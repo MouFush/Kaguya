@@ -1,0 +1,1 @@
+window.__CSRF_TOKEN__="2dc4e5dac73d7be7297b53e9fd892ef2";

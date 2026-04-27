@@ -1,0 +1,4 @@
+{"timestamp": "2026-04-18T20:21:05.516451", "session_id": "20260418_172344", "action": "permission_check", "tool": "list_env", "details": {"result": "allow", "reason": "no permission required"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-18T20:21:10.861100", "session_id": "20260418_172344", "action": "permission_check", "tool": "check_dependencies", "details": {"result": "allow", "reason": "always_allow rule"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-18T20:21:16.809775", "session_id": "20260418_172344", "action": "permission_check", "tool": "pip_install", "details": {"result": "allow", "reason": "always_allow rule"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-18T20:22:16.910363", "session_id": "20260418_172344", "action": "permission_check", "tool": "write_file", "details": {"result": "allow", "reason": "always_allow rule"}, "allowed": true, "device_id": ""}

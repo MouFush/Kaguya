@@ -1,0 +1,18 @@
+[
+  {
+    "id": "1771467846740",
+    "title": "你好，我想和你聊聊天",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请帮我解释一下",
+        "time": "10:24",
+        "toolResults": null
+      }
+    ],
+    "created": "2026-02-19T02:24:06.740Z",
+    "role": "kaguya",
+    "lora": "none",
+    "starred": false
+  }
+]

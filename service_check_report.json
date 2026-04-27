@@ -1,0 +1,46 @@
+{
+  "check_time": "2026-03-01T22:52:31.175471",
+  "summary": {
+    "total": 4,
+    "ok": 3,
+    "error": 1
+  },
+  "results": [
+    {
+      "name": "前端服务",
+      "url": "http://localhost:5173",
+      "status": "error",
+      "status_code": 404,
+      "response_time_ms": 14.27,
+      "content_length": 0,
+      "error": "HTTP Error 404: Not Found"
+    },
+    {
+      "name": "后端健康检查",
+      "url": "http://localhost:8000/health",
+      "status": "ok",
+      "status_code": 200,
+      "response_time_ms": 2050.06,
+      "content_length": 51,
+      "error": null
+    },
+    {
+      "name": "后端根路径",
+      "url": "http://localhost:8000/",
+      "status": "ok",
+      "status_code": 200,
+      "response_time_ms": 2079.8,
+      "content_length": 66,
+      "error": null
+    },
+    {
+      "name": "API文档",
+      "url": "http://localhost:8000/api/docs",
+      "status": "ok",
+      "status_code": 200,
+      "response_time_ms": 2085.36,
+      "content_length": 1021,
+      "error": null
+    }
+  ]
+}

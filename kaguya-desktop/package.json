@@ -1,0 +1,241 @@
+{
+  "name": "kaguya-ide",
+  "version": "3.1.0",
+  "description": "Kaguya IDE - AI-Powered Development Environment",
+  "main": "electron/main.js",
+  "author": "Kaguya",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "dist:all": "electron-builder --win --mac --linux"
+  },
+  "build": {
+    "appId": "com.kaguya.ide",
+    "productName": "Kaguya IDE",
+    "directories": {
+      "output": "dist-electron-final"
+    },
+    "files": [
+      "electron/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../qwen3_web.py",
+        "to": "python-app/qwen3_web.py"
+      },
+      {
+        "from": "../ollama_adapter.py",
+        "to": "python-app/ollama_adapter.py"
+      },
+      {
+        "from": "../start_server.py",
+        "to": "python-app/start_server.py"
+      },
+      {
+        "from": "../kaguya_bootstrap.py",
+        "to": "python-app/kaguya_bootstrap.py"
+      },
+      {
+        "from": "../kaguya_accounts.py",
+        "to": "python-app/kaguya_accounts.py"
+      },
+      {
+        "from": "../kaguya_acp.py",
+        "to": "python-app/kaguya_acp.py"
+      },
+      {
+        "from": "../kaguya_agents.py",
+        "to": "python-app/kaguya_agents.py"
+      },
+      {
+        "from": "../kaguya_compaction.py",
+        "to": "python-app/kaguya_compaction.py"
+      },
+      {
+        "from": "../kaguya_feature_flags.py",
+        "to": "python-app/kaguya_feature_flags.py"
+      },
+      {
+        "from": "../kaguya_file_analyzer.py",
+        "to": "python-app/kaguya_file_analyzer.py"
+      },
+      {
+        "from": "../kaguya_file_history.py",
+        "to": "python-app/kaguya_file_history.py"
+      },
+      {
+        "from": "../kaguya_file_operations.py",
+        "to": "python-app/kaguya_file_operations.py"
+      },
+      {
+        "from": "../kaguya_frontend.py",
+        "to": "python-app/kaguya_frontend.py"
+      },
+      {
+        "from": "../kaguya_hooks.py",
+        "to": "python-app/kaguya_hooks.py"
+      },
+      {
+        "from": "../kaguya_memory.py",
+        "to": "python-app/kaguya_memory.py"
+      },
+      {
+        "from": "../kaguya_permissions.py",
+        "to": "python-app/kaguya_permissions.py"
+      },
+      {
+        "from": "../kaguya_skills.py",
+        "to": "python-app/kaguya_skills.py"
+      },
+      {
+        "from": "../kaguya_terminal.py",
+        "to": "python-app/kaguya_terminal.py"
+      },
+      {
+        "from": "../kaguya_thinking.py",
+        "to": "python-app/kaguya_thinking.py"
+      },
+      {
+        "from": "../kaguya_tool_executor.py",
+        "to": "python-app/kaguya_tool_executor.py"
+      },
+      {
+        "from": "../kaguya_tool_system.py",
+        "to": "python-app/kaguya_tool_system.py"
+      },
+      {
+        "from": "../kaguya_enhanced_features_v2.py",
+        "to": "python-app/kaguya_enhanced_features_v2.py"
+      },
+      {
+        "from": "../kaguya_enhanced_features_v3.py",
+        "to": "python-app/kaguya_enhanced_features_v3.py"
+      },
+      {
+        "from": "../kaguya_security_framework_v2.py",
+        "to": "python-app/kaguya_security_framework_v2.py"
+      },
+      {
+        "from": "../kaguya_optimization_suite.py",
+        "to": "python-app/kaguya_optimization_suite.py"
+      },
+      {
+        "from": "../kaguya_project_instructions.py",
+        "to": "python-app/kaguya_project_instructions.py"
+      },
+      {
+        "from": "../kaguya_enhanced_v2_integration.py",
+        "to": "python-app/kaguya_enhanced_v2_integration.py"
+      },
+      {
+        "from": "../static",
+        "to": "python-app/static"
+      },
+      {
+        "from": "../kaguya_core",
+        "to": "python-app/kaguya_core"
+      },
+      {
+        "from": "../data/project_config.json",
+        "to": "python-app/data/project_config.json"
+      },
+      {
+        "from": "../assets",
+        "to": "python-app/assets"
+      },
+      {
+        "from": "../README.md",
+        "to": "python-app/README.md"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-Setup-${arch}.${ext}",
+      "sign": false,
+      "signingHashAlgorithms": []
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Kaguya IDE",
+      "allowElevation": true,
+      "installerIcon": "assets/kaguya.ico",
+      "uninstallerIcon": "assets/kaguya.ico",
+      "installerHeaderIcon": "assets/kaguya.ico"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-Portable-${arch}.${ext}"
+    },
+    "mac": {
+      "icon": "assets/kaguya.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist"
+    },
+    "linux": {
+      "icon": "assets",
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        },
+        {
+          "target": "tar.gz",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "desktop": {
+        "Name": "Kaguya IDE",
+        "Comment": "AI-Powered Development Environment",
+        "Categories": "Development;IDE;",
+        "StartupWMClass": "kaguya-ide"
+      }
+    },
+    "dmg": {
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0"
+  }
+}

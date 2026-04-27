@@ -1,0 +1,5 @@
+{"timestamp": "2026-04-21T23:12:06.404147", "session_id": "20260421_230710", "action": "permission_check", "tool": "list_env", "details": {"result": "allow", "reason": "bypass_mode"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-21T23:12:12.466711", "session_id": "20260421_230710", "action": "permission_check", "tool": "check_dependencies", "details": {"result": "allow", "reason": "bypass_mode"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-21T23:12:17.909653", "session_id": "20260421_230710", "action": "permission_check", "tool": "create_directory", "details": {"result": "allow", "reason": "bypass_mode"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-21T23:14:01.069377", "session_id": "20260421_230710", "action": "permission_check", "tool": "write_file", "details": {"result": "allow", "reason": "bypass_mode"}, "allowed": true, "device_id": ""}
+{"timestamp": "2026-04-21T23:14:15.534965", "session_id": "20260421_230710", "action": "permission_check", "tool": "write_file", "details": {"result": "allow", "reason": "bypass_mode"}, "allowed": true, "device_id": ""}

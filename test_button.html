@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Button Test</title>
+    <style>
+        .sidebar-tabs { 
+            display: flex; 
+            border-bottom: 1px solid #ddd; 
+            flex-wrap: nowrap; 
+            overflow-x: auto;
+            padding: 0 8px;
+        }
+        .sidebar-tab {
+            padding: 12px 8px; 
+            background: none; 
+            border: none; 
+            cursor: pointer;
+            font-size: 11px; 
+            color: #666; 
+            flex: 0 0 auto; 
+            min-width: 40px;
+            font-weight: 600; 
+            white-space: nowrap;
+        }
+        .sidebar-tab:hover {
+            color: #333;
+            background: rgba(0,0,0,0.05);
+        }
+        .tab-content { 
+            display: none; 
+            padding: 20px;
+            border: 1px solid #ddd;
+            margin-top: 10px;
+        }
+        .tab-content.active { 
+            display: block; 
+        }
+    </style>
+</head>
+<body>
+    <h2>Button Test Page</h2>
+    
+    <div class="sidebar-tabs">
+        <button class="sidebar-tab active" onclick="switchTab('tab1', this)">Tab 1</button>
+        <button class="sidebar-tab" onclick="switchTab('tab2', this)">Tab 2</button>
+        <button class="sidebar-tab" onclick="switchTab('tab3', this)">Tab 3</button>
+    </div>
+    
+    <div id="tab1Tab" class="tab-content active">
+        <h3>Tab 1 Content</h3>
+        <p>This is the content for tab 1.</p>
+    </div>
+    
+    <div id="tab2Tab" class="tab-content">
+        <h3>Tab 2 Content</h3>
+        <p>This is the content for tab 2.</p>
+    </div>
+    
+    <div id="tab3Tab" class="tab-content">
+        <h3>Tab 3 Content</h3>
+        <p>This is the content for tab 3.</p>
+    </div>
+    
+    <div style="margin-top: 20px; padding: 10px; background: #f0f0f0;">
+        <h4>Debug Log:</h4>
+        <div id="debugLog"></div>
+    </div>
+    
+    <script>
+        function log(msg) {
+            const debugDiv = document.getElementById('debugLog');
+            debugDiv.innerHTML += '<div>' + new Date().toLocaleTimeString() + ': ' + msg + '</div>';
+            console.log(msg);
+        }
+        
+        function switchTab(tab, clickedElement) {
+            log('switchTab called: ' + tab);
+            
+            if (!clickedElement && tab) {
+                clickedElement = document.querySelector('.sidebar-tab[onclick*="' + tab + '"]');
+            }
+            
+            if (!clickedElement) {
+                log('ERROR: Cannot find tab element for: ' + tab);
+                return;
+            }
+            
+            document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            clickedElement.classList.add('active');
+            
+            const tabContent = document.getElementById(tab + 'Tab');
+            if (tabContent) {
+                tabContent.classList.add('active');
+                log('Switched to tab: ' + tab);
+            } else {
+                log('ERROR: Cannot find tab content for: ' + tab + 'Tab');
+            }
+        }
+        
+        log('Page loaded successfully');
+    </script>
+</body>
+</html>

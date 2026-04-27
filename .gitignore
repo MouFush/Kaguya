@@ -1,0 +1,161 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+kaguya_env/
+kaguya_py311/
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Build outputs
+dist-electron-build/
+dist-electron-final/
+dist-electron-final-v2/
+dist-electron-v2/
+dist-standalone/
+release-new/
+*.zip
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# PyInstaller
+*.spec.bak
+*.manifest
+
+# Electron builder
+builder-debug.yml
+builder-effective-config.yaml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+memory_store/
+memory_system/
+security_data/
+test_audit_logs/
+
+# Secrets and sensitive data
+.env
+.env.local
+.env.*.local
+.secret_key
+.jwt_secret_key
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Package managers
+pnpm-store/
+
+# Third-party projects
+LLaMA-Factory/
+ai-card-explorer/
+financial_rag/
+snake_game/
+
+# IDE workspaces
+ide_workspaces/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+temp.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Ngrok
+ngrok.exe
+
+# Test outputs
+test_report.json
+test_report/
+coverage/
+
+# Data files (user-specific)
+data/.secret_key
+data/.jwt_secret_key
+ide_accounts.json
+
+# Backup files
+*.backup
+*_backup/
+*_old/
+
+# Debug files
+debug*.html
+debug*.py
+_*diag*.py
+_*check*.py
+_*test*.py
+_*debug*.py
+
+# Generated files
+generated_*.html
+generated_*.png
+
+# Problematic submodules
+cc-switch/
+
+# Large model files (>100MB)
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+*.h5
+*.pkl
+*.pickle

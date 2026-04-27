@@ -1,0 +1,36 @@
+{
+  "jobs": {},
+  "datasets": {
+    "sample_chat": {
+      "id": "sample_chat",
+      "name": "💬 对话示例数据集",
+      "format": "jsonl",
+      "sample_count": 100,
+      "created_at": 1771383067.3384228,
+      "status": "ready",
+      "description": "包含100条对话样本，用于训练对话模型",
+      "is_sample": true
+    },
+    "sample_code": {
+      "id": "sample_code",
+      "name": "💻 代码示例数据集",
+      "format": "jsonl",
+      "sample_count": 50,
+      "created_at": 1771383067.3384228,
+      "status": "ready",
+      "description": "包含50条代码样本，用于训练代码生成模型",
+      "is_sample": true
+    },
+    "sample_qa": {
+      "id": "sample_qa",
+      "name": "❓ 问答示例数据集",
+      "format": "jsonl",
+      "sample_count": 80,
+      "created_at": 1771383067.3384228,
+      "status": "ready",
+      "description": "包含80条问答样本，用于训练问答模型",
+      "is_sample": true
+    }
+  },
+  "updated_at": 1771383067.3384228
+}

@@ -1,0 +1,10 @@
+{
+  "mira_multimodal": {
+    "file_name": "mira_multimodal.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    }
+  }
+}

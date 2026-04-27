@@ -1,0 +1,45 @@
+[
+  {
+    "id": "1772857226832",
+    "title": "你是qwen3还是qwen3.5",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你是qwen3还是qwen3.5",
+        "time": "15:05",
+        "toolResults": null
+      }
+    ],
+    "created": "2026-03-07T04:20:26.832Z",
+    "role": "kaguya",
+    "lora": "none",
+    "starred": false
+  },
+  {
+    "id": "1772855927875",
+    "title": "新对话",
+    "messages": [],
+    "created": "2026-03-07T03:58:47.875Z",
+    "role": "kaguya",
+    "lora": "none",
+    "starred": false
+  },
+  {
+    "id": "1772509295945",
+    "title": "新对话",
+    "messages": [],
+    "created": "2026-03-03T03:41:35.945Z",
+    "role": "kaguya",
+    "lora": "none",
+    "starred": false
+  },
+  {
+    "id": "1772508280404",
+    "title": "新对话",
+    "messages": [],
+    "created": "2026-03-03T03:24:40.404Z",
+    "role": "kaguya",
+    "lora": "none",
+    "starred": false
+  }
+]

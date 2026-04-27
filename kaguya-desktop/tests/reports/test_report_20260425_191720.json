@@ -1,0 +1,1418 @@
+{
+  "report_title": "KaguyaIDE Test Report",
+  "generated_at": "2026-04-25T19:17:20.545575",
+  "test_environment": {
+    "platform": "Windows 10 (AMD64)",
+    "python_version": "3.9.25 (main, Nov  3 2025, 22:44:01) [MSC v.1929 64 bit (AMD64)]",
+    "ide_url": "http://127.0.0.1:5000",
+    "device_id": "test_ef524f71e2a3",
+    "hostname": "盒子",
+    "cpu_count": 24
+  },
+  "summary": {
+    "total_tests": 81,
+    "passed": 73,
+    "failed": 0,
+    "skipped": 7,
+    "errors": 0,
+    "warnings": 1,
+    "pass_rate": "90.1%",
+    "duration_sec": "107.4",
+    "overall_result": "PASS - All critical and major tests passed"
+  },
+  "by_category": {
+    "environment": {
+      "total": 11,
+      "PASS": 9,
+      "FAIL": 0,
+      "SKIP": 2,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "cmdline_basic": {
+      "total": 6,
+      "PASS": 6,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "cmdline_params": {
+      "total": 4,
+      "PASS": 4,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "cmdline_pipe": {
+      "total": 1,
+      "PASS": 0,
+      "FAIL": 0,
+      "SKIP": 1,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "cmdline_env": {
+      "total": 2,
+      "PASS": 2,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_python": {
+      "total": 10,
+      "PASS": 10,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_javascript": {
+      "total": 5,
+      "PASS": 5,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_c": {
+      "total": 1,
+      "PASS": 0,
+      "FAIL": 0,
+      "SKIP": 1,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_cpp": {
+      "total": 1,
+      "PASS": 0,
+      "FAIL": 0,
+      "SKIP": 1,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_java": {
+      "total": 1,
+      "PASS": 1,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_go": {
+      "total": 1,
+      "PASS": 0,
+      "FAIL": 0,
+      "SKIP": 1,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_rust": {
+      "total": 1,
+      "PASS": 1,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "prog_sandbox": {
+      "total": 8,
+      "PASS": 8,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "standalone": {
+      "total": 5,
+      "PASS": 5,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "error_handling": {
+      "total": 8,
+      "PASS": 8,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "performance": {
+      "total": 3,
+      "PASS": 3,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "stability": {
+      "total": 2,
+      "PASS": 2,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "security": {
+      "total": 7,
+      "PASS": 6,
+      "FAIL": 0,
+      "SKIP": 1,
+      "ERROR": 0,
+      "WARN": 0
+    },
+    "compatibility": {
+      "total": 4,
+      "PASS": 3,
+      "FAIL": 0,
+      "SKIP": 0,
+      "ERROR": 0,
+      "WARN": 1
+    }
+  },
+  "critical_failures": [],
+  "major_failures": [],
+  "all_results": [
+    {
+      "test_id": "TC-0001",
+      "name": "IDE HTTP accessibility",
+      "category": "environment",
+      "status": "SKIP",
+      "duration_ms": 0,
+      "input": {},
+      "expected": null,
+      "actual": null,
+      "error": "IDE not running (direct execution mode)",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:37.451377"
+    },
+    {
+      "test_id": "TC-0002",
+      "name": "IDE API status endpoint",
+      "category": "environment",
+      "status": "SKIP",
+      "duration_ms": 0,
+      "input": {},
+      "expected": null,
+      "actual": null,
+      "error": "IDE not running (direct execution mode)",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:39.476336"
+    },
+    {
+      "test_id": "TC-0003",
+      "name": "Tool availability: python",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 327,
+      "input": {
+        "command": "python --version"
+      },
+      "expected": null,
+      "actual": "Python 3.14.0\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:39.803827"
+    },
+    {
+      "test_id": "TC-0004",
+      "name": "Tool availability: git",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 421,
+      "input": {
+        "command": "git --version"
+      },
+      "expected": null,
+      "actual": "git version 2.52.0.windows.1\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:40.226159"
+    },
+    {
+      "test_id": "TC-0005",
+      "name": "Tool availability: node",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 396,
+      "input": {
+        "command": "node --version"
+      },
+      "expected": null,
+      "actual": "v24.14.0\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:40.623076"
+    },
+    {
+      "test_id": "TC-0006",
+      "name": "Tool availability: npm",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 748,
+      "input": {
+        "command": "npm --version"
+      },
+      "expected": null,
+      "actual": "11.9.0\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:41.371942"
+    },
+    {
+      "test_id": "TC-0007",
+      "name": "Compiler availability: gcc",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "gcc --version"
+      },
+      "expected": null,
+      "actual": "\nSTDERR:\n'gcc' 不是内部或外部命令，也不是可运行的程序\n或批处理文件。\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:41.440685"
+    },
+    {
+      "test_id": "TC-0008",
+      "name": "Compiler availability: g++",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "g++ --version"
+      },
+      "expected": null,
+      "actual": "\nSTDERR:\n'g++' 不是内部或外部命令，也不是可运行的程序\n或批处理文件。\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:41.565258"
+    },
+    {
+      "test_id": "TC-0009",
+      "name": "Compiler availability: javac",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "javac -version"
+      },
+      "expected": null,
+      "actual": "\nSTDERR:\njavac 1.8.0_482\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:42.243608"
+    },
+    {
+      "test_id": "TC-0010",
+      "name": "Compiler availability: go",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "go version"
+      },
+      "expected": null,
+      "actual": "\nSTDERR:\n'go' 不是内部或外部命令，也不是可运行的程序\n或批处理文件。\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:42.360049"
+    },
+    {
+      "test_id": "TC-0011",
+      "name": "Compiler availability: rustc",
+      "category": "environment",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "rustc --version"
+      },
+      "expected": null,
+      "actual": "rustc 1.94.0 (4a4ef493e 2026-03-02)\n",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:42.926734"
+    },
+    {
+      "test_id": "TC-0012",
+      "name": "Basic command: echo hello",
+      "category": "cmdline_basic",
+      "status": "PASS",
+      "duration_ms": 107,
+      "input": {
+        "command": "echo hello"
+      },
+      "expected": "exit_code=0, contains=hello",
+      "actual": "exit_code=0, output=hello\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.034157"
+    },
+    {
+      "test_id": "TC-0013",
+      "name": "Basic command: echo hello world",
+      "category": "cmdline_basic",
+      "status": "PASS",
+      "duration_ms": 98,
+      "input": {
+        "command": "echo hello world"
+      },
+      "expected": "exit_code=0, contains=hello world",
+      "actual": "exit_code=0, output=hello world\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.132479"
+    },
+    {
+      "test_id": "TC-0014",
+      "name": "Basic command: dir",
+      "category": "cmdline_basic",
+      "status": "PASS",
+      "duration_ms": 124,
+      "input": {
+        "command": "dir"
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0, output= 驱动器 C 中的卷没有标签。\n 卷的序列号是 380B-5875\n\n C:\\Users\\林智涵\\.conda\\kaguya-desktop\\tests 的目录",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.257332"
+    },
+    {
+      "test_id": "TC-0015",
+      "name": "Basic command: cd",
+      "category": "cmdline_basic",
+      "status": "PASS",
+      "duration_ms": 121,
+      "input": {
+        "command": "cd"
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0, output=C:\\Users\\林智涵\\.conda\\kaguya-desktop\\tests\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.378858"
+    },
+    {
+      "test_id": "TC-0016",
+      "name": "Basic command: whoami",
+      "category": "cmdline_basic",
+      "status": "PASS",
+      "duration_ms": 318,
+      "input": {
+        "command": "whoami"
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0, output=盒子\\lzh\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.697407"
+    },
+    {
+      "test_id": "TC-0017",
+      "name": "Basic command: echo %date%",
+      "category": "cmdline_basic",
+      "status": "PASS",
+      "duration_ms": 95,
+      "input": {
+        "command": "echo %date%"
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0, output=2026/04/25 周六\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.792888"
+    },
+    {
+      "test_id": "TC-0018",
+      "name": "Parameterized command: echo line1& echo line2",
+      "category": "cmdline_params",
+      "status": "PASS",
+      "duration_ms": 169,
+      "input": {
+        "command": "echo line1& echo line2"
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:43.962652"
+    },
+    {
+      "test_id": "TC-0019",
+      "name": "Parameterized command: python -c \"print('test')\"",
+      "category": "cmdline_params",
+      "status": "PASS",
+      "duration_ms": 202,
+      "input": {
+        "command": "python -c \"print('test')\""
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:44.165358"
+    },
+    {
+      "test_id": "TC-0020",
+      "name": "Parameterized command: git --version",
+      "category": "cmdline_params",
+      "status": "PASS",
+      "duration_ms": 290,
+      "input": {
+        "command": "git --version"
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:44.456466"
+    },
+    {
+      "test_id": "TC-0021",
+      "name": "Parameterized command: python -c \"import sys; print(sys.version)\"",
+      "category": "cmdline_params",
+      "status": "PASS",
+      "duration_ms": 177,
+      "input": {
+        "command": "python -c \"import sys; print(sys.version)\""
+      },
+      "expected": "exit_code=0",
+      "actual": "exit_code=0",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:44.634217"
+    },
+    {
+      "test_id": "TC-0022",
+      "name": "Pipe commands (Windows)",
+      "category": "cmdline_pipe",
+      "status": "SKIP",
+      "duration_ms": 0,
+      "input": {},
+      "expected": null,
+      "actual": null,
+      "error": "Pipe testing limited on Windows",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:44.634217"
+    },
+    {
+      "test_id": "TC-0023",
+      "name": "Environment variable access",
+      "category": "cmdline_env",
+      "status": "PASS",
+      "duration_ms": 153,
+      "input": {
+        "command": "python -c \"import os; print(os.environ.get('PATH', '')[:100])\""
+      },
+      "expected": "PATH value returned",
+      "actual": "Has output: True",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:44.787522"
+    },
+    {
+      "test_id": "TC-0024",
+      "name": "Working directory display",
+      "category": "cmdline_env",
+      "status": "PASS",
+      "duration_ms": 93,
+      "input": {
+        "command": "cd"
+      },
+      "expected": null,
+      "actual": "C:\\Users\\林智涵\\.conda\\kaguya-desktop\\tests\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:44.881430"
+    },
+    {
+      "test_id": "TC-0025",
+      "name": "Python: Hello World",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 2233,
+      "input": {
+        "language": "python",
+        "code": "print('Hello, World!')"
+      },
+      "expected": "Hello, World!",
+      "actual": "Hello, World!\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:47.115254"
+    },
+    {
+      "test_id": "TC-0026",
+      "name": "Python: Arithmetic",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 642,
+      "input": {
+        "language": "python",
+        "code": "print(2 + 3 * 4)"
+      },
+      "expected": "14",
+      "actual": "14\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:47.757944"
+    },
+    {
+      "test_id": "TC-0027",
+      "name": "Python: String ops",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 683,
+      "input": {
+        "language": "python",
+        "code": "print('hello'.upper())"
+      },
+      "expected": "HELLO",
+      "actual": "HELLO\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:48.442615"
+    },
+    {
+      "test_id": "TC-0028",
+      "name": "Python: List comprehension",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 672,
+      "input": {
+        "language": "python",
+        "code": "print([x*2 for x in range(5)])"
+      },
+      "expected": "[0, 2, 4, 6, 8]",
+      "actual": "[0, 2, 4, 6, 8]\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:49.115601"
+    },
+    {
+      "test_id": "TC-0029",
+      "name": "Python: Function def",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 692,
+      "input": {
+        "language": "python",
+        "code": "def f(x): return x*x\nprint(f(7))"
+      },
+      "expected": "49",
+      "actual": "49\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:49.808357"
+    },
+    {
+      "test_id": "TC-0030",
+      "name": "Python: Class usage",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 650,
+      "input": {
+        "language": "python",
+        "code": "class A:\n  def __init__(self, v): self.v = v\n  def get(self)"
+      },
+      "expected": "42",
+      "actual": "42\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:50.458585"
+    },
+    {
+      "test_id": "TC-0031",
+      "name": "Python: Exception handling",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 675,
+      "input": {
+        "language": "python",
+        "code": "try:\n  1/0\nexcept ZeroDivisionError:\n  print('caught')"
+      },
+      "expected": "caught",
+      "actual": "caught\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:51.134745"
+    },
+    {
+      "test_id": "TC-0032",
+      "name": "Python: File I/O",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 884,
+      "input": {
+        "language": "python",
+        "code": "import tempfile, os\nf=tempfile.NamedTemporaryFile(mode='w',d"
+      },
+      "expected": "test",
+      "actual": "test\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:52.018762"
+    },
+    {
+      "test_id": "TC-0033",
+      "name": "Python: JSON processing",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 665,
+      "input": {
+        "language": "python",
+        "code": "import json\nd=json.dumps({'k':'v'});print(json.loads(d)['k']"
+      },
+      "expected": "v",
+      "actual": "v\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:52.684627"
+    },
+    {
+      "test_id": "TC-0034",
+      "name": "Python: Multi-line output",
+      "category": "prog_python",
+      "status": "PASS",
+      "duration_ms": 704,
+      "input": {
+        "language": "python",
+        "code": "for i in range(3): print(f'line {i}')"
+      },
+      "expected": "line 0\nline 1\nline 2",
+      "actual": "line 0\nline 1\nline 2\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:53.389388"
+    },
+    {
+      "test_id": "TC-0035",
+      "name": "JavaScript: Hello World",
+      "category": "prog_javascript",
+      "status": "PASS",
+      "duration_ms": 935,
+      "input": {
+        "language": "javascript",
+        "code": "console.log('Hello, World!');"
+      },
+      "expected": "Hello, World!",
+      "actual": "Hello, World!\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:54.324878"
+    },
+    {
+      "test_id": "TC-0036",
+      "name": "JavaScript: Arithmetic",
+      "category": "prog_javascript",
+      "status": "PASS",
+      "duration_ms": 803,
+      "input": {
+        "language": "javascript",
+        "code": "console.log(2 + 3 * 4);"
+      },
+      "expected": "14",
+      "actual": "14\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:55.128307"
+    },
+    {
+      "test_id": "TC-0037",
+      "name": "JavaScript: Array methods",
+      "category": "prog_javascript",
+      "status": "PASS",
+      "duration_ms": 793,
+      "input": {
+        "language": "javascript",
+        "code": "console.log([1,2,3].map(x=>x*2).join(','));"
+      },
+      "expected": "2,4,6",
+      "actual": "2,4,6\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:55.921502"
+    },
+    {
+      "test_id": "TC-0038",
+      "name": "JavaScript: Arrow function",
+      "category": "prog_javascript",
+      "status": "PASS",
+      "duration_ms": 888,
+      "input": {
+        "language": "javascript",
+        "code": "const f = x => x * x; console.log(f(7));"
+      },
+      "expected": "49",
+      "actual": "49\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:56.809970"
+    },
+    {
+      "test_id": "TC-0039",
+      "name": "JavaScript: Promise/async",
+      "category": "prog_javascript",
+      "status": "PASS",
+      "duration_ms": 847,
+      "input": {
+        "language": "javascript",
+        "code": "Promise.resolve(42).then(v => console.log(v));"
+      },
+      "expected": "42",
+      "actual": "42\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:15:57.657446"
+    },
+    {
+      "test_id": "TC-0040",
+      "name": "C: Hello World",
+      "category": "prog_c",
+      "status": "SKIP",
+      "duration_ms": 702,
+      "input": {
+        "language": "c"
+      },
+      "expected": "Hello from C!",
+      "actual": "Compiler/interpreter not found: [WinError 2] 系统找不到指定的文件。",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:58.359767"
+    },
+    {
+      "test_id": "TC-0041",
+      "name": "C++: Hello World",
+      "category": "prog_cpp",
+      "status": "SKIP",
+      "duration_ms": 545,
+      "input": {
+        "language": "cpp"
+      },
+      "expected": "Hello from C++!",
+      "actual": "Compiler/interpreter not found: [WinError 2] 系统找不到指定的文件。",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:15:58.905169"
+    },
+    {
+      "test_id": "TC-0042",
+      "name": "Java: Hello World",
+      "category": "prog_java",
+      "status": "PASS",
+      "duration_ms": 2074,
+      "input": {
+        "language": "java"
+      },
+      "expected": "Hello from Java!",
+      "actual": "Hello from Java!\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:00.979707"
+    },
+    {
+      "test_id": "TC-0043",
+      "name": "Go: Hello World",
+      "category": "prog_go",
+      "status": "SKIP",
+      "duration_ms": 515,
+      "input": {
+        "language": "go"
+      },
+      "expected": "Hello from Go!",
+      "actual": "Compiler/interpreter not found: [WinError 2] 系统找不到指定的文件。",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:01.494970"
+    },
+    {
+      "test_id": "TC-0044",
+      "name": "Rust: Hello World",
+      "category": "prog_rust",
+      "status": "PASS",
+      "duration_ms": 3473,
+      "input": {
+        "language": "rust"
+      },
+      "expected": "Hello from Rust!",
+      "actual": "Hello from Rust!\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0045",
+      "name": "Sandbox: Safe math",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "print(2**10)"
+      },
+      "expected": "Success with '1024'",
+      "actual": "success=True, output=1024",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0046",
+      "name": "Sandbox: Safe string",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "print('hello'.replace('h','H'))"
+      },
+      "expected": "Success with 'Hello'",
+      "actual": "success=True, output=Hello",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0047",
+      "name": "Sandbox: Safe list",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "print(sorted([3,1,2]))"
+      },
+      "expected": "Success with '[1, 2, 3]'",
+      "actual": "success=True, output=[1, 2, 3]",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0048",
+      "name": "Sandbox: Blocked: os.system",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "import os\nos.system('echo x')"
+      },
+      "expected": "Blocked with '安全限制'",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (import os)",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0049",
+      "name": "Sandbox: Blocked: subprocess",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "import subprocess\nsubprocess.run(['ls'])"
+      },
+      "expected": "Blocked with '安全限制'",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (import subprocess)",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0050",
+      "name": "Sandbox: Blocked: open()",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "f=open('/etc/passwd')\nprint(f.read())"
+      },
+      "expected": "Blocked with '安全限制'",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (open()",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0051",
+      "name": "Sandbox: Blocked: exec()",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "exec('print(1)')"
+      },
+      "expected": "Blocked with '安全限制'",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (exec()",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0052",
+      "name": "Sandbox: Blocked: eval()",
+      "category": "prog_sandbox",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "eval('__import__(\"os\").system(\"ls\")')"
+      },
+      "expected": "Blocked with '安全限制'",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (__import__)",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:04.968893"
+    },
+    {
+      "test_id": "TC-0053",
+      "name": "Standalone Python execution",
+      "category": "standalone",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "python -c \"print('standalone_ok')\""
+      },
+      "expected": "standalone_ok",
+      "actual": "standalone_ok\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:05.287036"
+    },
+    {
+      "test_id": "TC-0054",
+      "name": "Standalone Python stdlib",
+      "category": "standalone",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "python -c \"import json; ...\""
+      },
+      "expected": "{\"ok\": true}",
+      "actual": "{\"ok\": true}\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:05.512136"
+    },
+    {
+      "test_id": "TC-0055",
+      "name": "Standalone compile API",
+      "category": "standalone",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "language": "python",
+        "code": "print('compile_standalone_ok')"
+      },
+      "expected": "compile_standalone_ok",
+      "actual": "compile_standalone_ok\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:06.194007"
+    },
+    {
+      "test_id": "TC-0056",
+      "name": "Standalone sandbox execution",
+      "category": "standalone",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "print('sandbox_standalone_ok')"
+      },
+      "expected": "sandbox_standalone_ok",
+      "actual": "sandbox_standalone_ok",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:06.194007"
+    },
+    {
+      "test_id": "TC-0057",
+      "name": "Standalone output display",
+      "category": "standalone",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "echo test_output_display"
+      },
+      "expected": "test_output_display",
+      "actual": "test_output_display\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:06.358269"
+    },
+    {
+      "test_id": "TC-0058",
+      "name": "Error: Invalid command",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "nonexistent_command_xyz_12345"
+      },
+      "expected": "Non-zero exit code or error message",
+      "actual": "exit_code=1, output=\nSTDERR:\n'nonexistent_command_xyz_12345' 不是内部或外部命令，也不是可运行的程序\n或批处理文件。\n",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:06.505579"
+    },
+    {
+      "test_id": "TC-0059",
+      "name": "Error: Python runtime exception",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "language": "python",
+        "code": "raise ValueError('test error')"
+      },
+      "expected": "Error message containing 'ValueError'",
+      "actual": "Traceback (most recent call last):\n  File \"C:\\Users\\林智涵\\AppData\\Local\\Temp\\kaguya_test_trypdjko\\main",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:07.223036"
+    },
+    {
+      "test_id": "TC-0060",
+      "name": "Error: Python syntax error",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "language": "python",
+        "code": "def f(\\n  print('bad syntax')"
+      },
+      "expected": "Syntax error message",
+      "actual": "  File \"C:\\Users\\林智涵\\AppData\\Local\\Temp\\kaguya_test_9dd2_sjw\\main.py\", line 2\n    print('bad syntax'",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:07.845781"
+    },
+    {
+      "test_id": "TC-0061",
+      "name": "Error: C compilation error",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "language": "c",
+        "code": "int main() { ..."
+      },
+      "expected": "Compilation error message",
+      "actual": "Compiler/interpreter not found: [WinError 2] 系统找不到指定的文件。",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:08.387872"
+    },
+    {
+      "test_id": "TC-0062",
+      "name": "Error: Execution timeout",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "language": "python",
+        "code": "time.sleep(60)",
+        "timeout": 2
+      },
+      "expected": "Timeout message",
+      "actual": "Execution timed out after 2 seconds",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:10.951034"
+    },
+    {
+      "test_id": "TC-0063",
+      "name": "Error: Unsupported language",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "language": "brainfuck"
+      },
+      "expected": "Unsupported language error",
+      "actual": "Unsupported language: brainfuck",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:11.491232"
+    },
+    {
+      "test_id": "TC-0064",
+      "name": "Error: Runtime division by zero",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "python -c \"x=1/0\""
+      },
+      "expected": "Error or non-zero exit",
+      "actual": "exit=1, output=\nSTDERR:\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <modul",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:11.844587"
+    },
+    {
+      "test_id": "TC-0065",
+      "name": "Error: Non-zero exit code capture",
+      "category": "error_handling",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "python -c \"import sys; sys.exit(42)\""
+      },
+      "expected": "exit_code=42",
+      "actual": "exit_code=42",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:12.137889"
+    },
+    {
+      "test_id": "TC-0066",
+      "name": "Perf: Terminal avg response (124ms)",
+      "category": "performance",
+      "status": "PASS",
+      "duration_ms": 124,
+      "input": {
+        "iterations": 10,
+        "command": "echo perf_test"
+      },
+      "expected": "<5000ms",
+      "actual": "avg=124ms, max=151ms",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:13.382112"
+    },
+    {
+      "test_id": "TC-0067",
+      "name": "Perf: Python compile avg (667ms)",
+      "category": "performance",
+      "status": "PASS",
+      "duration_ms": 667,
+      "input": {},
+      "expected": "<10000ms",
+      "actual": "avg=667ms",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:16.719889"
+    },
+    {
+      "test_id": "TC-0068",
+      "name": "Stability: 50 sequential commands (100%)",
+      "category": "stability",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "iterations": 50
+      },
+      "expected": ">=95% success rate",
+      "actual": "100.0% (50/50)",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:48.833468"
+    },
+    {
+      "test_id": "TC-0069",
+      "name": "Stability: 10 concurrent requests (100%)",
+      "category": "stability",
+      "status": "PASS",
+      "duration_ms": 277,
+      "input": {
+        "concurrent": 10
+      },
+      "expected": ">=90% success",
+      "actual": "100.0% success, avg 277ms, 0 errors",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:49.244530"
+    },
+    {
+      "test_id": "TC-0070",
+      "name": "Resource: Test runner memory (55MB)",
+      "category": "performance",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "pid": 2416
+      },
+      "expected": "<500MB",
+      "actual": "55.4MB",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:49.244530"
+    },
+    {
+      "test_id": "TC-0071",
+      "name": "Security: Destructive: fork bomb",
+      "category": "security",
+      "status": "SKIP",
+      "duration_ms": 0,
+      "input": {},
+      "expected": null,
+      "actual": null,
+      "error": "Fork bomb syntax is bash-specific, not applicable on Windows",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:16:49.244530"
+    },
+    {
+      "test_id": "TC-0072",
+      "name": "Security: Destructive: rm -rf /",
+      "category": "security",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "rm -rf /"
+      },
+      "expected": "Blocked or non-zero exit",
+      "actual": "blocked=None, exit_code=1",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:16:49.379441"
+    },
+    {
+      "test_id": "TC-0073",
+      "name": "Security: Destructive: del system drive",
+      "category": "security",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "del /f /s /q C:\\"
+      },
+      "expected": "Blocked or non-zero exit",
+      "actual": "blocked=None, exit_code=-1",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.508624"
+    },
+    {
+      "test_id": "TC-0074",
+      "name": "Security: Destructive: format drive",
+      "category": "security",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "format C:"
+      },
+      "expected": "Blocked or non-zero exit",
+      "actual": "blocked=None, exit_code=4",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.909113"
+    },
+    {
+      "test_id": "TC-0075",
+      "name": "Security: Sandbox blocks os.system",
+      "category": "security",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "import os; os.system('echo hack')"
+      },
+      "expected": "Blocked by sandbox",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (import os)",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.909113"
+    },
+    {
+      "test_id": "TC-0076",
+      "name": "Security: Sandbox blocks __import__",
+      "category": "security",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "__import__('os').system('echo hack')"
+      },
+      "expected": "Blocked by sandbox",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (__import__)",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.909113"
+    },
+    {
+      "test_id": "TC-0077",
+      "name": "Security: Sandbox blocks file read",
+      "category": "security",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "code": "open('/etc/passwd').read()"
+      },
+      "expected": "Blocked by sandbox",
+      "actual": "success=False, output=安全限制：代码包含不允许的操作 (open()",
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.909113"
+    },
+    {
+      "test_id": "TC-0078",
+      "name": "Platform: Windows 10",
+      "category": "compatibility",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "system": "Windows",
+        "release": "10",
+        "machine": "AMD64",
+        "python": "3.9.25"
+      },
+      "expected": null,
+      "actual": null,
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.909113"
+    },
+    {
+      "test_id": "TC-0079",
+      "name": "Python version: 3.9.25",
+      "category": "compatibility",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "version": "3.9.25 (main, Nov  3 2025, 22:44:01) [MSC v.1929 64 bit (AMD64)]"
+      },
+      "expected": null,
+      "actual": null,
+      "error": "",
+      "severity": "",
+      "timestamp": "2026-04-25T19:17:19.909113"
+    },
+    {
+      "test_id": "TC-0080",
+      "name": "Compatibility: CJK character output",
+      "category": "compatibility",
+      "status": "WARN",
+      "duration_ms": 0,
+      "input": {
+        "command": "python -c \"print('中文测试 日本語テスト 한글테스트')\""
+      },
+      "expected": "CJK characters displayed",
+      "actual": "\nSTDERR:\nTraceback (most recent call last):\nTraceback (most recent call last):\n ",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:17:20.319253"
+    },
+    {
+      "test_id": "TC-0081",
+      "name": "Compatibility: Path separator",
+      "category": "compatibility",
+      "status": "PASS",
+      "duration_ms": 0,
+      "input": {
+        "command": "python -c \"import os; print(os.path.join('a','b','c'))\""
+      },
+      "expected": "a\\b\\c",
+      "actual": "a\\b\\c",
+      "error": "",
+      "severity": "minor",
+      "timestamp": "2026-04-25T19:17:20.544557"
+    }
+  ],
+  "regression_strategy": {
+    "trigger": "On every version update or bug fix",
+    "scope": "Re-run all tests in categories affected by changes",
+    "full_regression": "Run complete test suite before each release",
+    "smoke_test": "Run environment + basic cmdline + Python compile tests for quick validation",
+    "automated": "Integrate with CI/CD pipeline for automated regression"
+  }
+}

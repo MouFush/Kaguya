@@ -1,0 +1,1086 @@
+{
+  "timestamp": "2026-04-17T18:47:05.521699",
+  "total_tests": 149,
+  "total_passed": 144,
+  "total_failed": 5,
+  "pass_rate": "96.6%",
+  "verdict": "CONDITIONAL PASS",
+  "categories": {
+    "File Upload": {
+      "passed": 32,
+      "failed": 0,
+      "total": 32,
+      "failures": []
+    },
+    "Terminal": {
+      "passed": 34,
+      "failed": 3,
+      "total": 37,
+      "failures": [
+        "Auto-open on agent action",
+        "Command parameter",
+        "Error output included"
+      ]
+    },
+    "Agent": {
+      "passed": 51,
+      "failed": 2,
+      "total": 53,
+      "failures": [
+        "String parameter parsing",
+        "Stuck agent detection"
+      ]
+    },
+    "Stability": {
+      "passed": 27,
+      "failed": 0,
+      "total": 27,
+      "failures": []
+    }
+  },
+  "details": [
+    {
+      "category": "File Upload",
+      "name": "Upload endpoint route",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.725693"
+    },
+    {
+      "category": "File Upload",
+      "name": "Upload handler function",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.726283"
+    },
+    {
+      "category": "File Upload",
+      "name": "Write file endpoint",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.726903"
+    },
+    {
+      "category": "File Upload",
+      "name": "Read file endpoint",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727006"
+    },
+    {
+      "category": "File Upload",
+      "name": "File tree endpoint",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727094"
+    },
+    {
+      "category": "File Upload",
+      "name": "Multipart form handling",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727928"
+    },
+    {
+      "category": "File Upload",
+      "name": "File save capability",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727937"
+    },
+    {
+      "category": "File Upload",
+      "name": "Directory auto-creation",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727940"
+    },
+    {
+      "category": "File Upload",
+      "name": "File size tracking",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727943"
+    },
+    {
+      "category": "File Upload",
+      "name": "Path normalization",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.727945"
+    },
+    {
+      "category": "File Upload",
+      "name": "UTF-8 encoding write",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.729095"
+    },
+    {
+      "category": "File Upload",
+      "name": "Path validation",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.729100"
+    },
+    {
+      "category": "File Upload",
+      "name": "Workspace security check",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.729101"
+    },
+    {
+      "category": "File Upload",
+      "name": "Parent dir creation",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.729103"
+    },
+    {
+      "category": "File Upload",
+      "name": "File existence check",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731046"
+    },
+    {
+      "category": "File Upload",
+      "name": "Directory vs file check",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731057"
+    },
+    {
+      "category": "File Upload",
+      "name": "Language detection",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731060"
+    },
+    {
+      "category": "File Upload",
+      "name": "Error replacement mode",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731063"
+    },
+    {
+      "category": "File Upload",
+      "name": "Empty filename check",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731066"
+    },
+    {
+      "category": "File Upload",
+      "name": "Error collection",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731068"
+    },
+    {
+      "category": "File Upload",
+      "name": "Imported paths tracking",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731071"
+    },
+    {
+      "category": "File Upload",
+      "name": "Relative path handling",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731077"
+    },
+    {
+      "category": "File Upload",
+      "name": "Binary save support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731080"
+    },
+    {
+      "category": "File Upload",
+      "name": "Content-Type passthrough",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731127"
+    },
+    {
+      "category": "File Upload",
+      "name": "No content transformation",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.731130"
+    },
+    {
+      "category": "File Upload",
+      "name": "Revert endpoint exists",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.732613"
+    },
+    {
+      "category": "File Upload",
+      "name": "Old content restore",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.732624"
+    },
+    {
+      "category": "File Upload",
+      "name": "New file removal",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.732632"
+    },
+    {
+      "category": "File Upload",
+      "name": "Write/read integrity",
+      "passed": true,
+      "details": "OK",
+      "timestamp": "2026-04-17T18:47:02.734751"
+    },
+    {
+      "category": "File Upload",
+      "name": "JSON format preservation",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.735745"
+    },
+    {
+      "category": "File Upload",
+      "name": "Empty file creation",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.736601"
+    },
+    {
+      "category": "File Upload",
+      "name": "Special character filename",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:02.737600"
+    },
+    {
+      "category": "Terminal",
+      "name": "Terminal exec endpoint",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.207149"
+    },
+    {
+      "category": "Terminal",
+      "name": "Terminal exec handler",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.207882"
+    },
+    {
+      "category": "Terminal",
+      "name": "Shell command execution",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208922"
+    },
+    {
+      "category": "Terminal",
+      "name": "shell=True support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208927"
+    },
+    {
+      "category": "Terminal",
+      "name": "Output capture",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208930"
+    },
+    {
+      "category": "Terminal",
+      "name": "Text mode output",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208932"
+    },
+    {
+      "category": "Terminal",
+      "name": "Timeout support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208934"
+    },
+    {
+      "category": "Terminal",
+      "name": "Working dir parameter",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208936"
+    },
+    {
+      "category": "Terminal",
+      "name": "cwd parameter in subprocess",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208938"
+    },
+    {
+      "category": "Terminal",
+      "name": "Relative path resolution",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208941"
+    },
+    {
+      "category": "Terminal",
+      "name": "Default to workspace",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208943"
+    },
+    {
+      "category": "Terminal",
+      "name": "Stdout capture",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208948"
+    },
+    {
+      "category": "Terminal",
+      "name": "Stderr capture",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208955"
+    },
+    {
+      "category": "Terminal",
+      "name": "Exit code reporting",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208958"
+    },
+    {
+      "category": "Terminal",
+      "name": "Output size limit",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208960"
+    },
+    {
+      "category": "Terminal",
+      "name": "Timeout handling",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208962"
+    },
+    {
+      "category": "Terminal",
+      "name": "Permission check",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208964"
+    },
+    {
+      "category": "Terminal",
+      "name": "Deny logging",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208966"
+    },
+    {
+      "category": "Terminal",
+      "name": "Execution logging",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208969"
+    },
+    {
+      "category": "Terminal",
+      "name": "Device ID support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.208971"
+    },
+    {
+      "category": "Terminal",
+      "name": "Terminal panel HTML",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.209060"
+    },
+    {
+      "category": "Terminal",
+      "name": "Terminal input field",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.209139"
+    },
+    {
+      "category": "Terminal",
+      "name": "Terminal body display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.209215"
+    },
+    {
+      "category": "Terminal",
+      "name": "Run terminal command JS",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.209291"
+    },
+    {
+      "category": "Terminal",
+      "name": "Terminal log function",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.209382"
+    },
+    {
+      "category": "Terminal",
+      "name": "Auto-open on agent action",
+      "passed": false,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.209839"
+    },
+    {
+      "category": "Terminal",
+      "name": "Agent command sync",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210036"
+    },
+    {
+      "category": "Terminal",
+      "name": "Agent result sync",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210158"
+    },
+    {
+      "category": "Terminal",
+      "name": "File write sync",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210246"
+    },
+    {
+      "category": "Terminal",
+      "name": "File edit sync",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210333"
+    },
+    {
+      "category": "Terminal",
+      "name": "Success notification",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210438"
+    },
+    {
+      "category": "Terminal",
+      "name": "Error notification",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210566"
+    },
+    {
+      "category": "Terminal",
+      "name": "execute_command tool",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210695"
+    },
+    {
+      "category": "Terminal",
+      "name": "Command parameter",
+      "passed": false,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210698"
+    },
+    {
+      "category": "Terminal",
+      "name": "Timeout parameter",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210700"
+    },
+    {
+      "category": "Terminal",
+      "name": "Working dir parameter",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210701"
+    },
+    {
+      "category": "Terminal",
+      "name": "Error output included",
+      "passed": false,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.210703"
+    },
+    {
+      "category": "Agent",
+      "name": "Agent run endpoint",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.218723"
+    },
+    {
+      "category": "Agent",
+      "name": "SSE streaming support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219354"
+    },
+    {
+      "category": "Agent",
+      "name": "External API support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219370"
+    },
+    {
+      "category": "Agent",
+      "name": "History support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219376"
+    },
+    {
+      "category": "Agent",
+      "name": "Working dir support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219434"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool code block format",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219650"
+    },
+    {
+      "category": "Agent",
+      "name": "XML format support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219665"
+    },
+    {
+      "category": "Agent",
+      "name": "JSON format support",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219670"
+    },
+    {
+      "category": "Agent",
+      "name": "Function call format",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219675"
+    },
+    {
+      "category": "Agent",
+      "name": "String parameter parsing",
+      "passed": false,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219679"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: read_file",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219716"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: write_file",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219750"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: edit_file",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219791"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: list_directory",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219822"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: search_files",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219853"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: execute_command",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219883"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: glob",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219926"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: create_directory",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.219976"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: compile",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220013"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: open_project_dir",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220045"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool: list_env",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220080"
+    },
+    {
+      "category": "Agent",
+      "name": "System prompt defined",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220118"
+    },
+    {
+      "category": "Agent",
+      "name": "Direct file operation mode",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220181"
+    },
+    {
+      "category": "Agent",
+      "name": "Anti-loop rules",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220233"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool call format examples",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220379"
+    },
+    {
+      "category": "Agent",
+      "name": "Workflow guidance",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220585"
+    },
+    {
+      "category": "Agent",
+      "name": "LoopDetector class",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220833"
+    },
+    {
+      "category": "Agent",
+      "name": "Duplicate tool detection",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220837"
+    },
+    {
+      "category": "Agent",
+      "name": "Sequence loop detection",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220839"
+    },
+    {
+      "category": "Agent",
+      "name": "Retry loop detection",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220842"
+    },
+    {
+      "category": "Agent",
+      "name": "Stuck agent detection",
+      "passed": false,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220844"
+    },
+    {
+      "category": "Agent",
+      "name": "Loop check in query loop",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220913"
+    },
+    {
+      "category": "Agent",
+      "name": "PermissionChecker class",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.220970"
+    },
+    {
+      "category": "Agent",
+      "name": "Permission request flow",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221033"
+    },
+    {
+      "category": "Agent",
+      "name": "Permission response endpoint",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221130"
+    },
+    {
+      "category": "Agent",
+      "name": "Sandbox mode",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221213"
+    },
+    {
+      "category": "Agent",
+      "name": "Denial tracker",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221289"
+    },
+    {
+      "category": "Agent",
+      "name": "Thinking display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221391"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool use display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221501"
+    },
+    {
+      "category": "Agent",
+      "name": "Tool result display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221596"
+    },
+    {
+      "category": "Agent",
+      "name": "Permission prompt display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221675"
+    },
+    {
+      "category": "Agent",
+      "name": "Error display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221793"
+    },
+    {
+      "category": "Agent",
+      "name": "Assistant message display",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.221892"
+    },
+    {
+      "category": "Agent",
+      "name": "Done state handling",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222118"
+    },
+    {
+      "category": "Agent",
+      "name": "showOperationFeedback function",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222198"
+    },
+    {
+      "category": "Agent",
+      "name": "showFileChangeConfirmation function",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222331"
+    },
+    {
+      "category": "Agent",
+      "name": "Status text updates",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222446"
+    },
+    {
+      "category": "Agent",
+      "name": "File change confirmation UI",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222534"
+    },
+    {
+      "category": "Agent",
+      "name": "Operation feedback element",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222630"
+    },
+    {
+      "category": "Agent",
+      "name": "Snip compact",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222690"
+    },
+    {
+      "category": "Agent",
+      "name": "Micro compact",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222744"
+    },
+    {
+      "category": "Agent",
+      "name": "Auto compact",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222802"
+    },
+    {
+      "category": "Agent",
+      "name": "Max turns limit",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.222885"
+    },
+    {
+      "category": "Stability",
+      "name": "Data lock",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.230742"
+    },
+    {
+      "category": "Stability",
+      "name": "Log lock",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.230753"
+    },
+    {
+      "category": "Stability",
+      "name": "Threading import",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.230755"
+    },
+    {
+      "category": "Stability",
+      "name": "Try-except in upload",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.232105"
+    },
+    {
+      "category": "Stability",
+      "name": "Try-except in terminal",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.232185"
+    },
+    {
+      "category": "Stability",
+      "name": "Try-except in agent run",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.233373"
+    },
+    {
+      "category": "Stability",
+      "name": "Try-except in file read",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.234270"
+    },
+    {
+      "category": "Stability",
+      "name": "Output size limit",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.234348"
+    },
+    {
+      "category": "Stability",
+      "name": "Terminal timeout",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.234386"
+    },
+    {
+      "category": "Stability",
+      "name": "Max turns limit",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.234451"
+    },
+    {
+      "category": "Stability",
+      "name": "File list limit",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.234529"
+    },
+    {
+      "category": "Stability",
+      "name": "History limit",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.234615"
+    },
+    {
+      "category": "Stability",
+      "name": "Keep-alive header",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.242801"
+    },
+    {
+      "category": "Stability",
+      "name": "No-cache header",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.251536"
+    },
+    {
+      "category": "Stability",
+      "name": "Buffering disabled",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.260451"
+    },
+    {
+      "category": "Stability",
+      "name": "Threaded mode",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.261032"
+    },
+    {
+      "category": "Stability",
+      "name": "Audit logger",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.261097"
+    },
+    {
+      "category": "Stability",
+      "name": "Loop detection logging",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.261162"
+    },
+    {
+      "category": "Stability",
+      "name": "Permission logging",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.261226"
+    },
+    {
+      "category": "Stability",
+      "name": "Terminal execution logging",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.261690"
+    },
+    {
+      "category": "Stability",
+      "name": "UTF-8 encoding declarations",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.261696"
+    },
+    {
+      "category": "Stability",
+      "name": "Main guard",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.262237"
+    },
+    {
+      "category": "Stability",
+      "name": "Argparse for CLI",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.262938"
+    },
+    {
+      "category": "Stability",
+      "name": "Graceful shutdown",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.263478"
+    },
+    {
+      "category": "Stability",
+      "name": "Round 1: File R/W consistency",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:03.265432"
+    },
+    {
+      "category": "Stability",
+      "name": "Round 2: File R/W consistency",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:04.353646"
+    },
+    {
+      "category": "Stability",
+      "name": "Round 3: File R/W consistency",
+      "passed": true,
+      "details": "",
+      "timestamp": "2026-04-17T18:47:05.446116"
+    }
+  ]
+}

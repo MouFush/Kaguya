@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>辉夜AI - 增强功能控制台</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #667eea; --secondary: #764ba2; --accent: #f093fb;
+            --success: #10b981; --warning: #f59e0b; --error: #ef4444;
+            --bg-primary: #f8fafc; --bg-secondary: #f1f5f9;
+            --text-primary: #1e293b; --text-secondary: #64748b;
+            --border: #e2e8f0; --shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; padding: 20px;
+        }
+        .container {
+            max-width: 1400px; margin: 0 auto;
+        }
+        .header {
+            text-align: center; margin-bottom: 30px; color: white;
+        }
+        .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
+        .header p { opacity: 0.9; font-size: 1.1rem; }
+        .grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: white; border-radius: 16px; padding: 24px;
+            box-shadow: var(--shadow); transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-2px); }
+        .card-header {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+        }
+        .card-icon {
+            width: 48px; height: 48px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+        }
+        .card-title { font-size: 1.25rem; font-weight: 600; color: var(--text-primary); }
+        .card-subtitle { font-size: 0.875rem; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* MCP Card */
+        .mcp-icon { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .tool-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .tool-tag {
+            background: var(--bg-secondary); padding: 6px 12px; border-radius: 20px;
+            font-size: 0.875rem; color: var(--text-secondary); cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tool-tag:hover { background: var(--primary); color: white; }
+        .tool-tag.active { background: var(--primary); color: white; }
+        
+        /* Research Card */
+        .research-icon { background: linear-gradient(135deg, #10b981, #059669); }
+        .input-group { margin-bottom: 16px; }
+        .input-group label { display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary); }
+        .input-group input, .input-group textarea, .input-group select {
+            width: 100%; padding: 10px 14px; border: 2px solid var(--border);
+            border-radius: 8px; font-size: 0.95rem; transition: border-color 0.2s;
+        }
+        .input-group input:focus, .input-group textarea:focus, .input-group select:focus {
+            outline: none; border-color: var(--primary);
+        }
+        .input-group textarea { min-height: 100px; resize: vertical; }
+        
+        /* A2A Card */
+        .a2a-icon { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .agent-card {
+            background: var(--bg-secondary); border-radius: 12px; padding: 16px;
+            text-align: center; cursor: pointer; transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        .agent-card:hover { border-color: var(--primary); }
+        .agent-card.selected { border-color: var(--primary); background: rgba(102,126,234,0.1); }
+        .agent-avatar { font-size: 32px; margin-bottom: 8px; }
+        .agent-name { font-weight: 600; font-size: 0.875rem; }
+        .agent-role { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* Buttons */
+        .btn {
+            padding: 12px 24px; border: none; border-radius: 8px;
+            font-size: 0.95rem; font-weight: 600; cursor: pointer;
+            transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+        .btn-secondary {
+            background: var(--bg-secondary); color: var(--text-primary);
+        }
+        .btn-secondary:hover { background: var(--border); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        /* Status */
+        .status-bar {
+            display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
+        }
+        .status-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 16px; background: var(--bg-secondary); border-radius: 20px;
+            font-size: 0.875rem;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.online { background: var(--success); }
+        .status-dot.offline { background: var(--error); }
+        .status-dot.loading { background: var(--warning); animation: pulse 1s infinite; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Results */
+        .result-panel {
+            background: var(--bg-secondary); border-radius: 12px; padding: 16px;
+            margin-top: 16px; max-height: 400px; overflow-y: auto;
+        }
+        .result-panel h4 { margin-bottom: 12px; color: var(--text-primary); }
+        .result-content { font-size: 0.9rem; line-height: 1.6; color: var(--text-secondary); }
+        .result-content pre {
+            background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px;
+            overflow-x: auto; font-family: 'Courier New', monospace;
+        }
+        
+        /* Loading */
+        .loading {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 20px; color: var(--text-secondary);
+        }
+        .spinner {
+            width: 20px; height: 20px; border: 2px solid var(--border);
+            border-top-color: var(--primary); border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Back link */
+        .back-link {
+            display: inline-flex; align-items: center; gap: 8px;
+            color: white; text-decoration: none; margin-bottom: 20px;
+            opacity: 0.9; transition: opacity 0.2s;
+        }
+        .back-link:hover { opacity: 1; }
+        
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 20px; right: 20px;
+            padding: 16px 24px; background: white; border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2); display: none;
+            align-items: center; gap: 12px; z-index: 1000;
+        }
+        .toast.show { display: flex; animation: slideIn 0.3s ease; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .toast-icon { font-size: 20px; }
+        .toast.success .toast-icon { color: var(--success); }
+        .toast.error .toast-icon { color: var(--error); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← 返回主界面</a>
+        
+        <div class="header">
+            <h1>🔮 辉夜AI增强功能</h1>
+            <p>MCP协议 | 深度研究 | A2A多智能体协作</p>
+        </div>
+        
+        <!-- Status Bar -->
+        <div class="status-bar" id="statusBar">
+            <div class="status-item">
+                <span class="status-dot loading" id="mcpStatus"></span>
+                <span>MCP系统</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot loading" id="researchStatus"></span>
+                <span>深度研究</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot loading" id="a2aStatus"></span>
+                <span>A2A多智能体</span>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <!-- MCP Tools Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon mcp-icon">🔧</div>
+                    <div>
+                        <div class="card-title">MCP工具</div>
+                        <div class="card-subtitle">Model Context Protocol 标准化工具调用</div>
+                    </div>
+                </div>
+                
+                <div class="tool-list" id="toolList">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <span>加载工具列表...</span>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>工具参数 (JSON格式)</label>
+                    <textarea id="toolParams" placeholder='{"expression": "2 + 2"}'></textarea>
+                </div>
+                
+                <button class="btn btn-primary" id="callToolBtn" onclick="callTool()">
+                    执行工具
+                </button>
+                
+                <div class="result-panel" id="toolResult" style="display: none;">
+                    <h4>执行结果</h4>
+                    <div class="result-content" id="toolResultContent"></div>
+                </div>
+            </div>
+            
+            <!-- Deep Research Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon research-icon">🔍</div>
+                    <div>
+                        <div class="card-title">深度研究</div>
+                        <div class="card-subtitle">自主调研、信息整合与报告生成</div>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>研究主题</label>
+                    <input type="text" id="researchQuery" placeholder="输入您想深入研究的主题...">
+                </div>
+                
+                <div class="input-group">
+                    <label>研究深度</label>
+                    <select id="researchDepth">
+                        <option value="brief">简要 - 快速概览</option>
+                        <option value="standard" selected>标准 - 平衡深度与速度</option>
+                        <option value="comprehensive">综合 - 深入全面分析</option>
+                    </select>
+                </div>
+                
+                <button class="btn btn-primary" id="startResearchBtn" onclick="startResearch()">
+                    开始研究
+                </button>
+                
+                <div class="result-panel" id="researchResult" style="display: none;">
+                    <h4>研究进度</h4>
+                    <div class="result-content" id="researchProgress"></div>
+                </div>
+            </div>
+            
+            <!-- A2A Multi-Agent Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon a2a-icon">🤖</div>
+                    <div>
+                        <div class="card-title">A2A智能体</div>
+                        <div class="card-subtitle">多智能体协作完成任务</div>
+                    </div>
+                </div>
+                
+                <div class="agent-grid" id="agentGrid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <span>加载智能体...</span>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>任务描述</label>
+                    <textarea id="agentTask" placeholder="描述您需要智能体完成的任务..."></textarea>
+                </div>
+                
+                <button class="btn btn-primary" id="delegateTaskBtn" onclick="delegateTask()">
+                    委派任务
+                </button>
+                
+                <div class="result-panel" id="agentResult" style="display: none;">
+                    <h4>任务状态</h4>
+                    <div class="result-content" id="agentTaskStatus"></div>
+                </div>
+            </div>
+            
+            <!-- System Info Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: linear-gradient(135deg, #ec4899, #be185d);">📊</div>
+                    <div>
+                        <div class="card-title">系统状态</div>
+                        <div class="card-subtitle">增强功能运行状态</div>
+                    </div>
+                </div>
+                
+                <div id="systemInfo">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <span>加载系统信息...</span>
+                    </div>
+                </div>
+                
+                <button class="btn btn-secondary" onclick="refreshStatus()" style="margin-top: 16px;">
+                    刷新状态
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <span class="toast-icon">✓</span>
+        <span id="toastMessage">操作成功</span>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let selectedTool = null;
+        let selectedAgent = null;
+        let currentResearchTask = null;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSystemStatus();
+            loadTools();
+            loadAgents();
+        });
+        
+        // Load system status
+        async function loadSystemStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/enhanced/status`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStatusIndicators(data.status);
+                    renderSystemInfo(data.status);
+                } else {
+                    showError('系统状态加载失败');
+                }
+            } catch (error) {
+                console.error('Error loading status:', error);
+                showError('无法连接到服务器');
+            }
+        }
+        
+        function updateStatusIndicators(status) {
+            document.getElementById('mcpStatus').className = 'status-dot ' + 
+                (status.mcp.enabled ? 'online' : 'offline');
+            document.getElementById('researchStatus').className = 'status-dot ' + 
+                (status.research.enabled ? 'online' : 'offline');
+            document.getElementById('a2aStatus').className = 'status-dot ' + 
+                (status.a2a.enabled ? 'online' : 'offline');
+        }
+        
+        function renderSystemInfo(status) {
+            const html = `
+                <div style="display: grid; gap: 12px;">
+                    <div style="display: flex; justify-content: space-between; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                        <span>系统初始化</span>
+                        <span style="color: ${status.initialized ? 'var(--success)' : 'var(--error)'}; font-weight: 600;">
+                            ${status.initialized ? '✅ 已完成' : '❌ 未完成'}
+                        </span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                        <span>MCP工具数量</span>
+                        <span style="font-weight: 600;">${status.mcp.tools_count}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                        <span>智能体数量</span>
+                        <span style="font-weight: 600;">${status.a2a.agents_count}</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); text-align: right;">
+                        更新时间: ${new Date(status.timestamp).toLocaleString()}
+                    </div>
+                </div>
+            `;
+            document.getElementById('systemInfo').innerHTML = html;
+        }
+        
+        // Load MCP tools
+        async function loadTools() {
+            try {
+                const response = await fetch(`${API_BASE}/api/enhanced/mcp/tools`);
+                const data = await response.json();
+                
+                if (data.success && data.tools.length > 0) {
+                    const html = data.tools.map(tool => `
+                        <span class="tool-tag" onclick="selectTool('${tool.name}', this)">
+                            ${tool.name}
+                        </span>
+                    `).join('');
+                    document.getElementById('toolList').innerHTML = html;
+                } else {
+                    document.getElementById('toolList').innerHTML = '<p style="color: var(--text-secondary);">暂无可用工具</p>';
+                }
+            } catch (error) {
+                document.getElementById('toolList').innerHTML = '<p style="color: var(--error);">加载失败</p>';
+            }
+        }
+        
+        function selectTool(toolName, element) {
+            selectedTool = toolName;
+            document.querySelectorAll('.tool-tag').forEach(t => t.classList.remove('active'));
+            element.classList.add('active');
+        }
+        
+        // Call MCP tool
+        async function callTool() {
+            if (!selectedTool) {
+                showToast('请先选择一个工具', 'error');
+                return;
+            }
+            
+            const params = document.getElementById('toolParams').value;
+            let args = {};
+            try {
+                args = params ? JSON.parse(params) : {};
+            } catch (e) {
+                showToast('参数格式错误，请使用有效的JSON', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('callToolBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> 执行中...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/enhanced/mcp/tools/${selectedTool}/call`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(args)
+                });
+                const data = await response.json();
+                
+                document.getElementById('toolResult').style.display = 'block';
+                document.getElementById('toolResultContent').innerHTML = `
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                showToast('工具执行成功');
+            } catch (error) {
+                showToast('工具执行失败', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '执行工具';
+            }
+        }
+        
+        // Load agents
+        async function loadAgents() {
+            try {
+                const response = await fetch(`${API_BASE}/api/enhanced/agents`);
+                const data = await response.json();
+                
+                if (data.success && data.agents.length > 0) {
+                    const html = data.agents.map(agent => `
+                        <div class="agent-card" onclick="selectAgent('${agent.id}', this)">
+                            <div class="agent-avatar">🤖</div>
+                            <div class="agent-name">${agent.name}</div>
+                            <div class="agent-role">${agent.capabilities.length} 项能力</div>
+                        </div>
+                    `).join('');
+                    document.getElementById('agentGrid').innerHTML = html;
+                } else {
+                    document.getElementById('agentGrid').innerHTML = '<p style="color: var(--text-secondary);">暂无可用智能体</p>';
+                }
+            } catch (error) {
+                document.getElementById('agentGrid').innerHTML = '<p style="color: var(--error);">加载失败</p>';
+            }
+        }
+        
+        function selectAgent(agentId, element) {
+            selectedAgent = agentId;
+            document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('selected'));
+            element.classList.add('selected');
+        }
+        
+        // Delegate task to agent
+        async function delegateTask() {
+            if (!selectedAgent) {
+                showToast('请先选择一个智能体', 'error');
+                return;
+            }
+            
+            const task = document.getElementById('agentTask').value;
+            if (!task) {
+                showToast('请输入任务描述', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('delegateTaskBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> 委派中...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/enhanced/agents/${selectedAgent}/delegate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task: task, params: {} })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('agentResult').style.display = 'block';
+                    document.getElementById('agentTaskStatus').innerHTML = `
+                        <p><strong>任务ID:</strong> ${data.task_id}</p>
+                        <p><strong>智能体:</strong> ${data.agent_id}</p>
+                        <p><strong>状态:</strong> 已委派</p>
+                    `;
+                    showToast('任务委派成功');
+                } else {
+                    showToast(data.error || '委派失败', 'error');
+                }
+            } catch (error) {
+                showToast('委派请求失败', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '委派任务';
+            }
+        }
+        
+        // Start deep research
+        async function startResearch() {
+            const query = document.getElementById('researchQuery').value;
+            const depth = document.getElementById('researchDepth').value;
+            
+            if (!query) {
+                showToast('请输入研究主题', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('startResearchBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> 启动中...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/enhanced/research/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query, depth: depth })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentResearchTask = data.task_id;
+                    document.getElementById('researchResult').style.display = 'block';
+                    document.getElementById('researchProgress').innerHTML = `
+                        <p><strong>任务ID:</strong> ${data.task_id}</p>
+                        <p><strong>状态:</strong> 研究中...</p>
+                        <div class="loading" style="margin-top: 12px;">
+                            <div class="spinner"></div>
+                            <span>正在进行深度研究，请稍候...</span>
+                        </div>
+                    `;
+                    showToast('研究任务已启动');
+                    
+                    // Start polling for status
+                    pollResearchStatus(data.task_id);
+                } else {
+                    showToast(data.error || '启动失败', 'error');
+                }
+            } catch (error) {
+                showToast('启动请求失败', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '开始研究';
+            }
+        }
+        
+        async function pollResearchStatus(taskId) {
+            const checkStatus = async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/api/enhanced/research/${taskId}/status`);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const status = data.status;
+                        
+                        if (status.status === 'completed') {
+                            // Load report
+                            const reportResponse = await fetch(`${API_BASE}/api/enhanced/research/${taskId}/report`);
+                            const reportData = await reportResponse.json();
+                            
+                            document.getElementById('researchProgress').innerHTML = `
+                                <p><strong>状态:</strong> ✅ 已完成</p>
+                                <p><strong>步骤:</strong> ${status.steps.length}</p>
+                                <hr style="margin: 12px 0; border: none; border-top: 1px solid var(--border);">
+                                <div style="max-height: 300px; overflow-y: auto; background: white; padding: 12px; border-radius: 8px;">
+                                    <pre style="white-space: pre-wrap;">${reportData.report || '暂无报告'}</pre>
+                                </div>
+                            `;
+                            showToast('研究完成！');
+                            return;
+                        } else if (status.status === 'failed') {
+                            document.getElementById('researchProgress').innerHTML = `
+                                <p><strong>状态:</strong> ❌ 失败</p>
+                                <p style="color: var(--error);">${status.metadata?.error || '未知错误'}</p>
+                            `;
+                            return;
+                        } else {
+                            document.getElementById('researchProgress').innerHTML = `
+                                <p><strong>任务ID:</strong> ${taskId}</p>
+                                <p><strong>状态:</strong> ${getStatusText(status.status)}</p>
+                                <p><strong>进度:</strong> ${status.steps.filter(s => s.status === 'completed').length} / ${status.steps.length} 步骤</p>
+                                <div class="loading" style="margin-top: 12px;">
+                                    <div class="spinner"></div>
+                                    <span>研究中...</span>
+                                </div>
+                            `;
+                            setTimeout(checkStatus, 3000);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error polling status:', error);
+                }
+            };
+            
+            checkStatus();
+        }
+        
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': '⏳ 等待中',
+                'planning': '📋 规划中',
+                'researching': '🔍 研究中',
+                'analyzing': '📊 分析中',
+                'writing': '📝 撰写中',
+                'completed': '✅ 已完成',
+                'failed': '❌ 失败'
+            };
+            return statusMap[status] || status;
+        }
+        
+        // Utility functions
+        function refreshStatus() {
+            loadSystemStatus();
+            showToast('状态已刷新');
+        }
+        
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toastMessage');
+            const toastIcon = toast.querySelector('.toast-icon');
+            
+            toast.className = 'toast ' + type;
+            toastIcon.textContent = type === 'success' ? '✓' : '✕';
+            toastMessage.textContent = message;
+            
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+        
+        function showError(message) {
+            console.error(message);
+        }
+    </script>
+</body>
+</html>

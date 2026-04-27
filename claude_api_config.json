@@ -1,0 +1,46 @@
+{
+  "api_provider": "haiio",
+  "base_url": "https://api.haiio.xyz/",
+  "api_key": "sk9TMEfJlqM4RWzz3ctXbOnwZe4ft4Vv9XDCv6wDqMq4PJdIPq",
+  "models": {
+    "claude-opus-4-6": {
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6",
+      "description": "最强大的Claude模型，适合复杂任务",
+      "max_tokens": 128000,
+      "supports_vision": true
+    },
+    "claude-sonnet-4-6": {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "description": "平衡的Claude模型，适合大多数任务",
+      "max_tokens": 128000,
+      "supports_vision": true
+    },
+    "claude-opus-4-5": {
+      "id": "claude-opus-4-5",
+      "name": "Claude Opus 4.5",
+      "description": "强大的Claude模型",
+      "max_tokens": 128000,
+      "supports_vision": true
+    },
+    "claude-sonnet-4-5": {
+      "id": "claude-sonnet-4-5",
+      "name": "Claude Sonnet 4.5",
+      "description": "平衡的Claude模型",
+      "max_tokens": 128000,
+      "supports_vision": true
+    },
+    "claude-haiku-4-5": {
+      "id": "claude-haiku-4-5",
+      "name": "Claude Haiku 4.5",
+      "description": "快速轻量的Claude模型，适合简单任务",
+      "max_tokens": 128000,
+      "supports_vision": false
+    }
+  },
+  "default_model": "claude-sonnet-4-6",
+  "timeout": 120,
+  "temperature": 0.7,
+  "max_retries": 3
+}

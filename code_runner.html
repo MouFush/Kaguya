@@ -1,0 +1,3745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniMind CS336 交互式学习平台</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --bg-card: #1c2128;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-primary: #58a6ff;
+            --accent-secondary: #1f6feb;
+            --accent-success: #3fb950;
+            --accent-warning: #d29922;
+            --accent-error: #f85149;
+            --accent-purple: #a371f7;
+            --accent-cyan: #39c5cf;
+            --gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-4: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --shadow-glow: 0 0 20px rgba(88, 166, 255, 0.3);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --transition-fast: 0.15s ease;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(88, 166, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(163, 113, 247, 0.08) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .app-container {
+            position: relative;
+            z-index: 1;
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 16px;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            margin-bottom: 16px;
+        }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--gradient-1);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        .logo-text {
+            font-size: 18px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .header-stats { display: flex; gap: 16px; }
+        .stat-item {
+            text-align: center;
+            padding: 6px 14px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+        }
+        .stat-value { font-size: 18px; font-weight: 700; color: var(--accent-success); }
+        .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+        .main-content { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+        .sidebar { display: flex; flex-direction: column; gap: 12px; }
+        .sidebar-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .sidebar-header {
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .category-filter {
+            padding: 8px 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .filter-btn {
+            padding: 4px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        .filter-btn:hover, .filter-btn.active {
+            background: var(--accent-secondary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+        .exercise-list {
+            list-style: none;
+            max-height: calc(100vh - 320px);
+            overflow-y: auto;
+        }
+        .exercise-list::-webkit-scrollbar { width: 5px; }
+        .exercise-list::-webkit-scrollbar-track { background: var(--bg-tertiary); }
+        .exercise-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .exercise-item {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+        }
+        .exercise-item::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            background: transparent;
+            transition: all var(--transition-fast);
+        }
+        .exercise-item:hover { background: var(--bg-tertiary); }
+        .exercise-item.active { background: rgba(88, 166, 255, 0.1); }
+        .exercise-item.active::before { background: var(--accent-primary); }
+        .exercise-item.completed::before { background: var(--accent-success); }
+        .exercise-item.failed::before { background: var(--accent-error); }
+        .exercise-number {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .exercise-item.completed .exercise-number { background: var(--accent-success); color: white; }
+        .exercise-item.failed .exercise-number { background: var(--accent-error); color: white; }
+        .exercise-info { flex: 1; min-width: 0; }
+        .exercise-title { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .exercise-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+        .editor-section { display: flex; flex-direction: column; gap: 12px; }
+        .editor-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .editor-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .toolbar-left { display: flex; align-items: center; gap: 12px; }
+        .file-tab {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+        }
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            background: var(--bg-card);
+            border-radius: 20px;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .status-dot.ready { background: var(--accent-success); }
+        .status-dot.loading { background: var(--accent-warning); animation: pulse 1s infinite; }
+        .status-dot.running { background: var(--accent-cyan); animation: pulse 0.5s infinite; }
+        .status-dot.error { background: var(--accent-error); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .toolbar-buttons { display: flex; gap: 6px; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 12px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            font-family: inherit;
+        }
+        .btn-primary { background: var(--gradient-1); color: white; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-glow); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { background: var(--bg-tertiary); border-color: var(--accent-primary); }
+        .editor-container { display: flex; background: var(--bg-primary); min-height: 280px; }
+        .line-numbers {
+            padding: 12px 10px;
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            text-align: right;
+            user-select: none;
+            border-right: 1px solid var(--border-color);
+            min-width: 45px;
+        }
+        .code-editor {
+            flex: 1;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            background: transparent;
+            color: var(--text-primary);
+            border: none;
+            resize: vertical;
+            outline: none;
+            tab-size: 4;
+            min-height: 280px;
+        }
+        .template-bar {
+            display: flex;
+            gap: 5px;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+        .template-btn {
+            padding: 4px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            font-family: inherit;
+        }
+        .template-btn:hover { background: var(--accent-secondary); border-color: var(--accent-primary); color: white; }
+        .editor-footer {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 12px;
+            background: var(--accent-secondary);
+            font-size: 10px;
+            color: white;
+        }
+        .output-section { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .output-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .output-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+        .output-time { font-size: 10px; color: var(--text-muted); padding: 2px 6px; background: var(--bg-card); border-radius: var(--radius-sm); }
+        .input-area {
+            width: 100%;
+            min-height: 60px;
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: none;
+            resize: vertical;
+            outline: none;
+        }
+        .output-area {
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            min-height: 60px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-secondary);
+        }
+        .output-area.success { color: var(--accent-success); }
+        .output-area.error { color: var(--accent-error); }
+        .shortcuts-bar {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            padding: 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .shortcut-item { display: flex; align-items: center; gap: 4px; }
+        kbd {
+            padding: 2px 5px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 9px;
+        }
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.2s ease;
+        }
+        .modal-overlay.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            width: 95%;
+            max-width: 900px;
+            max-height: 85vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .modal-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .modal-close {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+        }
+        .modal-close:hover { background: var(--bg-card); color: var(--text-primary); }
+        .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 14px 20px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+        }
+        .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .compare-panel {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .compare-header { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--bg-tertiary); font-size: 11px; font-weight: 500; }
+        .compare-code {
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            white-space: pre;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .score-card { text-align: center; padding: 20px; background: var(--bg-primary); border-radius: var(--radius-md); margin-bottom: 16px; }
+        .score-value { font-size: 42px; font-weight: 700; margin-bottom: 6px; }
+        .score-value.perfect { color: var(--accent-success); }
+        .score-value.good { color: var(--accent-primary); }
+        .score-value.poor { color: var(--accent-error); }
+        .score-label { font-size: 12px; color: var(--text-secondary); }
+        .test-list { display: flex; flex-direction: column; gap: 6px; }
+        .test-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            font-size: 12px;
+        }
+        .test-item.pass { border-left: 3px solid var(--accent-success); }
+        .test-item.fail { border-left: 3px solid var(--accent-error); }
+        .guide-step {
+            padding: 16px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            margin-bottom: 10px;
+            border-left: 3px solid var(--accent-primary);
+        }
+        .guide-step-title { font-size: 13px; font-weight: 600; color: var(--accent-primary); margin-bottom: 6px; }
+        .guide-step-content { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+        .code-snippet {
+            background: var(--bg-primary);
+            padding: 10px;
+            border-radius: var(--radius-sm);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            margin-top: 6px;
+            overflow-x: auto;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            transition: opacity 0.5s ease;
+        }
+        .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 16px; font-size: 13px; color: var(--text-secondary); }
+        .progress-bar {
+            width: 180px;
+            height: 3px;
+            background: var(--bg-tertiary);
+            border-radius: 2px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--gradient-1);
+            border-radius: 2px;
+            animation: progress 2s ease-in-out infinite;
+        }
+        @keyframes progress { 0% { width: 0%; margin-left: 0; } 50% { width: 70%; margin-left: 15%; } 100% { width: 0%; margin-left: 100%; } }
+        @media (max-width: 1024px) {
+            .main-content { grid-template-columns: 1fr; }
+            .output-section { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在初始化学习平台...</div>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+        <div style="margin-top: 20px; font-size: 11px; color: var(--text-muted); max-width: 300px; text-align: center;">
+            首次加载约需10-30秒<br>
+            请确保网络连接正常
+        </div>
+    </div>
+
+    <div class="app-container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">🧠</div>
+                <div>
+                    <div class="logo-text">MiniMind CS336 学习平台</div>
+                    <div class="logo-subtitle">Stanford CS336: Language Modeling from Scratch</div>
+                </div>
+            </div>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="completedCount">0</div>
+                    <div class="stat-label">已完成</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="totalCount">100</div>
+                    <div class="stat-label">总练习</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="scoreAvg">-</div>
+                    <div class="stat-label">平均分</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="sidebar-card">
+                    <div class="sidebar-header">
+                        <span>📚</span>
+                        <span>练习列表</span>
+                        <span id="filteredCount" style="margin-left: auto; font-size: 10px; color: var(--text-muted);"></span>
+                    </div>
+                    <div class="category-filter" id="categoryFilter"></div>
+                    <ul class="exercise-list" id="exerciseList"></ul>
+                </div>
+                <div class="sidebar-card">
+                    <div class="sidebar-header"><span>📊</span><span>学习进度</span></div>
+                    <div style="padding: 12px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="font-size: 11px; color: var(--text-secondary);">完成进度</span>
+                            <span style="font-size: 11px; color: var(--accent-success);" id="progressPercent">0%</span>
+                        </div>
+                        <div style="height: 5px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+                            <div id="progressBar" style="height: 100%; background: var(--gradient-4); border-radius: 3px; width: 0%; transition: width 0.5s ease;"></div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="editor-section">
+                <div class="editor-card">
+                    <div class="editor-toolbar">
+                        <div class="toolbar-left">
+                            <div class="file-tab"><span>🐍</span><span>main.py</span></div>
+                            <div class="status-badge">
+                                <span class="status-dot" id="statusDot"></span>
+                                <span id="statusText">初始化中...</span>
+                            </div>
+                        </div>
+                        <div class="toolbar-buttons">
+                            <button class="btn btn-secondary" onclick="resetCode()" title="重置">🔄</button>
+                            <button class="btn btn-secondary" onclick="showHint()" title="提示">💡</button>
+                            <button class="btn btn-secondary" onclick="showGuide()" title="指导">📖</button>
+                            <button class="btn btn-secondary" onclick="showCompare()" title="对照">🔄</button>
+                            <button class="btn btn-secondary" onclick="checkCode()" title="检测">✅</button>
+                            <button class="btn btn-secondary" onclick="showReference()" title="参考">📋</button>
+                            <button class="btn btn-primary" id="runBtn" onclick="runCode()">▶ 运行</button>
+                        </div>
+                    </div>
+                    <div class="editor-container">
+                        <div class="line-numbers" id="lineNumbers">1</div>
+                        <textarea class="code-editor" id="codeEditor" placeholder="# 在此输入 Python 代码"></textarea>
+                    </div>
+                    <div class="template-bar">
+                        <span style="color: var(--text-muted); font-size: 10px;">快速插入:</span>
+                        <button class="template-btn" onclick="insertTemplate('class')">class</button>
+                        <button class="template-btn" onclick="insertTemplate('def')">def</button>
+                        <button class="template-btn" onclick="insertTemplate('for')">for</button>
+                        <button class="template-btn" onclick="insertTemplate('if')">if</button>
+                        <button class="template-btn" onclick="insertTemplate('import')">import</button>
+                        <button class="template-btn" onclick="insertTemplate('nn_module')">nn.Module</button>
+                    </div>
+                    <div class="editor-footer">
+                        <span id="cursorPosition">行 1, 列 1</span>
+                        <span>Python 3.11 | UTF-8</span>
+                    </div>
+                </div>
+
+                <div class="output-section">
+                    <div class="output-card">
+                        <div class="output-header">
+                            <div class="output-title"><span>📥</span><span>程序输入</span></div>
+                        </div>
+                        <textarea class="input-area" id="inputBox" placeholder="每行一个输入值"></textarea>
+                    </div>
+                    <div class="output-card">
+                        <div class="output-header">
+                            <div class="output-title"><span>📤</span><span>运行输出</span></div>
+                            <span class="output-time" id="runTime">-</span>
+                        </div>
+                        <div class="output-area" id="outputBox">点击"运行"执行代码...</div>
+                    </div>
+                </div>
+
+                <div class="shortcuts-bar">
+                    <div class="shortcut-item"><kbd>Ctrl+Enter</kbd> 运行</div>
+                    <div class="shortcut-item"><kbd>Ctrl+D</kbd> 检测</div>
+                    <div class="shortcut-item"><kbd>Ctrl+H</kbd> 提示</div>
+                    <div class="shortcut-item"><kbd>Ctrl+/</kbd> 注释</div>
+                    <div class="shortcut-item"><kbd>Esc</kbd> 关闭</div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="refModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title"><span>📋</span> 参考答案</div>
+                <button class="modal-close" onclick="closeModal('refModal')">&times;</button>
+            </div>
+            <div class="modal-body"><pre class="compare-code" id="refCode"></pre></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('refModal')">关闭</button>
+                <button class="btn btn-primary" onclick="copyReference(); closeModal('refModal');">复制到编辑器</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="compareModal">
+        <div class="modal" style="max-width: 1000px;">
+            <div class="modal-header">
+                <div class="modal-title"><span>🔄</span> 代码对照</div>
+                <button class="modal-close" onclick="closeModal('compareModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="compare-grid">
+                    <div class="compare-panel">
+                        <div class="compare-header"><span>📝 你的代码</span><span id="userLines">0 行</span></div>
+                        <pre class="compare-code" id="userCodeDisplay"></pre>
+                    </div>
+                    <div class="compare-panel">
+                        <div class="compare-header"><span>✅ 参考代码</span><span id="refLines">0 行</span></div>
+                        <pre class="compare-code" id="refCodeDisplay"></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('compareModal')">关闭</button>
+                <button class="btn btn-primary" onclick="copyReference(); closeModal('compareModal');">使用参考代码</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="checkModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title"><span>✅</span> 代码检测</div>
+                <button class="modal-close" onclick="closeModal('checkModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="score-card">
+                    <div class="score-value" id="scoreValue">-</div>
+                    <div class="score-label" id="scoreLabel">检测得分</div>
+                </div>
+                <div class="test-list" id="testList"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('checkModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="hintModal">
+        <div class="modal" style="max-width: 550px;">
+            <div class="modal-header">
+                <div class="modal-title"><span>💡</span> 代码提示</div>
+                <button class="modal-close" onclick="closeModal('hintModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="hintContent"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('hintModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="guideModal">
+        <div class="modal" style="max-width: 650px;">
+            <div class="modal-header">
+                <div class="modal-title"><span>📖</span> 分步指导</div>
+                <button class="modal-close" onclick="closeModal('guideModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="guideContent"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('guideModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+const exercises = [
+    // ==================== Python基础 ====================
+    { id: 'py_hello', title: 'Hello World', category: 'Python基础', difficulty: 1,
+        template: `# 你的第一个Python程序
+print("Hello, MiniMind!")`,
+        reference: `print("Hello, MiniMind!")`,
+        tests: [{ type: 'output_contains', value: 'Hello', desc: '输出包含Hello' }],
+        hints: ['print()函数用于输出文本', '字符串需要用引号包裹']
+    },
+    { id: 'py_input', title: '输入输出', category: 'Python基础', difficulty: 1,
+        template: `# 输入输出练习
+name = input("请输入名字: ")
+print(f"你好，{name}！")`,
+        reference: `name = input("请输入名字: ")
+print(f"你好，{name}！")`,
+        hasInput: true, defaultInput: '小明',
+        tests: [{ type: 'has_input', desc: '使用了input' }, { type: 'has_fstring', desc: '使用了f-string' }],
+        hints: ['input()获取用户输入', 'f"..."是格式化字符串']
+    },
+    { id: 'py_list', title: '列表操作', category: 'Python基础', difficulty: 1,
+        template: `# 列表操作
+numbers = [1, 2, 3, 4, 5]
+# TODO: 计算总和
+total = 0
+print(f"总和: {total}")`,
+        reference: `numbers = [1, 2, 3, 4, 5]
+total = sum(numbers)
+print(f"总和: {total}")`,
+        tests: [{ type: 'has_sum', desc: '使用了sum或循环' }],
+        hints: ['sum(list)可以直接求和']
+    },
+    { id: 'py_func', title: '函数定义', category: 'Python基础', difficulty: 2,
+        template: `# 函数定义
+def add(a, b):
+    # TODO: 返回两数之和
+    pass
+
+result = add(3, 5)
+print(f"3 + 5 = {result}")`,
+        reference: `def add(a, b):
+    return a + b
+
+result = add(3, 5)
+print(f"3 + 5 = {result}")`,
+        tests: [{ type: 'has_function', value: 'add', desc: '定义了add函数' }, { type: 'has_return', desc: '使用了return' }],
+        hints: ['return语句返回结果']
+    },
+    { id: 'py_class', title: '类定义', category: 'Python基础', difficulty: 2,
+        template: `# 类定义
+class Rectangle:
+    def __init__(self, width, height):
+        # TODO: 保存属性
+        pass
+    
+    def area(self):
+        # TODO: 计算面积
+        pass
+
+rect = Rectangle(5, 3)
+print(f"面积: {rect.area()}")`,
+        reference: `class Rectangle:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+    
+    def area(self):
+        return self.width * self.height
+
+rect = Rectangle(5, 3)
+print(f"面积: {rect.area()}")`,
+        tests: [{ type: 'has_class', value: 'Rectangle', desc: '定义了Rectangle类' }, { type: 'no_pass', desc: '没有未实现的pass' }],
+        hints: ['self.width = width 保存属性']
+    },
+
+    // ==================== Unicode与编码 ====================
+    { id: 'unicode_basics', title: 'Unicode基础', category: 'Unicode编码', difficulty: 1,
+        template: `# Unicode基础
+# ord()获取字符的Unicode码点
+# chr()将码点转为字符
+char = '牛'
+code = ord(char)
+print(f"'{char}'的Unicode码点是: {code}")
+print(f"码点{code}对应的字符是: {chr(code)}")`,
+        reference: `char = '牛'
+code = ord(char)
+print(f"'{char}'的Unicode码点是: {code}")
+print(f"码点{code}对应的字符是: {chr(code)}")`,
+        tests: [{ type: 'has_ord', desc: '使用了ord函数' }, { type: 'has_chr', desc: '使用了chr函数' }],
+        hints: ['ord(char)返回Unicode码点', 'chr(code)返回对应字符']
+    },
+    { id: 'unicode_chr0', title: 'chr(0)探究', category: 'Unicode编码', difficulty: 2,
+        template: `# CS336 Problem: chr(0)返回什么?
+null_char = chr(0)
+print(f"repr: {repr(null_char)}")
+print(f"print: {null_char}")
+print(f"字符串: {'test' + null_char + 'string'}")`,
+        reference: `null_char = chr(0)
+print(f"repr: {repr(null_char)}")
+print(f"print: {null_char}")
+print(f"字符串: {'test' + null_char + 'string'}")`,
+        tests: [{ type: 'has_chr', desc: '使用了chr函数' }],
+        hints: ['chr(0)返回空字符(NULL)', 'repr()显示转义形式'],
+        guide: { steps: [{ title: '空字符', content: 'chr(0)返回ASCII/Unicode的空字符(NULL character)，在字符串中表示为\\x00。' }] }
+    },
+    { id: 'utf8_encode', title: 'UTF-8编码', category: 'Unicode编码', difficulty: 2,
+        template: `# UTF-8编码
+text = "你好世界"
+# TODO: 编码为UTF-8字节
+utf8_bytes = ?
+print(f"UTF-8字节: {list(utf8_bytes)}")
+print(f"字节数: {len(utf8_bytes)}")`,
+        reference: `text = "你好世界"
+utf8_bytes = text.encode('utf-8')
+print(f"UTF-8字节: {list(utf8_bytes)}")
+print(f"字节数: {len(utf8_bytes)}")`,
+        tests: [{ type: 'has_encode', desc: '使用了encode方法' }],
+        hints: ['str.encode("utf-8") 编码为字节', '中文通常占3个字节']
+    },
+    { id: 'utf8_decode', title: 'UTF-8解码', category: 'Unicode编码', difficulty: 2,
+        template: `# UTF-8解码
+utf8_bytes = b'\\xe4\\xbd\\xa0\\xe5\\xa5\\xbd'  # "你好"
+# TODO: 解码为字符串
+text = ?
+print(f"解码结果: {text}")`,
+        reference: `utf8_bytes = b'\\xe4\\xbd\\xa0\\xe5\\xa5\\xbd'
+text = utf8_bytes.decode('utf-8')
+print(f"解码结果: {text}")`,
+        tests: [{ type: 'has_decode', desc: '使用了decode方法' }],
+        hints: ['bytes.decode("utf-8") 解码为字符串']
+    },
+
+    // ==================== BPE分词器 ====================
+    { id: 'bpe_concept', title: 'BPE概念理解', category: 'BPE分词器', difficulty: 1,
+        template: `# BPE (Byte Pair Encoding) 概念理解
+# BPE是一种子词分词算法，通过合并高频字节对来构建词汇表
+
+# 初始词汇表: 256个字节 (0-255)
+vocab_size = 256
+print(f"初始词汇表大小: {vocab_size}")
+
+# BPE合并示例
+word_freq = {"low": 5, "lower": 2, "newest": 6}
+print(f"词频统计: {word_freq}")`,
+        reference: `vocab_size = 256
+print(f"初始词汇表大小: {vocab_size}")
+word_freq = {"low": 5, "lower": 2, "newest": 6}
+print(f"词频统计: {word_freq}")`,
+        tests: [],
+        hints: ['BPE从256个字节开始', '迭代合并最高频的字节对']
+    },
+    { id: 'bpe_count_pairs', title: 'BPE统计字节对', category: 'BPE分词器', difficulty: 3,
+        template: `# BPE: 统计字节对频率
+from collections import defaultdict
+
+def count_pairs(word_freq):
+    """
+    统计所有相邻字节对的频率
+    word_freq: dict, 键是元组表示的词, 值是频率
+    """
+    # TODO: 实现统计逻辑
+    pass
+
+word_freq = {('l','o','w'): 5, ('l','o','w','e','r'): 2}
+pairs = count_pairs(word_freq)
+print(f"字节对频率: {pairs}")`,
+        reference: `from collections import defaultdict
+
+def count_pairs(word_freq):
+    pairs = defaultdict(int)
+    for word, freq in word_freq.items():
+        for i in range(len(word) - 1):
+            pairs[(word[i], word[i+1])] += freq
+    return dict(pairs)
+
+word_freq = {('l','o','w'): 5, ('l','o','w','e','r'): 2}
+pairs = count_pairs(word_freq)
+print(f"字节对频率: {pairs}")`,
+        tests: [{ type: 'has_function', value: 'count_pairs', desc: '定义了count_pairs函数' }],
+        hints: ['遍历每个词的所有相邻对', '频率要乘以词频']
+    },
+    { id: 'bpe_merge', title: 'BPE合并操作', category: 'BPE分词器', difficulty: 3,
+        template: `# BPE: 合并操作
+def merge_pair(word_freq, pair):
+    """
+    合并指定的字节对
+    """
+    # TODO: 实现合并逻辑
+    pass
+
+word_freq = {('l','o','w'): 5, ('l','o','w','e','r'): 2}
+new_freq = merge_pair(word_freq, ('l', 'o'))
+print(f"合并后: {new_freq}")`,
+        reference: `def merge_pair(word_freq, pair):
+    new_freq = {}
+    for word, freq in word_freq.items():
+        new_word = []
+        i = 0
+        while i < len(word):
+            if i < len(word) - 1 and word[i] == pair[0] and word[i+1] == pair[1]:
+                new_word.append(pair[0] + pair[1])
+                i += 2
+            else:
+                new_word.append(word[i])
+                i += 1
+        new_freq[tuple(new_word)] = freq
+    return new_freq
+
+word_freq = {('l','o','w'): 5, ('l','o','w','e','r'): 2}
+new_freq = merge_pair(word_freq, ('l', 'o'))
+print(f"合并后: {new_freq}")`,
+        tests: [{ type: 'has_function', value: 'merge_pair', desc: '定义了merge_pair函数' }],
+        hints: ['遍历词中的每个位置', '找到匹配对就合并']
+    },
+    { id: 'bpe_encode', title: 'BPE编码', category: 'BPE分词器', difficulty: 3,
+        template: `# BPE: 编码文本
+def bpe_encode(text, merges):
+    """
+    使用学到的合并规则编码文本
+    """
+    # TODO: 实现编码逻辑
+    pass
+
+merges = [('l', 'o'), ('lo', 'w')]
+tokens = bpe_encode("low", merges)
+print(f"编码结果: {tokens}")`,
+        reference: `def bpe_encode(text, merges):
+    tokens = list(text)
+    for a, b in merges:
+        new_tokens = []
+        i = 0
+        while i < len(tokens):
+            if i < len(tokens) - 1 and tokens[i] == a and tokens[i+1] == b:
+                new_tokens.append(a + b)
+                i += 2
+            else:
+                new_tokens.append(tokens[i])
+                i += 1
+        tokens = new_tokens
+    return tokens
+
+merges = [('l', 'o'), ('lo', 'w')]
+tokens = bpe_encode("low", merges)
+print(f"编码结果: {tokens}")`,
+        tests: [{ type: 'has_function', value: 'bpe_encode', desc: '定义了bpe_encode函数' }],
+        hints: ['按顺序应用每个合并规则']
+    },
+
+    // ==================== Transformer组件 ====================
+    { id: 'linear', title: 'Linear线性层', category: 'Transformer组件', difficulty: 3,
+        template: `# CS336: 实现Linear层
+import torch
+import torch.nn as nn
+
+class Linear(nn.Module):
+    """线性变换层: y = Wx (无偏置)"""
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        # TODO: 初始化权重
+        pass
+    
+    def forward(self, x):
+        # TODO: 实现前向传播
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+import torch.nn.init as init
+
+class Linear(nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        std = (2 / (in_features + out_features)) ** 0.5
+        init.trunc_normal_(self.weight, mean=0, std=std, a=-3*std, b=3*std)
+    
+    def forward(self, x):
+        return x @ self.weight.T`,
+        tests: [{ type: 'has_class', value: 'Linear', desc: '定义了Linear类' }, { type: 'has_parameter', value: 'weight', desc: '定义了weight参数' }],
+        hints: ['nn.Parameter(torch.empty(out, in))', 'x @ self.weight.T 计算']
+    },
+    { id: 'embedding', title: 'Embedding嵌入层', category: 'Transformer组件', difficulty: 2,
+        template: `# CS336: 实现Embedding层
+import torch
+import torch.nn as nn
+
+class Embedding(nn.Module):
+    """词嵌入层"""
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        # TODO: 初始化嵌入矩阵
+        pass
+    
+    def forward(self, token_ids):
+        # TODO: 查找嵌入向量
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+import torch.nn.init as init
+
+class Embedding(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(num_embeddings, embedding_dim))
+        init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
+    
+    def forward(self, token_ids):
+        return self.weight[token_ids]`,
+        tests: [{ type: 'has_class', value: 'Embedding', desc: '定义了Embedding类' }],
+        hints: ['self.weight[token_ids] 直接索引']
+    },
+    { id: 'rmsnorm', title: 'RMSNorm归一化', category: 'Transformer组件', difficulty: 3,
+        template: `# CS336: 实现RMSNorm
+import torch
+import torch.nn as nn
+
+class RMSNorm(nn.Module):
+    """均方根层归一化: y = x/RMS(x) * gain"""
+    def __init__(self, d_model, eps=1e-5):
+        super().__init__()
+        # TODO: 初始化gain参数和eps
+        pass
+    
+    def forward(self, x):
+        # TODO: 实现RMSNorm
+        # RMS = sqrt(mean(x^2) + eps)
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class RMSNorm(nn.Module):
+    def __init__(self, d_model, eps=1e-5):
+        super().__init__()
+        self.gain = nn.Parameter(torch.ones(d_model))
+        self.eps = eps
+    
+    def forward(self, x):
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+        rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps)
+        result = (x / rms) * self.gain
+        return result.to(in_dtype)`,
+        tests: [{ type: 'has_class', value: 'RMSNorm', desc: '定义了RMSNorm类' }],
+        hints: ['x.pow(2).mean(-1, keepdim=True)', 'sqrt后除以rms，乘以gain']
+    },
+    { id: 'softmax', title: 'Softmax函数', category: 'Transformer组件', difficulty: 2,
+        template: `# CS336: 实现数值稳定的Softmax
+import torch
+
+def softmax(x, dim=-1):
+    """数值稳定的softmax实现"""
+    # TODO: 实现softmax
+    # 提示: 减去最大值防止溢出
+    pass
+
+x = torch.tensor([[1.0, 2.0, 3.0]])
+print(softmax(x))`,
+        reference: `import torch
+
+def softmax(x, dim=-1):
+    x_max = x.max(dim=dim, keepdim=True).values
+    x_shifted = x - x_max
+    exp_x = torch.exp(x_shifted)
+    return exp_x / exp_x.sum(dim=dim, keepdim=True)
+
+x = torch.tensor([[1.0, 2.0, 3.0]])
+print(softmax(x))`,
+        tests: [{ type: 'has_function', value: 'softmax', desc: '定义了softmax函数' }],
+        hints: ['减去最大值防止溢出', 'exp后除以sum']
+    },
+    { id: 'silu', title: 'SiLU激活函数', category: 'Transformer组件', difficulty: 1,
+        template: `# SiLU (Swish) 激活函数
+import torch
+
+def silu(x):
+    """SiLU = x * sigmoid(x)"""
+    # TODO: 实现SiLU
+    pass
+
+x = torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0])
+print(f"SiLU: {silu(x)}")`,
+        reference: `import torch
+
+def silu(x):
+    return x * torch.sigmoid(x)
+
+x = torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0])
+print(f"SiLU: {silu(x)}")`,
+        tests: [{ type: 'has_function', value: 'silu', desc: '定义了silu函数' }],
+        hints: ['x * sigmoid(x)']
+    },
+
+    // ==================== 注意力机制 ====================
+    { id: 'attention_scores', title: '注意力分数计算', category: '注意力机制', difficulty: 2,
+        template: `# 注意力分数计算
+import torch
+
+def attention_scores(Q, K):
+    """
+    计算注意力分数 (未归一化)
+    Q, K: (batch, seq_len, d_k)
+    返回: (batch, seq_len, seq_len)
+    """
+    # TODO: 实现注意力分数计算
+    pass
+
+Q = torch.randn(2, 4, 8)
+K = torch.randn(2, 4, 8)
+scores = attention_scores(Q, K)
+print(f"分数形状: {scores.shape}")`,
+        reference: `import torch
+
+def attention_scores(Q, K):
+    d_k = Q.size(-1)
+    return torch.matmul(Q, K.transpose(-2, -1)) / (d_k ** 0.5)
+
+Q = torch.randn(2, 4, 8)
+K = torch.randn(2, 4, 8)
+scores = attention_scores(Q, K)
+print(f"分数形状: {scores.shape}")`,
+        tests: [{ type: 'has_function', value: 'attention_scores', desc: '定义了attention_scores函数' }],
+        hints: ['Q @ K.T 矩阵乘法', '除以 sqrt(d_k) 缩放']
+    },
+    { id: 'scaled_dot_attention', title: '缩放点积注意力', category: '注意力机制', difficulty: 3,
+        template: `# CS336: 缩放点积注意力
+import torch
+
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    """
+    Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) V
+    """
+    # TODO: 实现缩放点积注意力
+    pass`,
+        reference: `import torch
+
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    d_k = Q.size(-1)
+    scores = torch.matmul(Q, K.transpose(-2, -1)) / (d_k ** 0.5)
+    
+    if mask is not None:
+        scores = scores.masked_fill(~mask, float('-inf'))
+    
+    attn_weights = torch.softmax(scores, dim=-1)
+    output = torch.matmul(attn_weights, V)
+    return output`,
+        tests: [{ type: 'has_function', value: 'scaled_dot_product_attention', desc: '定义了注意力函数' }],
+        hints: ['scores = Q @ K.T / sqrt(d_k)', 'mask用masked_fill处理', 'softmax后乘V']
+    },
+    { id: 'causal_mask', title: '因果掩码', category: '注意力机制', difficulty: 2,
+        template: `# 因果掩码 (Causal Mask)
+import torch
+
+def create_causal_mask(seq_len):
+    """
+    创建因果掩码，确保位置i只能看到位置0到i
+    返回: (seq_len, seq_len) 布尔张量
+    """
+    # TODO: 实现因果掩码
+    pass
+
+mask = create_causal_mask(4)
+print(mask.int())`,
+        reference: `import torch
+
+def create_causal_mask(seq_len):
+    return torch.tril(torch.ones(seq_len, seq_len)).bool()
+
+mask = create_causal_mask(4)
+print(mask.int())`,
+        tests: [{ type: 'has_function', value: 'create_causal_mask', desc: '定义了create_causal_mask函数' }, { type: 'has_tril', desc: '使用了torch.tril' }],
+        hints: ['torch.tril() 下三角矩阵']
+    },
+    { id: 'multihead_split', title: '多头拆分与合并', category: '注意力机制', difficulty: 2,
+        template: `# 多头注意力: 头拆分与合并
+import torch
+
+def split_heads(x, num_heads):
+    """x: (batch, seq, d_model) -> (batch, heads, seq, head_dim)"""
+    # TODO: 实现头拆分
+    pass
+
+def merge_heads(x):
+    """x: (batch, heads, seq, head_dim) -> (batch, seq, d_model)"""
+    # TODO: 实现头合并
+    pass
+
+x = torch.randn(2, 4, 16)
+split = split_heads(x, 4)
+print(f"拆分后: {split.shape}")
+merged = merge_heads(split)
+print(f"合并后: {merged.shape}")`,
+        reference: `import torch
+
+def split_heads(x, num_heads):
+    batch, seq_len, d_model = x.shape
+    head_dim = d_model // num_heads
+    return x.view(batch, seq_len, num_heads, head_dim).transpose(1, 2)
+
+def merge_heads(x):
+    batch, num_heads, seq_len, head_dim = x.shape
+    return x.transpose(1, 2).contiguous().view(batch, seq_len, num_heads * head_dim)
+
+x = torch.randn(2, 4, 16)
+split = split_heads(x, 4)
+print(f"拆分后: {split.shape}")
+merged = merge_heads(split)
+print(f"合并后: {merged.shape}")`,
+        tests: [{ type: 'has_function', value: 'split_heads', desc: '定义了split_heads函数' }],
+        hints: ['view后transpose', 'transpose后view']
+    },
+    { id: 'multihead_attention', title: '多头自注意力', category: '注意力机制', difficulty: 4,
+        template: `# CS336: 多头自注意力
+import torch
+import torch.nn as nn
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        # TODO: 初始化Q, K, V, O投影层
+        pass
+    
+    def forward(self, x, mask=None):
+        # TODO: 实现多头自注意力
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+        
+        self.W_q = nn.Linear(d_model, d_model, bias=False)
+        self.W_k = nn.Linear(d_model, d_model, bias=False)
+        self.W_v = nn.Linear(d_model, d_model, bias=False)
+        self.W_o = nn.Linear(d_model, d_model, bias=False)
+    
+    def forward(self, x, mask=None):
+        batch, seq_len, _ = x.shape
+        
+        Q = self.W_q(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.W_k(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.W_v(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        if mask is not None:
+            scores = scores.masked_fill(~mask, float('-inf'))
+        attn = torch.softmax(scores, dim=-1)
+        
+        out = torch.matmul(attn, V)
+        out = out.transpose(1, 2).contiguous().view(batch, seq_len, -1)
+        return self.W_o(out)`,
+        tests: [{ type: 'has_class', value: 'MultiHeadAttention', desc: '定义了MultiHeadAttention类' }],
+        hints: ['四个线性层: W_q, W_k, W_v, W_o', '拆分头->注意力->合并头']
+    },
+
+    // ==================== 位置编码 ====================
+    { id: 'pos_embedding', title: '位置嵌入', category: '位置编码', difficulty: 2,
+        template: `# 可学习的位置嵌入
+import torch
+import torch.nn as nn
+
+class PositionalEmbedding(nn.Module):
+    def __init__(self, max_seq_len, d_model):
+        super().__init__()
+        # TODO: 初始化位置嵌入矩阵
+        pass
+    
+    def forward(self, x):
+        """x: (batch, seq_len, d_model)"""
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class PositionalEmbedding(nn.Module):
+    def __init__(self, max_seq_len, d_model):
+        super().__init__()
+        self.pos_emb = nn.Parameter(torch.randn(max_seq_len, d_model))
+    
+    def forward(self, x):
+        seq_len = x.size(1)
+        return x + self.pos_emb[:seq_len]`,
+        tests: [{ type: 'has_class', value: 'PositionalEmbedding', desc: '定义了PositionalEmbedding类' }],
+        hints: ['nn.Parameter存储位置嵌入', 'x + pos_emb[:seq_len]']
+    },
+    { id: 'rope_basic', title: 'RoPE基础', category: '位置编码', difficulty: 3,
+        template: `# RoPE (旋转位置编码) 基础
+import torch
+
+def precompute_freqs_cis(dim, max_seq_len, theta=10000.0):
+    """预计算RoPE的复数频率"""
+    # TODO: 实现频率预计算
+    pass
+
+freqs = precompute_freqs_cis(8, 16)
+print(f"频率形状: {freqs.shape}")`,
+        reference: `import torch
+
+def precompute_freqs_cis(dim, max_seq_len, theta=10000.0):
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2).float() / dim))
+    positions = torch.arange(max_seq_len).float()
+    angles = torch.outer(positions, freqs)
+    return torch.polar(torch.ones_like(angles), angles)
+
+freqs = precompute_freqs_cis(8, 16)
+print(f"频率形状: {freqs.shape}")`,
+        tests: [{ type: 'has_function', value: 'precompute_freqs_cis', desc: '定义了频率计算函数' }],
+        hints: ['torch.outer计算外积', 'torch.polar创建复数']
+    },
+    { id: 'rope_apply', title: 'RoPE应用', category: '位置编码', difficulty: 4,
+        template: `# CS336: 应用RoPE
+import torch
+
+def apply_rope(x, freqs_cis):
+    """
+    将RoPE应用于输入张量
+    x: (batch, num_heads, seq_len, head_dim)
+    freqs_cis: (seq_len, head_dim//2)
+    """
+    # TODO: 实现RoPE应用
+    pass`,
+        reference: `import torch
+
+def apply_rope(x, freqs_cis):
+    x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+    freqs_cis = freqs_cis.unsqueeze(0).unsqueeze(0)
+    x_rotated = x_complex * freqs_cis
+    return torch.view_as_real(x_rotated).flatten(-2).type_as(x)`,
+        tests: [{ type: 'has_function', value: 'apply_rope', desc: '定义了apply_rope函数' }],
+        hints: ['view_as_complex转复数', '复数乘法实现旋转']
+    },
+
+    // ==================== 前馈网络 ====================
+    { id: 'ffn_basic', title: '基础前馈网络', category: '前馈网络', difficulty: 2,
+        template: `# 基础前馈网络
+import torch
+import torch.nn as nn
+
+class FeedForward(nn.Module):
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        # TODO: 实现两层MLP
+        pass
+    
+    def forward(self, x):
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class FeedForward(nn.Module):
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc2 = nn.Linear(d_ff, d_model)
+    
+    def forward(self, x):
+        return self.fc2(torch.relu(self.fc1(x)))`,
+        tests: [{ type: 'has_class', value: 'FeedForward', desc: '定义了FeedForward类' }],
+        hints: ['两层线性变换', '中间ReLU激活']
+    },
+    { id: 'swiglu', title: 'SwiGLU前馈网络', category: '前馈网络', difficulty: 3,
+        template: `# CS336: SwiGLU前馈网络
+import torch
+import torch.nn as nn
+
+class SwiGLU(nn.Module):
+    """SwiGLU = W2(SiLU(W1(x)) * W3(x))"""
+    def __init__(self, d_model, d_ff=None):
+        super().__init__()
+        if d_ff is None:
+            d_ff = int(d_model * 8 / 3)
+        # TODO: 实现三个线性层
+        pass
+    
+    def forward(self, x):
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SwiGLU(nn.Module):
+    def __init__(self, d_model, d_ff=None):
+        super().__init__()
+        if d_ff is None:
+            d_ff = int(d_model * 8 / 3)
+        self.w1 = nn.Linear(d_model, d_ff, bias=False)
+        self.w2 = nn.Linear(d_ff, d_model, bias=False)
+        self.w3 = nn.Linear(d_model, d_ff, bias=False)
+    
+    def forward(self, x):
+        return self.w2(F.silu(self.w1(x)) * self.w3(x))`,
+        tests: [{ type: 'has_class', value: 'SwiGLU', desc: '定义了SwiGLU类' }],
+        hints: ['三个线性层: w1, w2, w3', 'w2(silu(w1(x)) * w3(x))']
+    },
+
+    // ==================== Transformer块 ====================
+    { id: 'transformer_block', title: 'Transformer块', category: 'Transformer块', difficulty: 4,
+        template: `# CS336: Transformer块
+import torch
+import torch.nn as nn
+
+class TransformerBlock(nn.Module):
+    """
+    Pre-norm Transformer块:
+    x = x + Attention(RMSNorm(x))
+    x = x + FFN(RMSNorm(x))
+    """
+    def __init__(self, d_model, num_heads, d_ff):
+        super().__init__()
+        # TODO: 实现Transformer块组件
+        pass
+    
+    def forward(self, x, mask=None):
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, d_ff):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.GELU(),
+            nn.Linear(d_ff, d_model)
+        )
+    
+    def forward(self, x, mask=None):
+        x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x), need_weights=False)[0]
+        x = x + self.ff(self.norm2(x))
+        return x`,
+        tests: [{ type: 'has_class', value: 'TransformerBlock', desc: '定义了TransformerBlock类' }],
+        hints: ['Pre-norm: 先归一化再子层', '残差连接: x = x + sublayer(norm(x))']
+    },
+    { id: 'transformer_lm', title: 'Transformer语言模型', category: 'Transformer块', difficulty: 5,
+        template: `# CS336: Transformer语言模型
+import torch
+import torch.nn as nn
+
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len):
+        super().__init__()
+        # TODO: 实现完整的Transformer LM
+        pass
+    
+    def forward(self, input_ids):
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len):
+        super().__init__()
+        self.token_emb = nn.Embedding(vocab_size, d_model)
+        self.pos_emb = nn.Parameter(torch.randn(max_seq_len, d_model))
+        self.layers = nn.ModuleList([
+            nn.TransformerEncoderLayer(d_model, num_heads, d_ff, batch_first=True)
+            for _ in range(num_layers)
+        ])
+        self.norm = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+    
+    def forward(self, input_ids):
+        x = self.token_emb(input_ids) + self.pos_emb[:input_ids.size(1)]
+        for layer in self.layers:
+            x = layer(x)
+        x = self.norm(x)
+        return self.lm_head(x)`,
+        tests: [{ type: 'has_class', value: 'TransformerLM', desc: '定义了TransformerLM类' }],
+        hints: ['嵌入->位置->多层块->归一化->输出']
+    },
+
+    // ==================== 训练与优化 ====================
+    { id: 'cross_entropy', title: '交叉熵损失', category: '训练优化', difficulty: 2,
+        template: `# CS336: 交叉熵损失
+import torch
+import torch.nn.functional as F
+
+def cross_entropy_loss(logits, targets):
+    """
+    计算交叉熵损失
+    logits: (batch, vocab_size)
+    targets: (batch,)
+    """
+    # TODO: 实现交叉熵损失
+    pass
+
+logits = torch.randn(2, 10)
+targets = torch.tensor([3, 7])
+loss = cross_entropy_loss(logits, targets)
+print(f"损失: {loss}")`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def cross_entropy_loss(logits, targets):
+    log_probs = F.log_softmax(logits, dim=-1)
+    loss = -log_probs.gather(-1, targets.unsqueeze(-1)).mean()
+    return loss
+
+logits = torch.randn(2, 10)
+targets = torch.tensor([3, 7])
+loss = cross_entropy_loss(logits, targets)
+print(f"损失: {loss}")`,
+        tests: [{ type: 'has_function', value: 'cross_entropy_loss', desc: '定义了cross_entropy_loss函数' }],
+        hints: ['log_softmax + gather', '取负后求平均']
+    },
+    { id: 'perplexity', title: '困惑度计算', category: '训练优化', difficulty: 2,
+        template: `# 困惑度 (Perplexity)
+import torch
+
+def perplexity(loss):
+    """从交叉熵损失计算困惑度"""
+    # TODO: 实现困惑度计算
+    pass
+
+loss = torch.tensor(2.5)
+ppl = perplexity(loss)
+print(f"困惑度: {ppl}")`,
+        reference: `import torch
+
+def perplexity(loss):
+    return torch.exp(loss)
+
+loss = torch.tensor(2.5)
+ppl = perplexity(loss)
+print(f"困惑度: {ppl}")`,
+        tests: [{ type: 'has_function', value: 'perplexity', desc: '定义了perplexity函数' }],
+        hints: ['困惑度 = exp(交叉熵损失)']
+    },
+    { id: 'adamw', title: 'AdamW优化器', category: '训练优化', difficulty: 4,
+        template: `# CS336: AdamW优化器
+import torch
+
+class AdamW:
+    """AdamW = Adam + 权重衰减解耦"""
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01):
+        self.params = list(params)
+        self.lr = lr
+        self.beta1, self.beta2 = betas
+        self.eps = eps
+        self.weight_decay = weight_decay
+        # TODO: 初始化一阶和二阶矩估计
+        pass
+    
+    def step(self):
+        # TODO: 实现AdamW更新步骤
+        pass`,
+        reference: `import torch
+
+class AdamW:
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01):
+        self.params = list(params)
+        self.lr = lr
+        self.beta1, self.beta2 = betas
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.m = [torch.zeros_like(p) for p in self.params]
+        self.v = [torch.zeros_like(p) for p in self.params]
+        self.t = 0
+    
+    def step(self):
+        self.t += 1
+        for i, p in enumerate(self.params):
+            if p.grad is None:
+                continue
+            grad = p.grad
+            
+            self.m[i] = self.beta1 * self.m[i] + (1 - self.beta1) * grad
+            self.v[i] = self.beta2 * self.v[i] + (1 - self.beta2) * grad ** 2
+            
+            m_hat = self.m[i] / (1 - self.beta1 ** self.t)
+            v_hat = self.v[i] / (1 - self.beta2 ** self.t)
+            
+            p.data -= self.lr * (m_hat / (torch.sqrt(v_hat) + self.eps) + self.weight_decay * p.data)`,
+        tests: [{ type: 'has_class', value: 'AdamW', desc: '定义了AdamW类' }],
+        hints: ['维护m和v两个矩估计', '偏差修正: m_hat = m / (1-beta1^t)']
+    },
+    { id: 'lr_schedule', title: '学习率调度', category: '训练优化', difficulty: 3,
+        template: `# CS336: 余弦学习率调度
+import math
+
+def cosine_lr_schedule(step, max_steps, warmup_steps, lr_max, lr_min=0):
+    """
+    余弦退火学习率调度
+    1. warmup阶段: 线性增加
+    2. 余弦退火阶段
+    """
+    # TODO: 实现余弦学习率调度
+    pass
+
+for step in [0, 100, 500, 1000, 5000, 10000]:
+    lr = cosine_lr_schedule(step, max_steps=10000, warmup_steps=500, lr_max=1e-3)
+    print(f"Step {step}: lr = {lr:.6f}")`,
+        reference: `import math
+
+def cosine_lr_schedule(step, max_steps, warmup_steps, lr_max, lr_min=0):
+    if step < warmup_steps:
+        return lr_max * step / warmup_steps
+    
+    progress = (step - warmup_steps) / (max_steps - warmup_steps)
+    return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
+
+for step in [0, 100, 500, 1000, 5000, 10000]:
+    lr = cosine_lr_schedule(step, max_steps=10000, warmup_steps=500, lr_max=1e-3)
+    print(f"Step {step}: lr = {lr:.6f}")`,
+        tests: [{ type: 'has_function', value: 'cosine_lr_schedule', desc: '定义了学习率调度函数' }],
+        hints: ['warmup: 线性增长', '之后: 余弦退火']
+    },
+    { id: 'grad_clip', title: '梯度裁剪', category: '训练优化', difficulty: 2,
+        template: `# CS336: 梯度裁剪
+import torch
+
+def clip_grad_norm_(params, max_norm):
+    """
+    按范数裁剪梯度
+    返回: 裁剪前的总范数
+    """
+    # TODO: 实现梯度裁剪
+    pass
+
+param = torch.nn.Parameter(torch.randn(10))
+param.grad = torch.randn(10) * 10
+norm = clip_grad_norm_([param], max_norm=1.0)
+print(f"梯度范数: {norm:.4f}")`,
+        reference: `import torch
+
+def clip_grad_norm_(params, max_norm):
+    total_norm = 0
+    for p in params:
+        if p.grad is not None:
+            total_norm += p.grad.data.norm() ** 2
+    total_norm = total_norm ** 0.5
+    
+    if total_norm > max_norm:
+        ratio = max_norm / total_norm
+        for p in params:
+            if p.grad is not None:
+                p.grad.data.mul_(ratio)
+    
+    return total_norm
+
+param = torch.nn.Parameter(torch.randn(10))
+param.grad = torch.randn(10) * 10
+norm = clip_grad_norm_([param], max_norm=1.0)
+print(f"梯度范数: {norm:.4f}")`,
+        tests: [{ type: 'has_function', value: 'clip_grad_norm_', desc: '定义了梯度裁剪函数' }],
+        hints: ['计算总范数', '如果超过max_norm则缩放']
+    },
+
+    // ==================== FLOPs计算 ====================
+    { id: 'flops_matmul', title: '矩阵乘法FLOPs', category: 'FLOPs计算', difficulty: 2,
+        template: `# FLOPs计算: 矩阵乘法
+# 规则: A(m,n) @ B(n,p) 需要 2*m*n*p FLOPs
+
+def matmul_flops(m, n, p):
+    """
+    计算 (m,n) @ (n,p) 的FLOPs
+    """
+    # TODO: 实现FLOPs计算
+    pass
+
+# 测试: (1024, 768) @ (768, 768)
+flops = matmul_flops(1024, 768, 768)
+print(f"FLOPs: {flops:,}")`,
+        reference: `def matmul_flops(m, n, p):
+    return 2 * m * n * p
+
+flops = matmul_flops(1024, 768, 768)
+print(f"FLOPs: {flops:,}")`,
+        tests: [{ type: 'has_function', value: 'matmul_flops', desc: '定义了matmul_flops函数' }],
+        hints: ['每次乘加算2个FLOPs', '结果 = 2 * m * n * p']
+    },
+    { id: 'flops_attention', title: '注意力FLOPs', category: 'FLOPs计算', difficulty: 3,
+        template: `# FLOPs计算: 注意力层
+def attention_flops(batch, seq_len, d_model, num_heads):
+    """
+    计算多头注意力的FLOPs
+    包括: Q,K,V投影 + 注意力计算 + 输出投影
+    """
+    # TODO: 实现FLOPs计算
+    pass
+
+flops = attention_flops(batch=32, seq_len=1024, d_model=768, num_heads=12)
+print(f"注意力FLOPs: {flops/1e9:.2f} GFLOPs")`,
+        reference: `def attention_flops(batch, seq_len, d_model, num_heads):
+    head_dim = d_model // num_heads
+    
+    # Q, K, V投影: 3 * 2 * B * S * D * D
+    proj_flops = 3 * 2 * batch * seq_len * d_model * d_model
+    
+    # QK^T: 2 * B * H * S * S * D/H
+    qk_flops = 2 * batch * num_heads * seq_len * seq_len * head_dim
+    
+    # Attn @ V: 2 * B * H * S * S * D/H
+    av_flops = 2 * batch * num_heads * seq_len * seq_len * head_dim
+    
+    # 输出投影: 2 * B * S * D * D
+    out_flops = 2 * batch * seq_len * d_model * d_model
+    
+    return proj_flops + qk_flops + av_flops + out_flops
+
+flops = attention_flops(batch=32, seq_len=1024, d_model=768, num_heads=12)
+print(f"注意力FLOPs: {flops/1e9:.2f} GFLOPs")`,
+        tests: [{ type: 'has_function', value: 'attention_flops', desc: '定义了attention_flops函数' }],
+        hints: ['投影: 4个矩阵乘法', '注意力: QK^T + AV']
+    },
+    { id: 'flops_transformer', title: 'Transformer块FLOPs', category: 'FLOPs计算', difficulty: 4,
+        template: `# FLOPs计算: Transformer块
+def transformer_block_flops(batch, seq_len, d_model, num_heads, d_ff):
+    """
+    计算单个Transformer块的FLOPs
+    包括: 注意力 + FFN + LayerNorm
+    """
+    # TODO: 实现FLOPs计算
+    pass
+
+flops = transformer_block_flops(batch=32, seq_len=1024, d_model=768, num_heads=12, d_ff=3072)
+print(f"Transformer块FLOPs: {flops/1e9:.2f} GFLOPs")`,
+        reference: `def transformer_block_flops(batch, seq_len, d_model, num_heads, d_ff):
+    head_dim = d_model // num_heads
+    
+    # 注意力部分
+    attn_proj = 4 * 2 * batch * seq_len * d_model * d_model
+    attn_qk = 2 * batch * num_heads * seq_len * seq_len * head_dim
+    attn_av = 2 * batch * num_heads * seq_len * seq_len * head_dim
+    
+    # FFN部分 (SwiGLU: 3个投影)
+    ffn = 3 * 2 * batch * seq_len * d_model * d_ff
+    
+    # LayerNorm (约等于 4 * B * S * D)
+    ln = 2 * 4 * batch * seq_len * d_model
+    
+    return attn_proj + attn_qk + attn_av + ffn + ln
+
+flops = transformer_block_flops(batch=32, seq_len=1024, d_model=768, num_heads=12, d_ff=3072)
+print(f"Transformer块FLOPs: {flops/1e9:.2f} GFLOPs")`,
+        tests: [{ type: 'has_function', value: 'transformer_block_flops', desc: '定义了transformer_block_flops函数' }],
+        hints: ['注意力 + FFN + LayerNorm', 'SwiGLU有3个投影层']
+    },
+    { id: 'params_count', title: '参数量计算', category: 'FLOPs计算', difficulty: 3,
+        template: `# 参数量计算
+def count_transformer_params(vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len):
+    """
+    计算Transformer语言模型的参数量
+    """
+    # TODO: 实现参数量计算
+    pass
+
+params = count_transformer_params(vocab_size=50000, d_model=768, num_layers=12, num_heads=12, d_ff=3072, max_seq_len=1024)
+print(f"参数量: {params/1e6:.2f}M")`,
+        reference: `def count_transformer_params(vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len):
+    # Token嵌入
+    token_emb = vocab_size * d_model
+    
+    # 位置嵌入
+    pos_emb = max_seq_len * d_model
+    
+    # 每层Transformer块
+    # 注意力: 4 * D * D (W_q, W_k, W_v, W_o)
+    # FFN (SwiGLU): 3 * D * d_ff
+    # LayerNorm: 2 * D (每层2个)
+    layer_params = 4 * d_model * d_model + 3 * d_model * d_ff + 2 * d_model
+    layers = num_layers * layer_params
+    
+    # 最终LayerNorm + LM Head
+    final = d_model + vocab_size * d_model
+    
+    return token_emb + pos_emb + layers + final
+
+params = count_transformer_params(vocab_size=50000, d_model=768, num_layers=12, num_heads=12, d_ff=3072, max_seq_len=1024)
+print(f"参数量: {params/1e6:.2f}M")`,
+        tests: [{ type: 'has_function', value: 'count_transformer_params', desc: '定义了参数量计算函数' }],
+        hints: ['嵌入 + 层 + 输出', '每层: 注意力 + FFN + LN']
+    },
+
+    // ==================== 数据加载 ====================
+    { id: 'dataloader', title: '数据加载器', category: '数据加载', difficulty: 3,
+        template: `# CS336: 数据加载器
+import torch
+
+class DataLoader:
+    def __init__(self, data, batch_size, seq_len):
+        """
+        data: token ID数组
+        batch_size: 批量大小
+        seq_len: 序列长度
+        """
+        self.data = data
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+    
+    def __iter__(self):
+        # TODO: 实现迭代器
+        pass
+    
+    def __len__(self):
+        # TODO: 返回批次数
+        pass
+
+# 模拟数据
+data = torch.randint(0, 1000, (10000,))
+loader = DataLoader(data, batch_size=4, seq_len=32)
+print(f"批次数: {len(loader)}")`,
+        reference: `import torch
+
+class DataLoader:
+    def __init__(self, data, batch_size, seq_len):
+        self.data = data
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+    
+    def __iter__(self):
+        n = len(self.data) - self.seq_len
+        for i in range(0, n, self.batch_size * self.seq_len):
+            batch_inputs = []
+            batch_targets = []
+            for j in range(self.batch_size):
+                start = i + j * self.seq_len
+                if start + self.seq_len + 1 <= len(self.data):
+                    batch_inputs.append(self.data[start:start + self.seq_len])
+                    batch_targets.append(self.data[start + 1:start + self.seq_len + 1])
+            if batch_inputs:
+                yield torch.stack(batch_inputs), torch.stack(batch_targets)
+    
+    def __len__(self):
+        return (len(self.data) - self.seq_len) // (self.batch_size * self.seq_len)
+
+data = torch.randint(0, 1000, (10000,))
+loader = DataLoader(data, batch_size=4, seq_len=32)
+print(f"批次数: {len(loader)}")`,
+        tests: [{ type: 'has_class', value: 'DataLoader', desc: '定义了DataLoader类' }],
+        hints: ['输入: data[i:i+seq_len]', '目标: data[i+1:i+seq_len+1]']
+    },
+
+    // ==================== 文本生成 ====================
+    { id: 'greedy_decode', title: '贪婪解码', category: '文本生成', difficulty: 2,
+        template: `# 贪婪解码
+import torch
+
+def greedy_decode(model, input_ids, max_new_tokens):
+    """贪婪解码: 每步选择概率最高的token"""
+    # TODO: 实现贪婪解码
+    pass`,
+        reference: `import torch
+
+def greedy_decode(model, input_ids, max_new_tokens):
+    model.eval()
+    with torch.no_grad():
+        for _ in range(max_new_tokens):
+            logits = model(input_ids)
+            next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
+    return input_ids`,
+        tests: [{ type: 'has_function', value: 'greedy_decode', desc: '定义了greedy_decode函数' }],
+        hints: ['argmax选择最大概率token', '拼接到序列末尾']
+    },
+    { id: 'top_k_sample', title: 'Top-K采样', category: '文本生成', difficulty: 3,
+        template: `# Top-K采样
+import torch
+import torch.nn.functional as F
+
+def top_k_sample(logits, k, temperature=1.0):
+    """从概率最高的k个token中采样"""
+    # TODO: 实现Top-K采样
+    pass
+
+logits = torch.randn(1, 100)
+next_token = top_k_sample(logits, k=10)
+print(f"采样的token: {next_token}")`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def top_k_sample(logits, k, temperature=1.0):
+    logits = logits / temperature
+    values, indices = torch.topk(logits, k)
+    probs = F.softmax(values, dim=-1)
+    next_idx = torch.multinomial(probs, 1)
+    return indices.gather(-1, next_idx)
+
+logits = torch.randn(1, 100)
+next_token = top_k_sample(logits, k=10)
+print(f"采样的token: {next_token}")`,
+        tests: [{ type: 'has_function', value: 'top_k_sample', desc: '定义了top_k_sample函数' }],
+        hints: ['topk获取前k个', 'multinomial采样']
+    },
+    { id: 'top_p_sample', title: 'Top-P采样', category: '文本生成', difficulty: 3,
+        template: `# Top-P (Nucleus) 采样
+import torch
+import torch.nn.functional as F
+
+def top_p_sample(logits, p, temperature=1.0):
+    """从累积概率达到p的最小token集合中采样"""
+    # TODO: 实现Top-P采样
+    pass`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def top_p_sample(logits, p, temperature=1.0):
+    logits = logits / temperature
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+    sorted_probs = F.softmax(sorted_logits, dim=-1)
+    cum_probs = torch.cumsum(sorted_probs, dim=-1)
+    
+    sorted_indices_to_remove = cum_probs > p
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0
+    
+    sorted_logits[sorted_indices_to_remove] = float('-inf')
+    probs = F.softmax(sorted_logits, dim=-1)
+    next_idx = torch.multinomial(probs, 1)
+    return sorted_indices.gather(-1, next_idx)`,
+        tests: [{ type: 'has_function', value: 'top_p_sample', desc: '定义了top_p_sample函数' }],
+        hints: ['排序后计算累积概率', '保留累积概率<=p的token']
+    },
+
+    // ==================== 高级注意力 ====================
+    { id: 'kv_cache', title: 'KV Cache实现', category: '高级注意力', difficulty: 4,
+        template: `# CS336: KV Cache用于加速推理
+import torch
+
+class KVCache:
+    """
+    缓存Key和Value，避免重复计算
+    在自回归生成中，每次只需要计算新token的K,V
+    """
+    def __init__(self, num_layers, num_heads, head_dim, max_seq_len, dtype=torch.float32):
+        # TODO: 初始化KV缓存
+        pass
+    
+    def update(self, layer_idx, k, v, start_pos=0):
+        """更新缓存并返回完整的K, V"""
+        # TODO: 实现缓存更新
+        pass
+    
+    def clear(self):
+        """清空缓存"""
+        pass
+
+# 测试
+cache = KVCache(num_layers=4, num_heads=8, head_dim=64, max_seq_len=512)
+print(f"KV Cache初始化完成")`,
+        reference: `import torch
+
+class KVCache:
+    def __init__(self, num_layers, num_heads, head_dim, max_seq_len, dtype=torch.float32):
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.max_seq_len = max_seq_len
+        self.dtype = dtype
+        
+        # 缓存形状: (num_layers, batch, num_heads, max_seq_len, head_dim)
+        self.k_cache = torch.zeros(num_layers, 1, num_heads, max_seq_len, head_dim, dtype=dtype)
+        self.v_cache = torch.zeros(num_layers, 1, num_heads, max_seq_len, head_dim, dtype=dtype)
+        self.seq_len = 0
+    
+    def update(self, layer_idx, k, v, start_pos=0):
+        batch, num_heads, seq_len, head_dim = k.shape
+        self.k_cache[layer_idx, :batch, :, start_pos:start_pos+seq_len, :] = k
+        self.v_cache[layer_idx, :batch, :, start_pos:start_pos+seq_len, :] = v
+        return (
+            self.k_cache[layer_idx, :batch, :, :start_pos+seq_len, :],
+            self.v_cache[layer_idx, :batch, :, :start_pos+seq_len, :]
+        )
+    
+    def clear(self):
+        self.k_cache.zero_()
+        self.v_cache.zero_()
+        self.seq_len = 0
+
+cache = KVCache(num_layers=4, num_heads=8, head_dim=64, max_seq_len=512)
+print(f"KV Cache初始化完成")`,
+        tests: [{ type: 'has_class', value: 'KVCache', desc: '定义了KVCache类' }],
+        hints: ['缓存形状: (layers, batch, heads, seq, dim)', 'update时覆盖对应位置'],
+        guide: { steps: [
+            { title: '为什么需要KV Cache?', content: '在自回归生成中，每次生成新token时，之前的token的K和V是不变的。缓存它们可以避免重复计算，将复杂度从O(n²)降到O(n)。' },
+            { title: '缓存结构', content: '对于L层Transformer，每层都需要缓存K和V。形状通常是(batch, heads, max_seq_len, head_dim)。' },
+            { title: '更新逻辑', content: '新token的K,V计算后，拼接到缓存末尾。返回完整的K,V用于注意力计算。' }
+        ]}
+    },
+    { id: 'flash_attn_concept', title: 'Flash Attention概念', category: '高级注意力', difficulty: 3,
+        template: `# Flash Attention: IO感知的精确注意力
+# 核心思想: 分块计算，减少HBM访问
+
+import torch
+
+def flash_attention_naive(Q, K, V, block_size=64):
+    """
+    简化版Flash Attention演示
+    实际Flash Attention使用CUDA内核实现
+    
+    关键优化:
+    1. 分块计算，将Q,K,V分成小块
+    2. 在SRAM中完成softmax归一化
+    3. 减少HBM读写次数
+    """
+    batch, num_heads, seq_len, head_dim = Q.shape
+    output = torch.zeros_like(Q)
+    
+    # TODO: 实现分块注意力
+    # 提示: 外层循环遍历Q的块，内层遍历K,V的块
+    pass
+    
+    return output
+
+Q = torch.randn(1, 4, 128, 64)
+K = torch.randn(1, 4, 128, 64)
+V = torch.randn(1, 4, 128, 64)
+print("Flash Attention概念演示")`,
+        reference: `import torch
+
+def flash_attention_naive(Q, K, V, block_size=64):
+    """
+    简化版Flash Attention演示
+    """
+    batch, num_heads, seq_len, head_dim = Q.shape
+    output = torch.zeros_like(Q)
+    scale = head_dim ** -0.5
+    
+    # 分块计算
+    for i in range(0, seq_len, block_size):
+        q_block = Q[:, :, i:i+block_size, :]
+        block_max = torch.full((batch, num_heads, min(block_size, seq_len-i), 1), float('-inf'))
+        block_sum = torch.zeros(batch, num_heads, min(block_size, seq_len-i), 1)
+        acc = torch.zeros(batch, num_heads, min(block_size, seq_len-i), head_dim)
+        
+        for j in range(0, seq_len, block_size):
+            k_block = K[:, :, j:j+block_size, :]
+            v_block = V[:, :, j:j+block_size, :]
+            
+            scores = torch.matmul(q_block, k_block.transpose(-2, -1)) * scale
+            
+            # Online softmax
+            new_max = torch.maximum(block_max, scores.max(dim=-1, keepdim=True).values)
+            exp_scores = torch.exp(scores - new_max)
+            exp_old = torch.exp(block_max - new_max) * block_sum
+            
+            block_sum = exp_old + exp_scores.sum(dim=-1, keepdim=True)
+            acc = exp_old * acc + torch.matmul(exp_scores, v_block)
+            block_max = new_max
+        
+        output[:, :, i:i+block_size, :] = acc / block_sum
+    
+    return output
+
+Q = torch.randn(1, 4, 128, 64)
+K = torch.randn(1, 4, 128, 64)
+V = torch.randn(1, 4, 128, 64)
+print("Flash Attention概念演示")`,
+        tests: [{ type: 'has_function', value: 'flash_attention_naive', desc: '定义了flash_attention_naive函数' }],
+        hints: ['分块: Q按行分，K/V按列分', 'Online softmax: 增量更新max和sum'],
+        guide: { steps: [
+            { title: 'Flash Attention动机', content: '标准注意力需要O(N²)的HBM读写，成为内存带宽瓶颈。Flash Attention通过分块计算，将读写降到O(N)。' },
+            { title: 'Online Softmax', content: '分块计算softmax需要特殊处理：维护当前最大值和累加和，每次更新时重新归一化之前的结果。' },
+            { title: '实际应用', content: 'PyTorch 2.0+提供了F.scaled_dot_product_attention，会自动选择Flash Attention实现。' }
+        ]}
+    },
+    { id: 'grouped_query_attn', title: '分组查询注意力(GQA)', category: '高级注意力', difficulty: 4,
+        template: `# Grouped Query Attention (GQA)
+# Llama 2/3使用的技术: K,V的头数少于Q的头数
+# 减少KV Cache大小，同时保持性能
+
+import torch
+import torch.nn as nn
+
+class GroupedQueryAttention(nn.Module):
+    def __init__(self, d_model, num_heads, num_kv_heads):
+        """
+        num_heads: Q的头数
+        num_kv_heads: K,V的头数 (通常 num_heads // num_groups)
+        """
+        super().__init__()
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = d_model // num_heads
+        self.num_groups = num_heads // num_kv_heads
+        
+        # TODO: 实现GQA
+        pass
+    
+    def forward(self, x):
+        # TODO: 实现前向传播
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class GroupedQueryAttention(nn.Module):
+    def __init__(self, d_model, num_heads, num_kv_heads):
+        super().__init__()
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = d_model // num_heads
+        self.num_groups = num_heads // num_kv_heads
+        
+        self.wq = nn.Linear(d_model, num_heads * self.head_dim, bias=False)
+        self.wk = nn.Linear(d_model, num_kv_heads * self.head_dim, bias=False)
+        self.wv = nn.Linear(d_model, num_kv_heads * self.head_dim, bias=False)
+        self.wo = nn.Linear(num_heads * self.head_dim, d_model, bias=False)
+    
+    def forward(self, x):
+        batch, seq_len, _ = x.shape
+        
+        q = self.wq(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.wk(x).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.wv(x).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        
+        # 扩展K,V以匹配Q的头数
+        k = k.repeat_interleave(self.num_groups, dim=1)
+        v = v.repeat_interleave(self.num_groups, dim=1)
+        
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        attn = torch.softmax(scores, dim=-1)
+        out = torch.matmul(attn, v)
+        
+        out = out.transpose(1, 2).contiguous().view(batch, seq_len, -1)
+        return self.wo(out)`,
+        tests: [{ type: 'has_class', value: 'GroupedQueryAttention', desc: '定义了GQA类' }],
+        hints: ['K,V头数少于Q', 'repeat_interleave扩展K,V']
+    },
+    { id: 'sliding_window_attn', title: '滑动窗口注意力', category: '高级注意力', difficulty: 3,
+        template: `# Sliding Window Attention (Mistral使用)
+# 每个位置只关注局部窗口内的token
+
+import torch
+
+def create_sliding_window_mask(seq_len, window_size):
+    """
+    创建滑动窗口掩码
+    每个位置只能看到 [i-window_size, i+window_size] 范围内的位置
+    """
+    # TODO: 实现滑动窗口掩码
+    pass
+
+def sliding_window_attention(Q, K, V, window_size):
+    """
+    滑动窗口注意力
+    复杂度从O(N²)降到O(N*W)，W是窗口大小
+    """
+    # TODO: 实现滑动窗口注意力
+    pass
+
+mask = create_sliding_window_mask(16, 4)
+print(f"滑动窗口掩码:\\n{mask.int()}")`,
+        reference: `import torch
+
+def create_sliding_window_mask(seq_len, window_size):
+    # 基础因果掩码
+    causal = torch.tril(torch.ones(seq_len, seq_len))
+    
+    # 滑动窗口: 只保留窗口内的连接
+    for i in range(seq_len):
+        for j in range(seq_len):
+            if j < i - window_size:
+                causal[i, j] = 0
+    
+    return causal.bool()
+
+def sliding_window_attention(Q, K, V, window_size):
+    batch, num_heads, seq_len, head_dim = Q.shape
+    
+    scores = torch.matmul(Q, K.transpose(-2, -1)) / (head_dim ** 0.5)
+    mask = create_sliding_window_mask(seq_len, window_size)
+    scores = scores.masked_fill(~mask, float('-inf'))
+    
+    attn = torch.softmax(scores, dim=-1)
+    return torch.matmul(attn, V)
+
+mask = create_sliding_window_mask(16, 4)
+print(f"滑动窗口掩码:\\n{mask.int()}")`,
+        tests: [{ type: 'has_function', value: 'create_sliding_window_mask', desc: '定义了滑动窗口掩码函数' }],
+        hints: ['因果掩码 + 窗口限制', 'Mistral使用W=4096']
+    },
+
+    // ==================== 训练优化进阶 ====================
+    { id: 'mixed_precision', title: '混合精度训练', category: '训练优化进阶', difficulty: 3,
+        template: `# CS336: 混合精度训练 (Mixed Precision)
+# 使用FP16/BF16加速训练，同时保持FP32精度
+
+import torch
+import torch.nn as nn
+
+class MixedPrecisionTrainer:
+    def __init__(self, model, optimizer, use_grad_scaler=True):
+        self.model = model
+        self.optimizer = optimizer
+        self.use_grad_scaler = use_grad_scaler
+        if use_grad_scaler:
+            self.scaler = torch.amp.GradScaler('cuda')
+        
+    def train_step(self, inputs, targets):
+        """
+        混合精度训练步骤:
+        1. 前向传播使用FP16
+        2. 损失缩放防止下溢
+        3. 反向传播使用缩放后的损失
+        4. 梯度反缩放后更新
+        """
+        # TODO: 实现混合精度训练步骤
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class MixedPrecisionTrainer:
+    def __init__(self, model, optimizer, use_grad_scaler=True):
+        self.model = model
+        self.optimizer = optimizer
+        self.use_grad_scaler = use_grad_scaler
+        if use_grad_scaler:
+            self.scaler = torch.amp.GradScaler('cuda')
+    
+    def train_step(self, inputs, targets):
+        self.optimizer.zero_grad()
+        
+        with torch.amp.autocast('cuda'):
+            outputs = self.model(inputs)
+            loss = nn.functional.cross_entropy(outputs, targets)
+        
+        if self.use_grad_scaler:
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            self.optimizer.step()
+        
+        return loss.item()`,
+        tests: [{ type: 'has_class', value: 'MixedPrecisionTrainer', desc: '定义了混合精度训练器' }],
+        hints: ['autocast上下文管理器', 'GradScaler处理梯度缩放'],
+        guide: { steps: [
+            { title: '为什么混合精度?', content: 'FP16计算速度快2-8倍，内存占用减半。但FP16范围小，容易溢出或下溢。' },
+            { title: '损失缩放', content: 'FP16梯度可能太小（下溢），缩放损失可以让梯度保持在FP16可表示范围内。' },
+            { title: 'BF16替代', content: 'BF16有更大的动态范围，不需要损失缩放。Ampere+GPU支持BF16。' }
+        ]}
+    },
+    { id: 'gradient_accumulation', title: '梯度累积', category: '训练优化进阶', difficulty: 2,
+        template: `# CS336: 梯度累积
+# 模拟更大的batch size
+
+import torch
+
+def train_with_gradient_accumulation(model, dataloader, optimizer, accumulation_steps=4):
+    """
+    梯度累积训练:
+    - 每accumulation_steps步才更新一次参数
+    - 等效batch_size = batch_size * accumulation_steps
+    """
+    model.train()
+    optimizer.zero_grad()
+    
+    total_loss = 0
+    for i, (inputs, targets) in enumerate(dataloader):
+        # TODO: 实现梯度累积逻辑
+        pass
+    
+    return total_loss`,
+        reference: `import torch
+
+def train_with_gradient_accumulation(model, dataloader, optimizer, accumulation_steps=4):
+    model.train()
+    optimizer.zero_grad()
+    
+    total_loss = 0
+    for i, (inputs, targets) in enumerate(dataloader):
+        outputs = model(inputs)
+        loss = torch.nn.functional.cross_entropy(outputs, targets)
+        
+        # 归一化损失
+        loss = loss / accumulation_steps
+        loss.backward()
+        
+        total_loss += loss.item()
+        
+        # 每accumulation_steps步更新一次
+        if (i + 1) % accumulation_steps == 0:
+            # 可选: 梯度裁剪
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+    
+    return total_loss`,
+        tests: [{ type: 'has_function', value: 'train_with_gradient_accumulation', desc: '定义了梯度累积训练函数' }],
+        hints: ['loss /= accumulation_steps', '每N步才optimizer.step()']
+    },
+    { id: 'activation_checkpointing', title: '激活检查点', category: '训练优化进阶', difficulty: 3,
+        template: `# CS336: 激活检查点 (Activation Checkpointing)
+# 牺牲 compute 换 memory: 不保存中间激活，反向时重新计算
+
+import torch
+import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
+
+class CheckpointedTransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, d_ff, use_checkpoint=True):
+        super().__init__()
+        self.use_checkpoint = use_checkpoint
+        # TODO: 初始化Transformer块组件
+        pass
+    
+    def _forward(self, x):
+        """实际的前向计算"""
+        pass
+    
+    def forward(self, x):
+        """带检查点的前向传播"""
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
+
+class CheckpointedTransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, d_ff, use_checkpoint=True):
+        super().__init__()
+        self.use_checkpoint = use_checkpoint
+        self.norm1 = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.GELU(),
+            nn.Linear(d_ff, d_model)
+        )
+    
+    def _forward(self, x):
+        x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x), need_weights=False)[0]
+        x = x + self.ff(self.norm2(x))
+        return x
+    
+    def forward(self, x):
+        if self.use_checkpoint and self.training:
+            return checkpoint(self._forward, x, use_reentrant=False)
+        return self._forward(x)`,
+        tests: [{ type: 'has_class', value: 'CheckpointedTransformerBlock', desc: '定义了检查点块' }],
+        hints: ['torch.utils.checkpoint.checkpoint', 'training时启用，推理时禁用']
+    },
+    { id: 'gradient_clipping_detail', title: '梯度裁剪详解', category: '训练优化进阶', difficulty: 3,
+        template: `# CS336: 梯度裁剪详解
+# 防止梯度爆炸，稳定训练
+
+import torch
+
+def clip_grad_by_norm(params, max_norm):
+    """按全局范数裁剪"""
+    # TODO: 实现全局范数裁剪
+    pass
+
+def clip_grad_by_value(params, min_val, max_val):
+    """按值裁剪"""
+    # TODO: 实现值裁剪
+    pass
+
+def clip_grad_by_norm_per_param(params, max_norm):
+    """每个参数单独按范数裁剪"""
+    # TODO: 实现逐参数范数裁剪
+    pass
+
+# 测试
+params = [torch.nn.Parameter(torch.randn(10) * 10) for _ in range(3)]
+for p in params:
+    p.grad = torch.randn(10) * 5
+
+total_norm = clip_grad_by_norm(params, max_norm=1.0)
+print(f"裁剪前总范数: {total_norm:.4f}")`,
+        reference: `import torch
+
+def clip_grad_by_norm(params, max_norm):
+    """按全局范数裁剪"""
+    total_norm = 0
+    for p in params:
+        if p.grad is not None:
+            total_norm += p.grad.data.norm() ** 2
+    total_norm = total_norm ** 0.5
+    
+    clip_coef = max_norm / (total_norm + 1e-6)
+    if clip_coef < 1:
+        for p in params:
+            if p.grad is not None:
+                p.grad.data.mul_(clip_coef)
+    return total_norm
+
+def clip_grad_by_value(params, min_val, max_val):
+    """按值裁剪"""
+    for p in params:
+        if p.grad is not None:
+            p.grad.data.clamp_(min_val, max_val)
+
+def clip_grad_by_norm_per_param(params, max_norm):
+    """每个参数单独按范数裁剪"""
+    for p in params:
+        if p.grad is not None:
+            norm = p.grad.data.norm()
+            if norm > max_norm:
+                p.grad.data.mul_(max_norm / norm)
+
+params = [torch.nn.Parameter(torch.randn(10) * 10) for _ in range(3)]
+for p in params:
+    p.grad = torch.randn(10) * 5
+
+total_norm = clip_grad_by_norm(params, max_norm=1.0)
+print(f"裁剪前总范数: {total_norm:.4f}")`,
+        tests: [{ type: 'has_function', value: 'clip_grad_by_norm', desc: '定义了梯度裁剪函数' }],
+        hints: ['全局范数: 所有参数梯度的L2范数', 'clip_coef < 1时才需要裁剪']
+    },
+
+    // ==================== 模型评估 ====================
+    { id: 'perplexity_detail', title: '困惑度详解', category: '模型评估', difficulty: 2,
+        template: `# CS336: 困惑度计算详解
+# Perplexity = exp(交叉熵损失)
+# 表示模型对下一个token的平均分支因子
+
+import torch
+import torch.nn.functional as F
+
+def compute_perplexity(model, dataloader, device='cpu'):
+    """
+    计算模型在数据集上的困惑度
+    """
+    model.eval()
+    total_loss = 0
+    total_tokens = 0
+    
+    with torch.no_grad():
+        for inputs, targets in dataloader:
+            # TODO: 实现困惑度计算
+            pass
+    
+    return torch.exp(torch.tensor(total_loss / total_tokens))
+
+def compute_perplexity_per_token(logits, targets):
+    """
+    计算每个token的困惑度贡献
+    logits: (batch, seq_len, vocab_size)
+    targets: (batch, seq_len)
+    """
+    # TODO: 实现逐token困惑度
+    pass`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def compute_perplexity(model, dataloader, device='cpu'):
+    model.eval()
+    total_loss = 0
+    total_tokens = 0
+    
+    with torch.no_grad():
+        for inputs, targets in dataloader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            logits = model(inputs)
+            
+            # 重塑为 (batch*seq_len, vocab_size)
+            logits = logits.view(-1, logits.size(-1))
+            targets = targets.view(-1)
+            
+            loss = F.cross_entropy(logits, targets, reduction='sum')
+            total_loss += loss.item()
+            total_tokens += targets.numel()
+    
+    return torch.exp(torch.tensor(total_loss / total_tokens))
+
+def compute_perplexity_per_token(logits, targets):
+    batch, seq_len, vocab_size = logits.shape
+    logits = logits.view(-1, vocab_size)
+    targets = targets.view(-1)
+    
+    log_probs = F.log_softmax(logits, dim=-1)
+    token_log_probs = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+    
+    return torch.exp(-token_log_probs).view(batch, seq_len)`,
+        tests: [{ type: 'has_function', value: 'compute_perplexity', desc: '定义了困惑度计算函数' }],
+        hints: ['PPL = exp(cross_entropy)', '使用reduction=sum统计总损失']
+    },
+    { id: 'benchmark_inference', title: '推理基准测试', category: '模型评估', difficulty: 3,
+        template: `# CS336: 推理性能基准测试
+
+import torch
+import time
+
+def benchmark_generation(model, input_ids, max_new_tokens, warmup=3, runs=10):
+    """
+    测量生成性能
+    返回: tokens/second, latency
+    """
+    model.eval()
+    
+    # TODO: 实现基准测试
+    # 1. warmup运行
+    # 2. 多次运行取平均
+    pass
+
+def measure_memory_usage(model, input_shape):
+    """
+    测量模型内存占用
+    """
+    # TODO: 实现内存测量
+    pass
+
+def count_parameters(model):
+    """统计模型参数量"""
+    # TODO: 实现参数统计
+    pass`,
+        reference: `import torch
+import time
+
+def benchmark_generation(model, input_ids, max_new_tokens, warmup=3, runs=10):
+    model.eval()
+    
+    # Warmup
+    for _ in range(warmup):
+        with torch.no_grad():
+            _ = model.generate(input_ids, max_new_tokens=max_new_tokens)
+    
+    # Benchmark
+    latencies = []
+    for _ in range(runs):
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        start = time.perf_counter()
+        
+        with torch.no_grad():
+            output = model.generate(input_ids, max_new_tokens=max_new_tokens)
+        
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        latencies.append(time.perf_counter() - start)
+    
+    avg_latency = sum(latencies) / len(latencies)
+    tokens_per_sec = max_new_tokens / avg_latency
+    
+    return {
+        'tokens_per_second': tokens_per_sec,
+        'latency': avg_latency,
+        'output_tokens': max_new_tokens
+    }
+
+def measure_memory_usage(model, input_shape):
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+        input_ids = torch.randint(0, 1000, input_shape).cuda()
+        with torch.no_grad():
+            _ = model(input_ids)
+        return torch.cuda.max_memory_allocated() / 1024**2  # MB
+    return None
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())`,
+        tests: [{ type: 'has_function', value: 'benchmark_generation', desc: '定义了基准测试函数' }],
+        hints: ['warmup预热', '多次运行取平均']
+    },
+    { id: 'model_comparison', title: '模型配置对比', category: '模型评估', difficulty: 2,
+        template: `# CS336: 不同模型配置对比
+
+def compare_model_configs():
+    """
+    对比不同规模模型的参数量和计算量
+    """
+    configs = [
+        {'name': 'GPT-2 Small', 'd_model': 768, 'layers': 12, 'heads': 12, 'd_ff': 3072},
+        {'name': 'GPT-2 Medium', 'd_model': 1024, 'layers': 24, 'heads': 16, 'd_ff': 4096},
+        {'name': 'GPT-2 Large', 'd_model': 1280, 'layers': 36, 'heads': 20, 'd_ff': 5120},
+        {'name': 'GPT-2 XL', 'd_model': 1600, 'layers': 48, 'heads': 25, 'd_ff': 6400},
+    ]
+    
+    vocab_size = 50257
+    seq_len = 1024
+    
+    # TODO: 计算每个配置的参数量和FLOPs
+    for config in configs:
+        pass`,
+        reference: `def compare_model_configs():
+    configs = [
+        {'name': 'GPT-2 Small', 'd_model': 768, 'layers': 12, 'heads': 12, 'd_ff': 3072},
+        {'name': 'GPT-2 Medium', 'd_model': 1024, 'layers': 24, 'heads': 16, 'd_ff': 4096},
+        {'name': 'GPT-2 Large', 'd_model': 1280, 'layers': 36, 'heads': 20, 'd_ff': 5120},
+        {'name': 'GPT-2 XL', 'd_model': 1600, 'layers': 48, 'heads': 25, 'd_ff': 6400},
+    ]
+    
+    vocab_size = 50257
+    seq_len = 1024
+    
+    print(f"{'模型':<15} {'参数量':>12} {'FLOPs/Token':>15}")
+    print("-" * 45)
+    
+    for c in configs:
+        d, L, d_ff = c['d_model'], c['layers'], c['d_ff']
+        
+        # 参数量
+        embed = vocab_size * d
+        pos = seq_len * d
+        layer = 4 * d * d + 3 * d * d_ff + 2 * d  # attn + ffn + ln
+        output = vocab_size * d
+        params = embed + pos + L * layer + output
+        
+        # FLOPs per token
+        flops = L * (4 * d * d + 3 * d * d_ff + 2 * d * d)
+        
+        print(f"{c['name']:<15} {params/1e6:>10.1f}M {flops/1e9:>12.2f}G")
+
+compare_model_configs()`,
+        tests: [{ type: 'has_function', value: 'compare_model_configs', desc: '定义了模型对比函数' }],
+        hints: ['参数量 = 嵌入 + 层 × 每层参数 + 输出', 'FLOPs ≈ 6 × 参数量 × 序列长度']
+    },
+
+    // ==================== BPE进阶 ====================
+    { id: 'bpe_train', title: 'BPE训练完整流程', category: 'BPE进阶', difficulty: 4,
+        template: `# CS336: BPE训练完整流程
+import re
+from collections import defaultdict
+
+class BPETokenizer:
+    def __init__(self, vocab_size=256):
+        self.vocab_size = vocab_size
+        self.merges = []
+        self.vocab = {bytes([i]): i for i in range(256)}
+    
+    def train(self, text, num_merges):
+        """
+        训练BPE:
+        1. 将文本转为字节序列
+        2. 统计字节对频率
+        3. 合并最高频字节对
+        4. 重复直到达到目标词汇量
+        """
+        # TODO: 实现BPE训练
+        pass
+    
+    def encode(self, text):
+        """编码文本"""
+        # TODO: 实现编码
+        pass
+    
+    def decode(self, tokens):
+        """解码tokens"""
+        # TODO: 实现解码
+        pass
+
+text = "hello world! hello there!"
+tokenizer = BPETokenizer()
+print("BPE训练器初始化完成")`,
+        reference: `import re
+from collections import defaultdict
+
+class BPETokenizer:
+    def __init__(self, vocab_size=256):
+        self.vocab_size = vocab_size
+        self.merges = []
+        self.vocab = {bytes([i]): i for i in range(256)}
+    
+    def _get_stats(self, word_freqs):
+        pairs = defaultdict(int)
+        for word, freq in word_freqs.items():
+            for i in range(len(word) - 1):
+                pairs[(word[i], word[i+1])] += freq
+        return pairs
+    
+    def _merge(self, word_freqs, pair):
+        new_freqs = {}
+        bigram = pair
+        replacement = pair[0] + pair[1]
+        for word, freq in word_freqs.items():
+            new_word = []
+            i = 0
+            while i < len(word):
+                if i < len(word) - 1 and word[i] == bigram[0] and word[i+1] == bigram[1]:
+                    new_word.append(replacement)
+                    i += 2
+                else:
+                    new_word.append(word[i])
+                    i += 1
+            new_freqs[tuple(new_word)] = freq
+        return new_freqs
+    
+    def train(self, text, num_merges):
+        # 分词并统计频率
+        words = re.findall(r'\\w+|\\s+|[^\\w\\s]', text)
+        word_freqs = defaultdict(int)
+        for word in words:
+            word_freqs[tuple(word.encode('utf-8'))] += 1
+        
+        for _ in range(num_merges):
+            pairs = self._get_stats(word_freqs)
+            if not pairs:
+                break
+            best = max(pairs, key=pairs.get)
+            word_freqs = self._merge(word_freqs, best)
+            self.merges.append(best)
+            self.vocab[best[0] + best[1]] = len(self.vocab)
+    
+    def encode(self, text):
+        tokens = list(text.encode('utf-8'))
+        for a, b in self.merges:
+            i = 0
+            new_tokens = []
+            while i < len(tokens):
+                if i < len(tokens) - 1 and tokens[i] == a and tokens[i+1] == b:
+                    new_tokens.append(a + b)
+                    i += 2
+                else:
+                    new_tokens.append(tokens[i])
+                    i += 1
+            tokens = new_tokens
+        return tokens
+    
+    def decode(self, tokens):
+        return b''.join(t if isinstance(t, bytes) else bytes([t]) for t in tokens).decode('utf-8', errors='replace')
+
+text = "hello world! hello there!"
+tokenizer = BPETokenizer()
+print("BPE训练器初始化完成")`,
+        tests: [{ type: 'has_class', value: 'BPETokenizer', desc: '定义了BPE分词器类' }],
+        hints: ['训练: 统计->合并->重复', '编码: 按顺序应用合并规则']
+    },
+    { id: 'bpe_regex', title: 'BPE正则分词', category: 'BPE进阶', difficulty: 3,
+        template: `# CS336: BPE预分词 (GPT-2风格)
+# 使用正则表达式将文本分割成词元
+
+import re
+
+def gpt2_pre_tokenize(text):
+    """
+    GPT-2的预分词模式
+    将文本分割为: 词、空格、标点等
+    """
+    # GPT-2使用的正则模式
+    pattern = r'''(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+
+    '''
+    # TODO: 实现预分词
+    pass
+
+def simple_pre_tokenize(text):
+    """简化版预分词"""
+    # TODO: 实现简化版
+    pass
+
+text = "Hello, World! This is GPT-2's tokenizer."
+print(f"原文: {text}")`,
+        reference: `import re
+
+def gpt2_pre_tokenize(text):
+    """
+    GPT-2的预分词模式
+    """
+    # 简化版正则 (完整版需要regex库)
+    pattern = r''''[a-z]+|[^\\s\\w]+|\\w+|\\s+'''
+    tokens = re.findall(pattern, text)
+    return tokens
+
+def simple_pre_tokenize(text):
+    """简化版预分词: 分离词、空格、标点"""
+    tokens = []
+    current = ''
+    current_type = None
+    
+    for char in text:
+        if char.isalpha():
+            char_type = 'alpha'
+        elif char.isdigit():
+            char_type = 'digit'
+        elif char.isspace():
+            char_type = 'space'
+        else:
+            char_type = 'punct'
+        
+        if current_type != char_type and current:
+            tokens.append(current)
+            current = ''
+        current += char
+        current_type = char_type
+    
+    if current:
+        tokens.append(current)
+    
+    return tokens
+
+text = "Hello, World! This is GPT-2's tokenizer."
+print(f"原文: {text}")
+print(f"预分词: {simple_pre_tokenize(text)}")`,
+        tests: [{ type: 'has_function', value: 'simple_pre_tokenize', desc: '定义了预分词函数' }],
+        hints: ['按字符类型分组', '字母、数字、空格、标点分开']
+    },
+    { id: 'bpe_special_tokens', title: 'BPE特殊Token', category: 'BPE进阶', difficulty: 2,
+        template: `# CS336: BPE特殊Token处理
+
+class TokenizerWithSpecial:
+    def __init__(self, special_tokens=None):
+        """
+        special_tokens: 特殊token映射
+        例如: {'<|endoftext|>': 50256, '<|pad|>': 50257}
+        """
+        self.special_tokens = special_tokens or {}
+        self.special_tokens_pattern = None
+        # TODO: 构建特殊token的正则匹配模式
+        pass
+    
+    def encode(self, text, add_special=False):
+        """编码，处理特殊token"""
+        # TODO: 实现带特殊token的编码
+        pass
+    
+    def decode(self, tokens, skip_special=True):
+        """解码，可选跳过特殊token"""
+        # TODO: 实现解码
+        pass
+
+tokenizer = TokenizerWithSpecial({
+    '<|endoftext|>': 50256,
+    '<|pad|>': 50257,
+    '<|unk|>': 50258
+})
+print("特殊Token分词器初始化完成")`,
+        reference: `import re
+
+class TokenizerWithSpecial:
+    def __init__(self, special_tokens=None):
+        self.special_tokens = special_tokens or {}
+        self.inverse_special = {v: k for k, v in self.special_tokens.items()}
+        
+        if self.special_tokens:
+            # 按长度降序排列，优先匹配更长的token
+            sorted_special = sorted(self.special_tokens.keys(), key=len, reverse=True)
+            pattern = '|'.join(re.escape(t) for t in sorted_special)
+            self.special_tokens_pattern = re.compile(f'({pattern})')
+    
+    def encode(self, text, add_special=False):
+        if not self.special_tokens:
+            return list(text.encode('utf-8'))
+        
+        # 分割文本，保留特殊token
+        parts = self.special_tokens_pattern.split(text)
+        tokens = []
+        
+        for part in parts:
+            if part in self.special_tokens:
+                tokens.append(self.special_tokens[part])
+            elif part:
+                tokens.extend(list(part.encode('utf-8')))
+        
+        return tokens
+    
+    def decode(self, tokens, skip_special=True):
+        result = []
+        for t in tokens:
+            if t in self.inverse_special:
+                if not skip_special:
+                    result.append(self.inverse_special[t])
+            else:
+                result.append(bytes([t]))
+        return b''.join(result).decode('utf-8', errors='replace')
+
+tokenizer = TokenizerWithSpecial({
+    '<|endoftext|>': 50256,
+    '<|pad|>': 50257,
+    '<|unk|>': 50258
+})
+print("特殊Token分词器初始化完成")`,
+        tests: [{ type: 'has_class', value: 'TokenizerWithSpecial', desc: '定义了带特殊token的分词器' }],
+        hints: ['正则分割保留特殊token', '解码时可跳过特殊token']
+    },
+
+    // ==================== 文本生成进阶 ====================
+    { id: 'beam_search', title: '束搜索', category: '文本生成进阶', difficulty: 4,
+        template: `# CS336: 束搜索 (Beam Search)
+import torch
+import torch.nn.functional as F
+
+def beam_search(model, input_ids, max_new_tokens, beam_size=4, length_penalty=1.0):
+    """
+    束搜索: 保持beam_size个候选序列
+    """
+    # TODO: 实现束搜索
+    pass`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def beam_search(model, input_ids, max_new_tokens, beam_size=4, length_penalty=1.0):
+    model.eval()
+    
+    with torch.no_grad():
+        beams = [(input_ids, 0.0)]
+        
+        for _ in range(max_new_tokens):
+            candidates = []
+            
+            for seq, log_prob in beams:
+                logits = model(seq)
+                log_probs = F.log_softmax(logits[:, -1, :], dim=-1)
+                top_log_probs, top_indices = log_probs.topk(beam_size)
+                
+                for i in range(beam_size):
+                    new_seq = torch.cat([seq, top_indices[:, i:i+1]], dim=-1)
+                    new_log_prob = log_prob + top_log_probs[0, i].item()
+                    candidates.append((new_seq, new_log_prob))
+            
+            candidates.sort(key=lambda x: x[1] / (x[0].shape[1] ** length_penalty), reverse=True)
+            beams = candidates[:beam_size]
+        
+        return beams[0][0]`,
+        tests: [{ type: 'has_function', value: 'beam_search', desc: '定义了beam_search函数' }],
+        hints: ['保持beam_size个候选', '按长度归一化分数']
+    },
+    { id: 'repetition_penalty', title: '重复惩罚', category: '文本生成进阶', difficulty: 2,
+        template: `# CS336: 重复惩罚
+import torch
+import torch.nn.functional as F
+
+def apply_repetition_penalty(logits, generated_tokens, penalty=1.2):
+    """对已生成的token施加惩罚"""
+    # TODO: 实现重复惩罚
+    pass
+
+logits = torch.randn(1, 100)
+generated = torch.tensor([[1, 5, 10, 5, 1]])
+penalized = apply_repetition_penalty(logits, generated, penalty=1.5)
+print("重复惩罚应用完成")`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def apply_repetition_penalty(logits, generated_tokens, penalty=1.2):
+    batch_size, vocab_size = logits.shape
+    
+    for b in range(batch_size):
+        unique_tokens = set(generated_tokens[b].tolist())
+        for token in unique_tokens:
+            if logits[b, token] > 0:
+                logits[b, token] /= penalty
+            else:
+                logits[b, token] *= penalty
+    
+    return logits
+
+logits = torch.randn(1, 100)
+generated = torch.tensor([[1, 5, 10, 5, 1]])
+penalized = apply_repetition_penalty(logits, generated, penalty=1.5)
+print("重复惩罚应用完成")`,
+        tests: [{ type: 'has_function', value: 'apply_repetition_penalty', desc: '定义了重复惩罚函数' }],
+        hints: ['正logits除以penalty', '负logits乘以penalty']
+    },
+    { id: 'temperature_sampling', title: '温度采样详解', category: '文本生成进阶', difficulty: 2,
+        template: `# CS336: 温度采样详解
+import torch
+import torch.nn.functional as F
+
+def sample_with_temperature(logits, temperature=1.0):
+    """温度采样控制多样性"""
+    # TODO: 实现温度采样
+    pass
+
+def compare_temperatures(logits, temperatures=[0.5, 1.0, 1.5, 2.0]):
+    """对比不同温度下的概率分布"""
+    # TODO: 实现温度对比
+    pass
+
+logits = torch.tensor([[1.0, 2.0, 3.0, 0.5, 0.1]])
+print("温度采样演示")`,
+        reference: `import torch
+import torch.nn.functional as F
+
+def sample_with_temperature(logits, temperature=1.0):
+    if temperature == 0:
+        return logits.argmax(dim=-1)
+    
+    logits = logits / temperature
+    probs = F.softmax(logits, dim=-1)
+    return torch.multinomial(probs, 1).squeeze(-1)
+
+def compare_temperatures(logits, temperatures=[0.5, 1.0, 1.5, 2.0]):
+    print("温度对概率分布的影响:")
+    for temp in temperatures:
+        scaled = logits / temp
+        probs = F.softmax(scaled, dim=-1)
+        print(f"T={temp}: {probs[0].tolist()}")
+
+logits = torch.tensor([[1.0, 2.0, 3.0, 0.5, 0.1]])
+compare_temperatures(logits)`,
+        tests: [{ type: 'has_function', value: 'sample_with_temperature', desc: '定义了温度采样函数' }],
+        hints: ['logits / temperature缩放', 'temperature=0时用argmax']
+    },
+
+    // ==================== 模型量化 ====================
+    { id: 'quantization_intro', title: '量化基础概念', category: '模型量化', difficulty: 2,
+        template: `# CS336: 模型量化基础
+import torch
+
+def quantize_to_int8(tensor):
+    """将FP32张量量化为INT8"""
+    # TODO: 实现INT8量化
+    pass
+
+def dequantize_from_int8(quantized, scale):
+    """从INT8反量化回FP32"""
+    # TODO: 实现反量化
+    pass
+
+x = torch.randn(4, 8)
+quantized, scale = quantize_to_int8(x)
+print(f"原始: {x.shape}, 量化后: {quantized.shape}")`,
+        reference: `import torch
+
+def quantize_to_int8(tensor):
+    max_val = tensor.abs().max()
+    scale = max_val / 127.0
+    quantized = torch.clamp(torch.round(tensor / scale), -128, 127).to(torch.int8)
+    return quantized, scale
+
+def dequantize_from_int8(quantized, scale):
+    return quantized.float() * scale
+
+x = torch.randn(4, 8)
+quantized, scale = quantize_to_int8(x)
+reconstructed = dequantize_from_int8(quantized, scale)
+
+print(f"原始: {x.shape}, 量化后: {quantized.shape}")
+print(f"量化误差: {(x - reconstructed).abs().mean():.6f}")`,
+        tests: [{ type: 'has_function', value: 'quantize_to_int8', desc: '定义了量化函数' }],
+        hints: ['scale = max(abs(x)) / 127', 'round + clamp到[-128, 127]']
+    },
+    { id: 'dynamic_quantization', title: '动态量化', category: '模型量化', difficulty: 3,
+        template: `# CS336: 动态量化
+import torch
+import torch.nn as nn
+
+def apply_dynamic_quantization(model):
+    """应用PyTorch动态量化"""
+    # TODO: 实现动态量化
+    pass
+
+class SimpleModel(nn.Module):
+    def __init__(self, d_model=256, d_ff=512):
+        super().__init__()
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc2 = nn.Linear(d_ff, d_model)
+    
+    def forward(self, x):
+        return self.fc2(torch.relu(self.fc1(x)))
+
+model = SimpleModel()
+print(f"原始模型参数: {sum(p.numel() for p in model.parameters()):,}")`,
+        reference: `import torch
+import torch.nn as nn
+
+def apply_dynamic_quantization(model):
+    quantized_model = torch.quantization.quantize_dynamic(
+        model,
+        {nn.Linear},
+        dtype=torch.qint8
+    )
+    return quantized_model
+
+class SimpleModel(nn.Module):
+    def __init__(self, d_model=256, d_ff=512):
+        super().__init__()
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc2 = nn.Linear(d_ff, d_model)
+    
+    def forward(self, x):
+        return self.fc2(torch.relu(self.fc1(x)))
+
+model = SimpleModel()
+quantized = apply_dynamic_quantization(model)
+
+print(f"原始模型参数: {sum(p.numel() for p in model.parameters()):,}")
+print(f"量化后模型大小约减少4倍 (FP32 -> INT8)")`,
+        tests: [{ type: 'has_function', value: 'apply_dynamic_quantization', desc: '定义了动态量化函数' }],
+        hints: ['torch.quantization.quantize_dynamic', '量化nn.Linear层']
+    },
+
+    // ==================== 分布式训练 ====================
+    { id: 'ddp_concept', title: '分布式数据并行概念', category: '分布式训练', difficulty: 3,
+        template: `# CS336: 分布式数据并行 (DDP) 概念
+import torch
+import torch.nn as nn
+
+class DDPConcept:
+    """DDP核心概念演示"""
+    
+    def __init__(self, model, num_gpus=4):
+        # TODO: 初始化DDP概念
+        pass
+    
+    def forward_backward_step(self, batch_per_gpu):
+        """模拟DDP的前向和反向步骤"""
+        # TODO: 实现模拟步骤
+        pass
+
+print("DDP概念演示 - 实际使用需要多GPU环境")`,
+        reference: `import torch
+import torch.nn as nn
+
+class DDPConcept:
+    def __init__(self, model, num_gpus=4):
+        self.model = model
+        self.num_gpus = num_gpus
+    
+    def forward_backward_step(self, batch_per_gpu):
+        outputs = []
+        losses = []
+        
+        for gpu_id in range(self.num_gpus):
+            x, y = batch_per_gpu[gpu_id]
+            output = self.model(x)
+            loss = nn.functional.cross_entropy(output, y)
+            outputs.append(output)
+            losses.append(loss)
+        
+        avg_loss = sum(losses) / len(losses)
+        return avg_loss
+
+print("DDP概念演示 - 实际使用需要多GPU环境")
+print("实际代码: model = nn.parallel.DistributedDataParallel(model)")`,
+        tests: [{ type: 'has_class', value: 'DDPConcept', desc: '定义了DDP概念类' }],
+        hints: ['每个GPU处理不同数据', '梯度在all-reduce中同步']
+    },
+    { id: 'gradient_allreduce', title: '梯度All-Reduce', category: '分布式训练', difficulty: 3,
+        template: `# CS336: All-Reduce梯度同步
+import torch
+
+def simulate_all_reduce(gradients_list):
+    """模拟All-Reduce操作"""
+    # TODO: 实现All-Reduce模拟
+    pass
+
+def ring_all_reduce_concept(local_grad, num_workers=4):
+    """Ring All-Reduce概念演示"""
+    # TODO: 演示Ring All-Reduce
+    pass
+
+grads = [torch.randn(10) for _ in range(4)]
+result = simulate_all_reduce(grads)
+print(f"All-Reduce结果: {result}")`,
+        reference: `import torch
+
+def simulate_all_reduce(gradients_list):
+    stacked = torch.stack(gradients_list, dim=0)
+    return stacked.mean(dim=0)
+
+def ring_all_reduce_concept(local_grad, num_workers=4):
+    print(f"Ring All-Reduce需要{2*(num_workers-1)}次通信步骤")
+    print(f"每次发送 1/num_workers 的数据量")
+    return local_grad
+
+grads = [torch.randn(10) for _ in range(4)]
+result = simulate_all_reduce(grads)
+print(f"All-Reduce结果: {result}")
+print(f"每个GPU收到相同的平均梯度")`,
+        tests: [{ type: 'has_function', value: 'simulate_all_reduce', desc: '定义了All-Reduce模拟函数' }],
+        hints: ['平均所有梯度', 'Ring All-Reduce效率高']
+    },
+
+    // ==================== 综合项目 ====================
+    { id: 'project_mini_gpt', title: '项目: MiniGPT', category: '综合项目', difficulty: 5,
+        template: `# 项目: 实现MiniGPT
+import torch
+import torch.nn as nn
+
+class MiniGPT(nn.Module):
+    def __init__(self, vocab_size=1000, d_model=128, num_layers=4, 
+                 num_heads=4, d_ff=512, max_seq_len=256):
+        super().__init__()
+        # TODO: 实现MiniGPT
+        pass
+    
+    def forward(self, input_ids):
+        pass
+    
+    def generate(self, input_ids, max_new_tokens, temperature=1.0):
+        pass`,
+        reference: `import torch
+import torch.nn as nn
+
+class MiniGPT(nn.Module):
+    def __init__(self, vocab_size=1000, d_model=128, num_layers=4,
+                 num_heads=4, d_ff=512, max_seq_len=256):
+        super().__init__()
+        self.token_emb = nn.Embedding(vocab_size, d_model)
+        self.pos_emb = nn.Parameter(torch.randn(max_seq_len, d_model))
+        self.layers = nn.ModuleList([
+            nn.TransformerEncoderLayer(d_model, num_heads, d_ff, batch_first=True)
+            for _ in range(num_layers)
+        ])
+        self.norm = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size)
+    
+    def forward(self, input_ids):
+        x = self.token_emb(input_ids) + self.pos_emb[:input_ids.size(1)]
+        for layer in self.layers:
+            x = layer(x)
+        return self.lm_head(self.norm(x))
+    
+    @torch.no_grad()
+    def generate(self, input_ids, max_new_tokens, temperature=1.0):
+        for _ in range(max_new_tokens):
+            logits = self(input_ids)[:, -1, :] / temperature
+            probs = torch.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, 1)
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
+        return input_ids`,
+        tests: [{ type: 'has_class', value: 'MiniGPT', desc: '定义了MiniGPT类' }],
+        hints: ['组合: Embedding + TransformerBlocks + LMHead', 'generate: 自回归生成']
+    },
+    { id: 'free', title: '自由练习', category: '自由练习', difficulty: 1,
+        template: `# 自由练习区 - 编写任何Python代码
+print("Hello, MiniMind!")`,
+        reference: `print("Hello, MiniMind!")`,
+        tests: []
+    }
+];
+
+        let currentExercise = null;
+        let completedExercises = new Set();
+        let failedExercises = new Set();
+        let pyodideInstance = null;
+        let pyodideLoading = false;
+        let currentCategory = 'all';
+
+        let pyodideLoadAttempts = 0;
+        const MAX_LOAD_ATTEMPTS = 3;
+
+        async function initPyodide() {
+            if (pyodideInstance) return pyodideInstance;
+            if (pyodideLoading) {
+                while (pyodideLoading) await new Promise(r => setTimeout(r, 100));
+                return pyodideInstance;
+            }
+            pyodideLoading = true;
+            
+            const loadingText = document.querySelector('.loading-text');
+            const updateLoadingText = (text) => {
+                if (loadingText) loadingText.textContent = text;
+            };
+            
+            try {
+                updateLoadingText('正在加载 Python 运行环境...');
+                
+                if (typeof loadPyodide === 'undefined') {
+                    updateLoadingText('正在从CDN加载Pyodide脚本...');
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js';
+                        script.onload = resolve;
+                        script.onerror = () => reject(new Error('无法加载Pyodide脚本'));
+                        document.head.appendChild(script);
+                    });
+                }
+                
+                updateLoadingText('正在初始化Python环境...');
+                pyodideInstance = await loadPyodide({ 
+                    indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/",
+                    stdout: (text) => console.log('Python:', text),
+                    stderr: (text) => console.error('Python Error:', text)
+                });
+                
+                updateLoadingText('正在加载numpy...');
+                await pyodideInstance.loadPackage(['numpy']);
+                
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                updateStatus('ready', 'Python 就绪');
+                document.getElementById('outputBox').textContent = '✓ Python 环境已就绪 (Pyodide)';
+                document.getElementById('outputBox').className = 'output-area success';
+                return pyodideInstance;
+            } catch (e) {
+                console.error('Pyodide加载失败:', e);
+                pyodideLoadAttempts++;
+                
+                if (pyodideLoadAttempts < MAX_LOAD_ATTEMPTS) {
+                    updateLoadingText(`加载失败，正在重试 (${pyodideLoadAttempts}/${MAX_LOAD_ATTEMPTS})...`);
+                    pyodideLoading = false;
+                    await new Promise(r => setTimeout(r, 2000));
+                    return initPyodide();
+                }
+                
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                updateStatus('ready', '模拟模式');
+                document.getElementById('outputBox').innerHTML = '⚠ Pyodide加载失败，已切换到模拟模式<br>代码检测功能可用，运行功能受限<br><br>提示: 请通过HTTP服务器访问 (如: python -m http.server 8080)';
+                document.getElementById('outputBox').className = 'output-area';
+                return null;
+            } finally {
+                pyodideLoading = false;
+            }
+        }
+
+        function simulatePythonExecution(code) {
+            let output = '';
+            const lines = code.split('\n');
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                
+                if (trimmed.startsWith('print(')) {
+                    const match = trimmed.match(/print\s*\(\s*(.+)\s*\)/);
+                    if (match) {
+                        let content = match[1];
+                        try {
+                            if (content.startsWith('f"') || content.startsWith("f'")) {
+                                content = content.slice(2, -1);
+                                content = content.replace(/\{[^}]+\}/g, '[变量]');
+                            } else if (content.startsWith('"') || content.startsWith("'")) {
+                                content = content.slice(1, -1);
+                            }
+                            output += content + '\n';
+                        } catch (e) {
+                            output += '[输出内容]\n';
+                        }
+                    }
+                } else if (trimmed.startsWith('#') || trimmed === '') {
+                    continue;
+                } else if (trimmed.includes('def ') || trimmed.includes('class ')) {
+                    output += '[定义已记录]\n';
+                } else if (trimmed.includes('import ')) {
+                    output += '[模块已导入]\n';
+                } else if (trimmed.includes('=') && !trimmed.includes('==')) {
+                    output += '[变量已赋值]\n';
+                }
+            }
+            
+            return output || '[代码已执行 - 模拟模式]';
+        }
+
+        function init() {
+            renderCategoryFilter();
+            renderExerciseList();
+            setupEditor();
+            setupKeyboardShortcuts();
+            loadProgress();
+            if (exercises.length > 0) selectExercise(exercises[0].id);
+            initPyodide();
+        }
+
+        function renderCategoryFilter() {
+            const categories = [...new Set(exercises.map(e => e.category))];
+            const filter = document.getElementById('categoryFilter');
+            filter.innerHTML = `<button class="filter-btn active" onclick="filterCategory('all')">全部</button>` +
+                categories.map(c => `<button class="filter-btn" onclick="filterCategory('${c}')">${c}</button>`).join('');
+        }
+
+        function filterCategory(cat) {
+            currentCategory = cat;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent === (cat === 'all' ? '全部' : cat));
+            });
+            renderExerciseList();
+        }
+
+        function renderExerciseList() {
+            const filtered = currentCategory === 'all' ? exercises : exercises.filter(e => e.category === currentCategory);
+            document.getElementById('filteredCount').textContent = `${filtered.length}/${exercises.length}`;
+            document.getElementById('totalCount').textContent = exercises.length;
+            
+            const list = document.getElementById('exerciseList');
+            list.innerHTML = filtered.map((ex) => {
+                let statusClass = '';
+                if (completedExercises.has(ex.id)) statusClass = 'completed';
+                else if (failedExercises.has(ex.id)) statusClass = 'failed';
+                const globalIdx = exercises.findIndex(e => e.id === ex.id) + 1;
+                return `<li class="exercise-item ${statusClass}" data-id="${ex.id}" onclick="selectExercise('${ex.id}')">
+                    <div class="exercise-number">${globalIdx}</div>
+                    <div class="exercise-info">
+                        <div class="exercise-title">${ex.title}</div>
+                        <div class="exercise-meta">${ex.category} ${'★'.repeat(ex.difficulty || 1)}</div>
+                    </div>
+                </li>`;
+            }).join('');
+            updateProgress();
+        }
+
+        function selectExercise(id) {
+            const ex = exercises.find(e => e.id === id);
+            if (!ex) return;
+            currentExercise = ex;
+            document.querySelectorAll('.exercise-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.id === id) item.classList.add('active');
+            });
+            document.getElementById('codeEditor').value = ex.template;
+            document.getElementById('inputBox').value = ex.defaultInput || '';
+            document.getElementById('outputBox').textContent = '点击"运行"执行代码...';
+            document.getElementById('outputBox').className = 'output-area';
+            document.getElementById('runTime').textContent = '-';
+            updateLineNumbers();
+            updateStatus('ready', '就绪');
+        }
+
+        function updateStatus(status, text) {
+            document.getElementById('statusDot').className = 'status-dot ' + status;
+            document.getElementById('statusText').textContent = text;
+        }
+
+        function updateProgress() {
+            const total = exercises.length;
+            const completed = completedExercises.size;
+            const percent = Math.round((completed / total) * 100);
+            document.getElementById('completedCount').textContent = completed;
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressBar').style.width = percent + '%';
+        }
+
+        function setupEditor() {
+            const editor = document.getElementById('codeEditor');
+            const lineNumbers = document.getElementById('lineNumbers');
+            
+            function updateLineNumbers() {
+                const lines = editor.value.split('\n').length;
+                lineNumbers.innerHTML = Array.from({length: lines}, (_, i) => i + 1).join('<br>');
+            }
+            
+            editor.addEventListener('input', updateLineNumbers);
+            editor.addEventListener('scroll', () => lineNumbers.scrollTop = editor.scrollTop);
+            editor.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const start = editor.selectionStart;
+                    editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(editor.selectionEnd);
+                    editor.selectionStart = editor.selectionEnd = start + 4;
+                    updateLineNumbers();
+                }
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const start = editor.selectionStart;
+                    const beforeCursor = editor.value.substring(0, start);
+                    const currentLine = beforeCursor.split('\n').pop();
+                    const indent = currentLine.match(/^\s*/)[0];
+                    let extraIndent = currentLine.trim().endsWith(':') ? '    ' : '';
+                    const newIndent = indent + extraIndent;
+                    editor.value = beforeCursor + '\n' + newIndent + editor.value.substring(start);
+                    editor.selectionStart = editor.selectionEnd = start + 1 + newIndent.length;
+                    updateLineNumbers();
+                }
+                if (e.ctrlKey && e.key === '/') {
+                    e.preventDefault();
+                    toggleComment();
+                }
+            });
+            updateLineNumbers();
+        }
+
+        function toggleComment() {
+            const editor = document.getElementById('codeEditor');
+            const lines = editor.value.split('\n');
+            const start = editor.selectionStart;
+            let lineIndex = 0, currentLineStart = 0;
+            for (let i = 0; i < lines.length; i++) {
+                if (currentLineStart + lines[i].length >= start) { lineIndex = i; break; }
+                currentLineStart += lines[i].length + 1;
+            }
+            const line = lines[lineIndex];
+            lines[lineIndex] = line.trim().startsWith('#') ? line.replace(/^(\s*)#\s?/, '$1') : line.replace(/^(\s*)/, '$1# ');
+            editor.value = lines.join('\n');
+        }
+
+        const templates = {
+            class: `class ClassName:
+    def __init__(self):
+        pass`,
+            def: `def function_name(param):
+    pass`,
+            for: `for i in range(10):
+    print(i)`,
+            if: `if condition:
+    pass`,
+            import: `import torch
+import torch.nn as nn`,
+            nn_module: `class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, x):
+        return x`
+        };
+
+        function insertTemplate(type) {
+            const editor = document.getElementById('codeEditor');
+            const template = templates[type];
+            if (template) {
+                const start = editor.selectionStart;
+                editor.value = editor.value.substring(0, start) + template + editor.value.substring(start);
+                editor.selectionStart = editor.selectionEnd = start + template.length;
+                editor.focus();
+                updateLineNumbers();
+            }
+        }
+
+        async function runCode() {
+            const code = document.getElementById('codeEditor').value;
+            const inputs = document.getElementById('inputBox').value;
+            if (!code.trim()) { alert('请输入代码！'); return; }
+            
+            const runBtn = document.getElementById('runBtn');
+            const outputBox = document.getElementById('outputBox');
+            runBtn.disabled = true;
+            outputBox.textContent = '正在执行...';
+            outputBox.className = 'output-area';
+            updateStatus('running', '运行中');
+            
+            const startTime = performance.now();
+            try {
+                const result = await executeCode(code, inputs);
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                document.getElementById('runTime').textContent = elapsed + 's';
+                if (result.success) {
+                    outputBox.textContent = result.output || '(执行成功)';
+                    outputBox.className = 'output-area success';
+                    updateStatus('ready', '运行成功');
+                } else {
+                    outputBox.textContent = result.error || '执行失败';
+                    outputBox.className = 'output-area error';
+                    updateStatus('error', '运行失败');
+                }
+            } catch (e) {
+                outputBox.textContent = '错误: ' + e.message;
+                outputBox.className = 'output-area error';
+                updateStatus('error', '执行出错');
+            } finally {
+                runBtn.disabled = false;
+            }
+        }
+
+        async function executeCode(code, inputs) {
+            let fullCode = code;
+            if (inputs && inputs.trim()) {
+                const inputLines = inputs.trim().split('\n').map(l => JSON.stringify(l)).join(', ');
+                fullCode = `_inputs = [${inputLines}]\n_idx = 0\ndef input(p=""): global _idx; print(p,end=""); v = _inputs[_idx] if _idx < len(_inputs) else ""; _idx += 1; return v\n` + code;
+            }
+            
+            try {
+                const pyodide = await initPyodide();
+                
+                if (!pyodide) {
+                    const output = simulatePythonExecution(fullCode);
+                    return { success: true, output: output + '\n\n[模拟模式 - Pyodide未加载]' };
+                }
+                
+                pyodide.runPython(`import sys; from io import StringIO; _sys_stdout = sys.stdout; _sys_stderr = sys.stderr; sys.stdout = StringIO(); sys.stderr = StringIO()`);
+                try {
+                    pyodide.runPython(fullCode);
+                    const output = pyodide.runPython('sys.stdout.getvalue()');
+                    const error = pyodide.runPython('sys.stderr.getvalue()');
+                    pyodide.runPython('sys.stdout = _sys_stdout; sys.stderr = _sys_stderr');
+                    if (error && !output) return { success: false, error };
+                    return { success: true, output: output || '(执行成功)' };
+                } catch (e) {
+                    pyodide.runPython('sys.stdout = _sys_stdout; sys.stderr = _sys_stderr');
+                    return { success: false, error: e.message };
+                }
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }
+
+        function checkCode() {
+            if (!currentExercise) { alert('请先选择练习！'); return; }
+            const code = document.getElementById('codeEditor').value;
+            const tests = currentExercise.tests;
+            
+            if (tests.length === 0) {
+                document.getElementById('scoreValue').textContent = '自由';
+                document.getElementById('scoreValue').className = 'score-value good';
+                document.getElementById('scoreLabel').textContent = '自由练习模式';
+                document.getElementById('testList').innerHTML = '<p style="text-align: center; color: var(--text-muted);">此练习没有测试用例</p>';
+                document.getElementById('checkModal').classList.add('active');
+                return;
+            }
+            
+            let passed = 0, results = '';
+            tests.forEach(test => {
+                let pass = false;
+                switch (test.type) {
+                    case 'has_class': pass = code.includes(`class ${test.value}`); break;
+                    case 'has_method': pass = code.includes(`def ${test.value}`); break;
+                    case 'no_pass': pass = !code.match(/^\s*pass\s*$/m); break;
+                    case 'has_parameter': pass = code.includes(test.value) && code.includes('Parameter'); break;
+                    case 'has_input': pass = code.includes('input('); break;
+                    case 'has_print': pass = code.includes('print('); break;
+                    case 'has_fstring': pass = code.includes('f"') || code.includes("f'"); break;
+                    case 'has_linear': pass = code.includes('nn.Linear') || code.includes('Linear'); break;
+                    case 'has_softmax': pass = code.includes('softmax'); break;
+                    case 'has_silu': pass = code.includes('silu') || code.includes('SiLU'); break;
+                    case 'has_tril': pass = code.includes('tril'); break;
+                    case 'has_function': pass = code.includes(`def ${test.value}`); break;
+                    case 'has_sum': pass = code.includes('sum(') || code.includes('+='); break;
+                    case 'has_dict': pass = code.includes('{') && code.includes(':'); break;
+                    case 'has_return': pass = code.includes('return'); break;
+                    case 'has_ord': pass = code.includes('ord('); break;
+                    case 'has_chr': pass = code.includes('chr('); break;
+                    case 'has_encode': pass = code.includes('.encode('); break;
+                    case 'has_decode': pass = code.includes('.decode('); break;
+                    default: pass = true;
+                }
+                if (pass) passed++;
+                results += `<div class="test-item ${pass ? 'pass' : 'fail'}"><span>${pass ? '✓' : '✗'}</span><span>${test.desc}</span></div>`;
+            });
+            
+            const score = Math.round((passed / tests.length) * 100);
+            document.getElementById('scoreValue').textContent = score;
+            document.getElementById('scoreValue').className = 'score-value ' + (score === 100 ? 'perfect' : score >= 60 ? 'good' : 'poor');
+            document.getElementById('scoreLabel').textContent = `得分 (${passed}/${tests.length})`;
+            document.getElementById('testList').innerHTML = results;
+            document.getElementById('checkModal').classList.add('active');
+            
+            if (score === 100) { completedExercises.add(currentExercise.id); failedExercises.delete(currentExercise.id); }
+            else if (score < 60) { failedExercises.add(currentExercise.id); }
+            saveProgress();
+            renderExerciseList();
+        }
+
+        function showCompare() {
+            if (!currentExercise) { alert('请先选择练习！'); return; }
+            const userCode = document.getElementById('codeEditor').value;
+            const refCode = currentExercise.reference;
+            document.getElementById('userLines').textContent = userCode.split('\n').length + ' 行';
+            document.getElementById('refLines').textContent = refCode.split('\n').length + ' 行';
+            document.getElementById('userCodeDisplay').textContent = userCode;
+            document.getElementById('refCodeDisplay').textContent = refCode;
+            document.getElementById('compareModal').classList.add('active');
+        }
+
+        function showHint() {
+            if (!currentExercise) { alert('请先选择练习！'); return; }
+            const hints = currentExercise.hints || [];
+            if (hints.length === 0) {
+                document.getElementById('hintContent').innerHTML = '<p style="text-align: center; color: var(--text-muted);">此练习没有额外提示</p>';
+            } else {
+                document.getElementById('hintContent').innerHTML = hints.map((h, i) => 
+                    `<div style="background: var(--bg-primary); padding: 12px; border-radius: var(--radius-md); margin-bottom: 8px;">
+                        <strong style="color: var(--accent-primary);">提示 ${i+1}:</strong> ${h}
+                    </div>`
+                ).join('');
+            }
+            document.getElementById('hintModal').classList.add('active');
+        }
+
+        function showGuide() {
+            if (!currentExercise) { alert('请先选择练习！'); return; }
+            const guide = currentExercise.guide;
+            if (!guide) {
+                document.getElementById('guideContent').innerHTML = '<p style="text-align: center; color: var(--text-muted);">此练习没有详细指导</p>';
+            } else {
+                document.getElementById('guideContent').innerHTML = guide.steps.map((s, i) => 
+                    `<div class="guide-step">
+                        <div class="guide-step-title">${i+1}. ${s.title}</div>
+                        <div class="guide-step-content">${s.content}</div>
+                    </div>`
+                ).join('');
+            }
+            document.getElementById('guideModal').classList.add('active');
+        }
+
+        function showReference() {
+            if (currentExercise) {
+                document.getElementById('refCode').textContent = currentExercise.reference;
+                document.getElementById('refModal').classList.add('active');
+            }
+        }
+
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+        function copyReference() {
+            if (currentExercise) {
+                document.getElementById('codeEditor').value = currentExercise.reference;
+                updateLineNumbers();
+            }
+        }
+
+        function resetCode() {
+            if (currentExercise) {
+                document.getElementById('codeEditor').value = currentExercise.template;
+                document.getElementById('outputBox').textContent = '点击"运行"执行代码...';
+                document.getElementById('outputBox').className = 'output-area';
+                updateLineNumbers();
+                updateStatus('ready', '就绪');
+            }
+        }
+
+        function saveProgress() {
+            localStorage.setItem('minimind_cs336_progress', JSON.stringify({
+                completed: [...completedExercises],
+                failed: [...failedExercises]
+            }));
+        }
+
+        function loadProgress() {
+            const saved = localStorage.getItem('minimind_cs336_progress');
+            if (saved) {
+                const data = JSON.parse(saved);
+                completedExercises = new Set(data.completed || []);
+                failedExercises = new Set(data.failed || []);
+                renderExerciseList();
+            }
+        }
+
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key === 'Enter') { e.preventDefault(); runCode(); }
+                    else if (e.key === 'd') { e.preventDefault(); checkCode(); }
+                    else if (e.key === 'h') { e.preventDefault(); showHint(); }
+                    else if (e.key === 'g') { e.preventDefault(); showGuide(); }
+                    else if (e.key === 'k') { e.preventDefault(); showCompare(); }
+                    else if (e.key === 'r') { e.preventDefault(); resetCode(); }
+                    else if (e.key === 's') { e.preventDefault(); showReference(); }
+                }
+                if (e.key === 'Escape') {
+                    ['refModal', 'compareModal', 'checkModal', 'hintModal', 'guideModal'].forEach(closeModal);
+                }
+            });
+        }
+
+        function updateLineNumbers() {
+            const editor = document.getElementById('codeEditor');
+            const lineNumbers = document.getElementById('lineNumbers');
+            const lines = editor.value.split('\n').length;
+            lineNumbers.innerHTML = Array.from({length: lines}, (_, i) => i + 1).join('<br>');
+        }
+
+        init();
+    </script>
+</body>
+</html>

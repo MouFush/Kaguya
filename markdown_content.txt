@@ -1,0 +1,5304 @@
+﻿# MiniMind 瀹屾暣浠ｇ爜鏁欏鎸囧崡
+
+## 鍓嶈█锛歁iniMind椤圭洰鏂囦欢缁撴瀯璇﹁В
+
+鍦ㄦ繁鍏ュ涔燤iniMind浠ｇ爜涔嬪墠锛岃鎴戜滑棣栧厛鍏ㄩ潰浜嗚В椤圭洰鐨勬枃浠剁粨鏋勫拰鍚勯儴鍒嗙殑鍔熻兘銆傝繖灏嗗府鍔╀綘寤虹珛娓呮櫚鐨勯」鐩鐭ユ鏋躲€?
+### 椤圭洰鏍圭洰褰曠粨鏋?
+```
+minimind/                           # 椤圭洰鏍圭洰褰?鈹?鈹溾攢鈹€ model/                          # 銆愭牳蹇冦€戞ā鍨嬪畾涔夌洰褰?鈹?  鈹溾攢鈹€ model.py                    # 妯″瀷鏋舵瀯瀹炵幇锛堟渶閲嶈鏂囦欢锛?鈹?  鈹溾攢鈹€ LMConfig.py                 # 妯″瀷閰嶇疆绫?鈹?  鈹斺攢鈹€ minimind_tokenizer/         # 鍒嗚瘝鍣ㄧ洰褰?鈹?      鈹溾攢鈹€ tokenizer.json          # 鍒嗚瘝鍣ㄩ厤缃?鈹?      鈹溾攢鈹€ tokenizer.model         # 鍒嗚瘝鍣ㄦā鍨?鈹?      鈹斺攢鈹€ vocab.json              # 璇嶆眹琛?鈹?鈹溾攢鈹€ dataset/                        # 銆愭暟鎹€戞暟鎹泦鐩綍
+鈹?  鈹溾攢鈹€ pretrain_hq.jsonl          # 棰勮缁冭鏂欙紙楂樿川閲忥級
+鈹?  鈹溾攢鈹€ sft_mini_512.jsonl         # SFT寰皟鏁版嵁
+鈹?  鈹斺攢鈹€ dpo_data.jsonl             # DPO鍋忓ソ鏁版嵁
+鈹?鈹溾攢鈹€ out/                            # 銆愯緭鍑恒€戣缁冧骇鐗╃洰褰?鈹?  鈹溾攢鈹€ pretrain_512.pth           # 棰勮缁冩潈閲?鈹?  鈹溾攢鈹€ full_sft_512.pth           # SFT鏉冮噸
+鈹?  鈹斺攢鈹€ lora_512.pth               # LoRA鏉冮噸
+鈹?鈹溾攢鈹€ 1-pretrain.py                   # 棰勮缁冨叆鍙ｈ剼鏈?鈹溾攢鈹€ 2-eval.py                       # 妯″瀷璇勪及鍏ュ彛鑴氭湰
+鈹溾攢鈹€ 3-full_sft.py                   # 鍏ㄥ弬鏁板井璋冨叆鍙ｈ剼鏈?鈹溾攢鈹€ 4-lora_sft.py                   # LoRA寰皟鍏ュ彛鑴氭湰
+鈹溾攢鈹€ 5-dpo_train.py                  # DPO璁粌鍏ュ彛鑴氭湰
+鈹?鈹溾攢鈹€ requirements.txt                # 渚濊禆鍖呭垪琛?鈹溾攢鈹€ README.md                       # 椤圭洰璇存槑鏂囨。
+鈹斺攢鈹€ setup.py                        # 瀹夎閰嶇疆鑴氭湰
+```
+
+### 鏍稿績鏂囦欢璇﹁В
+
+#### 1. model/model.py - 妯″瀷鏍稿績瀹炵幇
+
+杩欐槸MiniMind鏈€閲嶈鐨勬枃浠讹紝鍖呭惈浜嗘墍鏈夋ā鍨嬬粍浠剁殑瀹炵幇锛?
+```python
+model.py 鏂囦欢缁撴瀯锛?
+鈹溾攢鈹€ RMSNorm 绫?                     # 褰掍竴鍖栧眰锛堢16-50琛岋級
+鈹?  鈹溾攢鈹€ __init__()                 # 鍒濆鍖?鈹?  鈹溾攢鈹€ _norm()                    # 褰掍竴鍖栬绠?鈹?  鈹斺攢鈹€ forward()                  # 鍓嶅悜浼犳挱
+鈹?鈹溾攢鈹€ precompute_pos_cis() 鍑芥暟       # RoPE棰勮绠楋紙绗?3-113琛岋級
+鈹溾攢鈹€ apply_rotary_emb() 鍑芥暟         # RoPE搴旂敤锛堢116-139琛岋級
+鈹?鈹溾攢鈹€ repeat_kv() 鍑芥暟                # KV澶村鍒讹紙绗?42-165琛岋級
+鈹?鈹溾攢鈹€ Attention 绫?                   # 娉ㄦ剰鍔涘眰锛堢168-280琛岋級
+鈹?  鈹溾攢鈹€ __init__()                 # 鍒濆鍖栨姇褰卞眰
+鈹?  鈹斺攢鈹€ forward()                  # 娉ㄦ剰鍔涜绠?鈹?鈹溾攢鈹€ FeedForward 绫?                 # 鍓嶉缃戠粶锛堢283-320琛岋級
+鈹?  鈹溾攢鈹€ __init__()                 # 鍒濆鍖栦笁灞傛姇褰?鈹?  鈹斺攢鈹€ forward()                  # SwiGLU璁＄畻
+鈹?鈹溾攢鈹€ MoEGate 绫?                     # MoE闂ㄦ帶锛堢323-380琛岋級
+鈹溾攢鈹€ MOEFeedForward 绫?              # MoE鍓嶉缃戠粶锛堢383-450琛岋級
+鈹?鈹溾攢鈹€ MiniMindBlock 绫?               # Transformer鍧楋紙绗?53-500琛岋級
+鈹?  鈹溾攢鈹€ __init__()                 # 鍒濆鍖栧瓙灞?鈹?  鈹斺攢鈹€ forward()                  # 娈嬪樊杩炴帴璁＄畻
+鈹?鈹斺攢鈹€ MiniMindLM 绫?                  # 瀹屾暣妯″瀷锛堢503-600琛岋級
+    鈹溾攢鈹€ __init__()                 # 妯″瀷缁勮
+    鈹溾攢鈹€ forward()                  # 鍓嶅悜浼犳挱
+    鈹斺攢鈹€ generate()                 # 鏂囨湰鐢熸垚
+```
+
+**浠ｇ爜琛屾暟缁熻**锛氱害600琛屾牳蹇冧唬鐮?
+**瀛︿範寤鸿**锛?- 鎸夌収浠庣畝鍗曞埌澶嶆潅鐨勯『搴忛槄璇伙細RMSNorm 鈫?RoPE 鈫?Attention 鈫?FeedForward 鈫?MiniMindBlock 鈫?MiniMindLM
+- 姣忎釜绫婚兘鏄嫭绔嬬殑锛屽彲浠ュ崟鐙祴璇曞拰鐞嗚В
+- 娉ㄦ剰鐞嗚В鏁版嵁褰㈢姸鐨勫彉鍖?
+#### 2. model/LMConfig.py - 妯″瀷閰嶇疆
+
+```python
+LMConfig.py 鏂囦欢缁撴瀯锛?
+鈹溾攢鈹€ 瀵煎叆閮ㄥ垎                        # dataclass, typing绛?鈹?鈹斺攢鈹€ LMConfig 绫?                    # 閰嶇疆鏁版嵁绫?    鈹溾攢鈹€ dim                         # 闅愯棌缁村害
+    鈹溾攢鈹€ n_layers                    # 灞傛暟
+    鈹溾攢鈹€ n_heads                     # 娉ㄦ剰鍔涘ご鏁?    鈹溾攢鈹€ n_kv_heads                  # KV澶存暟锛圙QA锛?    鈹溾攢鈹€ vocab_size                  # 璇嶆眹琛ㄥぇ灏?    鈹溾攢鈹€ hidden_dim                  # FFN闅愯棌缁村害
+    鈹溾攢鈹€ max_seq_len                 # 鏈€澶у簭鍒楅暱搴?    鈹溾攢鈹€ dropout                     # Dropout姣旂巼
+    鈹溾攢鈹€ flash_attn                  # Flash Attention寮€鍏?    鈹溾攢鈹€ use_moe                     # MoE寮€鍏?    鈹溾攢鈹€ num_experts_per_tok         # 姣弔oken婵€娲讳笓瀹舵暟
+    鈹溾攢鈹€ n_routed_experts            # 璺敱涓撳鎬绘暟
+    鈹斺攢鈹€ __post_init__()             # 娲剧敓鍙傛暟璁＄畻
+```
+
+**鍏抽敭鍙傛暟璇存槑**锛?
+| 鍙傛暟 | 榛樿鍊?| 璇存槑 | 褰卞搷 |
+|------|--------|------|------|
+| dim | 512 | 闅愯棌缁村害 | 鍐冲畾妯″瀷瀹归噺 |
+| n_layers | 8 | Transformer灞傛暟 | 鍐冲畾妯″瀷娣卞害 |
+| n_heads | 8 | 娉ㄦ剰鍔涘ご鏁?| 澶氬ご娉ㄦ剰鍔?|
+| n_kv_heads | 2 | KV澶存暟 | GQA閰嶇疆 |
+| vocab_size | 6400 | 璇嶆眹琛ㄥぇ灏?| 宓屽叆灞傚ぇ灏?|
+| max_seq_len | 8192 | 鏈€澶у簭鍒楅暱搴?| RoPE棰勮绠?|
+
+#### 3. model/minimind_tokenizer/ - 鍒嗚瘝鍣?
+```
+minimind_tokenizer/
+鈹溾攢鈹€ tokenizer.json          # 鍒嗚瘝鍣ㄥ畬鏁撮厤缃?鈹?  鈹溾攢鈹€ vocab               # 璇嶆眹琛ㄦ槧灏?鈹?  鈹溾攢鈹€ merges              # BPE鍚堝苟瑙勫垯
+鈹?  鈹斺攢鈹€ special_tokens      # 鐗规畩token瀹氫箟
+鈹?鈹溾攢鈹€ tokenizer.model         # SentencePiece妯″瀷
+鈹溾攢鈹€ vocab.json              # 鐙珛璇嶆眹琛ㄦ枃浠?鈹斺攢鈹€ special_tokens_map.json # 鐗规畩token鏄犲皠
+```
+
+**鐗规畩Token瀹氫箟**锛?
+| Token | ID | 鐢ㄩ€?|
+|-------|-----|------|
+| `<pad>` | 0 | 濉厖 |
+| `<s>` | 1 | 搴忓垪寮€濮?BOS) |
+| `</s>` | 2 | 搴忓垪缁撴潫(EOS) |
+| `<|im_start|>` | 3 | ChatML瑙掕壊寮€濮?|
+| `<|im_end|>` | 4 | ChatML瑙掕壊缁撴潫 |
+
+#### 4. 鏁版嵁闆嗘枃浠舵牸寮?
+**pretrain_hq.jsonl** - 棰勮缁冩暟鎹牸寮忥細
+```json
+{"text": "杩欐槸涓€娈甸璁粌鏂囨湰锛岀敤浜庤妯″瀷瀛︿範璇█鐭ヨ瘑..."}
+{"text": "鍙︿竴娈甸璁粌鏂囨湰..."}
+```
+
+**sft_mini_512.jsonl** - SFT鏁版嵁鏍煎紡锛?```json
+{
+  "conversations": [
+    {"role": "user", "content": "浣犲ソ"},
+    {"role": "assistant", "content": "浣犲ソ锛佹湁浠€涔堝彲浠ュ府鍔╀綘鐨勶紵"}
+  ]
+}
+```
+
+**dpo_data.jsonl** - DPO鏁版嵁鏍煎紡锛?```json
+{
+  "prompt": "璇疯В閲婁粈涔堟槸鏈哄櫒瀛︿範",
+  "chosen": "鏈哄櫒瀛︿範鏄汉宸ユ櫤鑳界殑涓€涓垎鏀?..",
+  "rejected": "鏈哄櫒瀛︿範灏辨槸璁╂満鍣ㄥ涔?.."
+}
+```
+
+### 璁粌鑴氭湰璇﹁В
+
+#### 1-pretrain.py - 棰勮缁冭剼鏈?
+```python
+1-pretrain.py 涓昏鍔熻兘锛?
+鈹溾攢鈹€ 鍙傛暟瑙ｆ瀽                        # argparse閰嶇疆
+鈹溾攢鈹€ 鍒嗗竷寮忓垵濮嬪寲                    # DDP璁剧疆
+鈹溾攢鈹€ 鏁版嵁鍔犺浇                        # DataLoader鍒涘缓
+鈹溾攢鈹€ 妯″瀷鍒涘缓                        # MiniMindLM瀹炰緥鍖?鈹溾攢鈹€ 浼樺寲鍣ㄩ厤缃?                     # AdamW璁剧疆
+鈹溾攢鈹€ 璁粌寰幆                        # 涓昏缁冮€昏緫
+鈹?  鈹溾攢鈹€ 鍓嶅悜浼犳挱
+鈹?  鈹溾攢鈹€ 鎹熷け璁＄畻
+鈹?  鈹溾攢鈹€ 鍙嶅悜浼犳挱
+鈹?  鈹溾攢鈹€ 姊害瑁佸壀
+鈹?  鈹溾攢鈹€ 鍙傛暟鏇存柊
+鈹?  鈹斺攢鈹€ 瀛︿範鐜囪皟搴?鈹溾攢鈹€ 妫€鏌ョ偣淇濆瓨                      # 瀹氭湡淇濆瓨
+鈹斺攢鈹€ 鏃ュ織璁板綍                        # 璁粌鐩戞帶
+```
+
+**鍏抽敭璁粌鍙傛暟**锛?
+| 鍙傛暟 | 榛樿鍊?| 璇存槑 |
+|------|--------|------|
+| batch_size | 32 | 鎵规澶у皬 |
+| learning_rate | 5e-4 | 瀛︿範鐜?|
+| epochs | 1 | 璁粌杞暟 |
+| accumulation_steps | 8 | 姊害绱Н姝ユ暟 |
+| grad_clip | 1.0 | 姊害瑁佸壀闃堝€?|
+| warmup_steps | 100 | 棰勭儹姝ユ暟 |
+
+#### 3-full_sft.py - 鍏ㄥ弬鏁板井璋?
+```python
+3-full_sft.py 涓庨璁粌鐨勫尯鍒細
+
+1. 鏁版嵁鏍煎紡锛氫娇鐢ㄥ璇濇暟鎹€岄潪绾枃鏈?2. 鎹熷け璁＄畻锛氬彧璁＄畻assistant鍥炲閮ㄥ垎
+3. 瀛︿範鐜囷細閫氬父鏇村皬锛?e-5锛?4. 璁粌杞暟锛氭洿澶氾紙3-10杞級
+5. 鏉冮噸鍔犺浇锛氫粠棰勮缁冩潈閲嶅垵濮嬪寲
+```
+
+#### 4-lora_sft.py - LoRA寰皟
+
+```python
+LoRA鏍稿績瀹炵幇锛?
+鈹溾攢鈹€ LoRALayer 绫?                   # LoRA灞傚畾涔?鈹?  鈹溾攢鈹€ lora_A                     # 浣庣З鐭╅樀A
+鈹?  鈹斺攢鈹€ lora_B                     # 浣庣З鐭╅樀B
+鈹?鈹溾攢鈹€ apply_lora_to_model()           # 搴旂敤LoRA
+鈹?  鈹斺攢鈹€ 鍐荤粨鍘熸潈閲嶏紝娣诲姞LoRA灞?鈹?鈹斺攢鈹€ 璁粌娴佺▼                        # 鍙缁僉oRA鍙傛暟
+```
+
+**LoRA鍙傛暟**锛?
+| 鍙傛暟 | 榛樿鍊?| 璇存槑 |
+|------|--------|------|
+| lora_rank | 8 | LoRA绉?|
+| lora_alpha | 16.0 | 缂╂斁鍥犲瓙 |
+| target_modules | ['wq','wk','wv','wo','w1','w2','w3'] | 鐩爣妯″潡 |
+
+#### 5-dpo_train.py - DPO璁粌
+
+```python
+DPO鏍稿績瀹炵幇锛?
+鈹溾攢鈹€ DPODataset 绫?                  # DPO鏁版嵁闆?鈹?  鈹斺攢鈹€ 鍔犺浇prompt/chosen/rejected
+鈹?鈹溾攢鈹€ dpo_loss() 鍑芥暟                 # DPO鎹熷け鍑芥暟
+鈹?  鈹斺攢鈹€ 璁＄畻鍋忓ソ浼樺寲鎹熷け
+鈹?鈹溾攢鈹€ 绛栫暐妯″瀷                        # 姝ｅ湪璁粌鐨勬ā鍨?鈹溾攢鈹€ 鍙傝€冩ā鍨?                       # 鍐荤粨鐨勫弬鑰冩ā鍨?鈹斺攢鈹€ 璁粌寰幆                        # DPO鐗瑰畾閫昏緫
+```
+
+### 杈撳嚭鏂囦欢璇存槑
+
+#### 鏉冮噸鏂囦欢鏍煎紡
+
+```python
+# .pth 鏂囦欢缁撴瀯
+checkpoint = {
+    'model': model.state_dict(),        # 妯″瀷鏉冮噸
+    'optimizer': optimizer.state_dict(), # 浼樺寲鍣ㄧ姸鎬?    'epoch': epoch,                     # 褰撳墠杞暟
+    'step': step,                       # 褰撳墠姝ユ暟
+    'loss': loss,                       # 鎹熷け鍊?}
+```
+
+#### 鏉冮噸鏂囦欢澶у皬浼扮畻
+
+| 妯″瀷鐗堟湰 | 鍙傛暟閲?| 鏉冮噸鏂囦欢澶у皬 |
+|---------|--------|-------------|
+| minimind-v1-small | 26M | ~100MB |
+| minimind-v1-moe | 104M | ~400MB |
+| minimind-v1 | 108M | ~420MB |
+
+### 椤圭洰渚濊禆锛坮equirements.txt锛?
+```
+torch>=2.0.0                # PyTorch鏍稿績
+transformers>=4.30.0        # HuggingFace宸ュ叿
+tokenizers>=0.13.0          # 鍒嗚瘝鍣?datasets>=2.12.0            # 鏁版嵁闆嗗伐鍏?accelerate>=0.20.0          # 鍔犻€熷簱
+flash-attn>=2.0.0           # Flash Attention
+wandb>=0.15.0               # 瀹為獙璺熻釜
+tensorboard>=2.12.0         # 鍙鍖?tqdm>=4.65.0                # 杩涘害鏉?numpy>=1.24.0               # 鏁板€艰绠?```
+
+### 瀛︿範璺緞寤鸿
+
+```
+鎺ㄨ崘瀛︿範椤哄簭锛?
+绗?闃舵锛氱悊瑙ｆ灦鏋?鈹溾攢鈹€ 闃呰 README.md
+鈹溾攢鈹€ 鐞嗚В LMConfig.py
+鈹斺攢鈹€ 杩愯 2-eval.py 浣撻獙妯″瀷
+
+绗?闃舵锛氭繁鍏ユā鍨?鈹溾攢鈹€ 绮捐 model.py
+鈹?  鈹溾攢鈹€ RMSNorm
+鈹?  鈹溾攢鈹€ RoPE
+鈹?  鈹溾攢鈹€ Attention
+鈹?  鈹溾攢鈹€ FeedForward
+鈹?  鈹斺攢鈹€ MiniMindLM
+鈹斺攢鈹€ 鐞嗚В鏁版嵁娴?
+绗?闃舵锛氬疄璺佃缁?鈹溾攢鈹€ 鍑嗗鏁版嵁
+鈹溾攢鈹€ 杩愯 1-pretrain.py
+鈹溾攢鈹€ 杩愯 3-full_sft.py
+鈹斺攢鈹€ 鍒嗘瀽璁粌鏃ュ織
+
+绗?闃舵锛氳繘闃朵紭鍖?鈹溾攢鈹€ 瀛︿範 LoRA 寰皟
+鈹溾攢鈹€ 瀛︿範 DPO 璁粌
+鈹溾攢鈹€ 灏濊瘯淇敼妯″瀷
+鈹斺攢鈹€ 鑷畾涔夋暟鎹缁?```
+
+### 甯歌闂涓庢枃浠跺搴?
+| 闂 | 鏌ョ湅鏂囦欢 |
+|------|---------|
+| 妯″瀷缁撴瀯鏄粈涔堬紵 | model/model.py |
+| 濡備綍淇敼妯″瀷澶у皬锛?| model/LMConfig.py |
+| 濡備綍鍑嗗鏁版嵁锛?| dataset/*.jsonl |
+| 濡備綍寮€濮嬭缁冿紵 | 1-pretrain.py |
+| 濡備綍璇勪及妯″瀷锛?| 2-eval.py |
+| 濡備綍寰皟妯″瀷锛?| 3-full_sft.py, 4-lora_sft.py |
+| 濡備綍浣跨敤DPO锛?| 5-dpo_train.py |
+| 鍒嗚瘝鍣ㄥ浣曞伐浣滐紵 | model/minimind_tokenizer/ |
+
+---
+
+## 鐩綍
+
+1. [椤圭洰鏁翠綋鏋舵瀯姒傝](#1-椤圭洰鏁翠綋鏋舵瀯姒傝)
+2. [閰嶇疆绯荤粺璇﹁В - LMConfig.py](#2-閰嶇疆绯荤粺璇﹁В---lmconfigpy)
+3. [妯″瀷鏍稿績缁勪欢 - model.py](#3-妯″瀷鏍稿績缁勪欢---modelpy)
+   - 3.1 [RMSNorm 褰掍竴鍖栧眰](#31-rmsnorm-褰掍竴鍖栧眰)
+   - 3.2 [RoPE 鏃嬭浆浣嶇疆缂栫爜](#32-rope-鏃嬭浆浣嶇疆缂栫爜)
+   - 3.3 [閲嶅KV澶村嚱鏁?repeat_kv](#33-閲嶅kv澶村嚱鏁?repeat_kv)
+   - 3.4 [娉ㄦ剰鍔涙満鍒?Attention](#34-娉ㄦ剰鍔涙満鍒?attention)
+   - 3.5 [鍓嶉绁炵粡缃戠粶 FeedForward](#35-鍓嶉绁炵粡缃戠粶-feedforward)
+   - 3.6 [娣峰悎涓撳绯荤粺 MoE](#36-娣峰悎涓撳绯荤粺-moe)
+   - 3.7 [Transformer鍧?MiniMindBlock](#37-transformer鍧?minimindblock)
+   - 3.8 [瀹屾暣璇█妯″瀷 MiniMindLM](#38-瀹屾暣璇█妯″瀷-minimindlm)
+4. [鏁版嵁澶勭悊绯荤粺](#4-鏁版嵁澶勭悊绯荤粺)
+5. [棰勮缁冩祦绋媇(#5-棰勮缁冩祦绋?
+6. [鐩戠潱寰皟 SFT](#6-鐩戠潱寰皟-sft)
+7. [LoRA寰皟](#7-lora寰皟)
+8. [DPO寮哄寲瀛︿範](#8-dpo寮哄寲瀛︿範)
+9. [妯″瀷鎺ㄧ悊](#9-妯″瀷鎺ㄧ悊)
+
+---
+
+## 1. 椤圭洰鏁翠綋鏋舵瀯姒傝
+
+MiniMind鏄竴涓粠闆跺紑濮嬭缁冪殑瓒呭皬鍨嬭瑷€妯″瀷椤圭洰锛屽叾鏍稿績璁捐鐞嗗康鏄?澶ч亾鑷崇畝"銆傞」鐩噰鐢ㄧ粡鍏哥殑Transformer Decoder-Only鏋舵瀯锛屼笌GPT銆丩LaMA绛変富娴佸ぇ妯″瀷淇濇寔涓€鑷寸殑璁捐鎬濊矾銆?
+### 1.1 椤圭洰鐩綍缁撴瀯
+
+```
+minimind/
+鈹溾攢鈹€ model/                          # 妯″瀷瀹氫箟鐩綍
+鈹?  鈹溾攢鈹€ model.py                    # 鏍稿績妯″瀷瀹炵幇
+鈹?  鈹溾攢鈹€ LMConfig.py                 # 妯″瀷閰嶇疆绫?鈹?  鈹斺攢鈹€ minimind_tokenizer/         # 鍒嗚瘝鍣ㄧ洰褰?鈹?鈹溾攢鈹€ dataset/                        # 鏁版嵁闆嗙洰褰?鈹?  鈹溾攢鈹€ pretrain_hq.jsonl          # 棰勮缁冩暟鎹?鈹?  鈹溾攢鈹€ sft_mini_512.jsonl         # SFT寰皟鏁版嵁
+鈹?  鈹斺攢鈹€ dpo_data.jsonl             # DPO璁粌鏁版嵁
+鈹?鈹溾攢鈹€ trainer/                        # 璁粌鑴氭湰鐩綍
+鈹?  鈹溾攢鈹€ train_pretrain.py          # 棰勮缁冭剼鏈?鈹?  鈹溾攢鈹€ train_full_sft.py          # 鍏ㄥ弬寰皟鑴氭湰
+鈹?  鈹溾攢鈹€ train_lora_sft.py          # LoRA寰皟鑴氭湰
+鈹?  鈹斺攢鈹€ train_dpo.py               # DPO璁粌鑴氭湰
+鈹?鈹溾攢鈹€ out/                            # 璁粌杈撳嚭鐩綍
+鈹?  鈹溾攢鈹€ pretrain_512.pth           # 棰勮缁冩潈閲?鈹?  鈹斺攢鈹€ full_sft_512.pth           # 寰皟鏉冮噸
+鈹?鈹溾攢鈹€ 1-pretrain.py                   # 棰勮缁冨叆鍙?鈹溾攢鈹€ 3-full_sft.py                   # SFT寰皟鍏ュ彛
+鈹溾攢鈹€ 4-lora_sft.py                   # LoRA寰皟鍏ュ彛
+鈹溾攢鈹€ 5-dpo_train.py                  # DPO璁粌鍏ュ彛
+鈹斺攢鈹€ 2-eval.py                       # 妯″瀷璇勪及鍏ュ彛
+```
+
+### 1.2 鏍稿績鎶€鏈爤
+
+MiniMind閲囩敤浜嗗椤圭幇浠ｅぇ璇█妯″瀷鐨勬牳蹇冩妧鏈細
+
+| 鎶€鏈粍浠?| 璇存槑 | 鏉ユ簮 |
+|---------|------|------|
+| RMSNorm | 鍧囨柟鏍瑰眰褰掍竴鍖?| LLaMA |
+| RoPE | 鏃嬭浆浣嶇疆缂栫爜 | LLaMA |
+| GQA | 鍒嗙粍鏌ヨ娉ㄦ剰鍔?| LLaMA 2 |
+| SwiGLU | 闂ㄦ帶绾挎€у崟鍏冩縺娲?| LLaMA |
+| Flash Attention | 楂樻晥娉ㄦ剰鍔涜绠?| Flash Attention 2 |
+| MoE | 娣峰悎涓撳绯荤粺 | DeepSeek-V2 |
+
+### 1.3 妯″瀷鍙傛暟瑙勬ā
+
+MiniMind鎻愪緵浜嗕笁涓増鏈殑妯″瀷锛?
+| 妯″瀷鐗堟湰 | 鍙傛暟閲?| 灞傛暟 | 闅愯棌缁村害 | 娉ㄦ剰鍔涘ご鏁?| KV澶存暟 |
+|---------|--------|------|----------|-----------|--------|
+| minimind-v1-small | 26M | 8 | 512 | 8 | 2 |
+| minimind-v1-moe | 4脳26M | 8 | 512 | 8 | 2 |
+| minimind-v1 | 108M | 8 | 768 | 8 | 2 |
+
+---
+
+## 2. 閰嶇疆绯荤粺璇﹁В - LMConfig.py
+
+閰嶇疆鏂囦欢鏄暣涓ā鍨嬬殑"钃濆浘"锛屽畾涔変簡妯″瀷鐨勬墍鏈夎秴鍙傛暟銆傝鎴戜滑娣卞叆鍒嗘瀽姣忎竴琛屼唬鐮併€?
+### 2.1 瀹屾暣閰嶇疆绫讳唬鐮?
+```python
+"""
+LMConfig.py - MiniMind妯″瀷閰嶇疆绫?杩欎釜鏂囦欢瀹氫箟浜哅iniMind妯″瀷鐨勬墍鏈夎秴鍙傛暟閰嶇疆
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+import math
+
+
+@dataclass
+class LMConfig:
+    """
+    MiniMind璇█妯″瀷閰嶇疆绫?    
+    浣跨敤Python鐨刣ataclass瑁呴グ鍣紝鑷姩鐢熸垚__init__銆乢_repr__绛夋柟娉?    鎵€鏈夊弬鏁伴兘鏈夐粯璁ゅ€硷紝鍙互鐩存帴瀹炰緥鍖栦娇鐢ㄩ粯璁ら厤缃?    """
+    
+    # ==================== 鍩虹妯″瀷鍙傛暟 ====================
+    
+    # 妯″瀷闅愯棌灞傜淮搴?    # 杩欐槸鏈€鏍稿績鐨勫弬鏁帮紝鍐冲畾浜嗘ā鍨嬬殑澶ч儴鍒嗗弬鏁伴噺
+    # 璁＄畻鍏紡锛氬弬鏁伴噺 鈮?12 脳 dim虏 脳 n_layers
+    # dim=512 鏃讹紝8灞傛ā鍨嬬害26M鍙傛暟
+    dim: int = 512
+    
+    # Transformer灞傛暟
+    # 鏇村鐨勫眰鏁版剰鍛崇潃妯″瀷鍙互瀛︿範鏇村鏉傜殑鐗瑰緛灞傛
+    # 閫氬父8-12灞傚浜庡皬鍨嬫ā鍨嬪凡缁忚冻澶?    n_layers: int = 8
+    
+    # 娉ㄦ剰鍔涘ご鏁?    # 澶氬ご娉ㄦ剰鍔涘厑璁告ā鍨嬪悓鏃跺叧娉ㄤ笉鍚屼綅缃殑淇℃伅
+    # 澶存暟蹇呴』鑳芥暣闄im锛屾瘡涓ご鐨勭淮搴?= dim / n_heads
+    n_heads: int = 8
+    
+    # KV澶存暟锛堢敤浜嶨QA鍒嗙粍鏌ヨ娉ㄦ剰鍔涳級
+    # 褰搉_kv_heads < n_heads鏃讹紝鍚敤GQA
+    # 渚嬪锛歯_heads=8, n_kv_heads=2 琛ㄧず8涓猀澶村叡浜?缁凨V澶?    # 杩欏彲浠ュぇ骞呭噺灏戞帹鐞嗘椂鐨凨V缂撳瓨鏄惧瓨鍗犵敤
+    n_kv_heads: int = 2
+    
+    # 璇嶆眹琛ㄥぇ灏?    # MiniMind浣跨敤鑷畾涔夊垎璇嶅櫒锛岃瘝姹囪〃澶у皬涓?400
+    # 姣擥PT-2鐨?0257灏忓緢澶氾紝鏈夊姪浜庡噺灏戝弬鏁伴噺
+    vocab_size: int = 6400
+    
+    # ==================== FFN鍓嶉缃戠粶鍙傛暟 ====================
+    
+    # FFN闅愯棌灞傜淮搴?    # 濡傛灉涓篘one锛屼細鑷姩璁＄畻涓?hidden_dim = 4 * dim
+    # 浣嗗疄闄呬細璋冩暣涓簃ultiple_of鐨勫€嶆暟
+    hidden_dim: int = None
+    
+    # 闅愯棌缁村害瀵归綈鍊嶆暟
+    # 涓轰簡GPU璁＄畻鏁堢巼锛岄殣钘忕淮搴︿細瀵归綈鍒拌繖涓€肩殑鍊嶆暟
+    # 閫氬父璁剧疆涓?4锛屽洜涓篏PU鐨凾ensor Core浠?4涓哄崟浣嶈绠?    multiple_of: int = 64
+    
+    # ==================== 褰掍竴鍖栧弬鏁?====================
+    
+    # RMSNorm鐨別psilon鍊?    # 闃叉闄ら浂閿欒锛岄€氬父璁剧疆涓?e-5鎴?e-6
+    norm_eps: float = 1e-5
+    
+    # ==================== 搴忓垪闀垮害鍙傛暟 ====================
+    
+    # 鏈€澶у簭鍒楅暱搴?    # 璁粌鏃舵敮鎸佺殑鏈€澶oken鏁伴噺
+    # 512鏄皬鍨嬫ā鍨嬬殑甯歌閫夋嫨锛屽彲閫氳繃RoPE澶栨帹鎵╁睍
+    max_seq_len: int = 8192
+    
+    # ==================== RoPE浣嶇疆缂栫爜鍙傛暟 ====================
+    
+    # RoPE鐨則heta鍙傛暟锛堝熀鏁帮級
+    # 鎺у埗浣嶇疆缂栫爜鐨勯鐜囪寖鍥?    # 1e6鏄疞LaMA鐨勯粯璁ゅ€硷紝鏇村ぇ鐨勫€兼敮鎸佹洿闀跨殑澶栨帹
+    rope_theta: int = 1e6
+    
+    # ==================== 姝ｅ垯鍖栧弬鏁?====================
+    
+    # Dropout姣旂巼
+    # 璁粌鏃堕殢鏈轰涪寮冪缁忓厓鐨勬瘮渚嬶紝闃叉杩囨嫙鍚?    # 灏忔ā鍨嬮€氬父浣跨敤杈冨皬鐨刣ropout鎴栦笉浣跨敤
+    dropout: float = 0.0
+    
+    # ==================== Flash Attention鍙傛暟 ====================
+    
+    # 鏄惁浣跨敤Flash Attention
+    # Flash Attention鏄竴绉嶉珮鏁堢殑娉ㄦ剰鍔涜绠楀疄鐜?    # 鍙互鏄捐憲鍑忓皯鏄惧瓨鍗犵敤骞跺姞閫熻绠?    flash_attn: bool = True
+    
+    # ==================== MoE娣峰悎涓撳鍙傛暟 ====================
+    
+    # 鏄惁鍚敤娣峰悎涓撳妯″瀷
+    # MoE鍙互鍦ㄤ笉澧炲姞鎺ㄧ悊璁＄畻閲忕殑鎯呭喌涓嬪鍔犳ā鍨嬪閲?    use_moe: bool = False
+    
+    # 姣忎釜token婵€娲荤殑涓撳鏁伴噺
+    # 閫氬父璁剧疆涓?锛屽嵆姣忎釜token閫氳繃2涓笓瀹跺鐞?    num_experts_per_tok: int = 2
+    
+    # 璺敱涓撳鎬绘暟
+    # 鎬诲叡鏈夊灏戜釜涓撳鍙緵閫夋嫨
+    # 渚嬪4琛ㄧず鏈?涓笓瀹讹紝姣忎釜token閫夋嫨鍏朵腑2涓?    n_routed_experts: int = 4
+    
+    # 鏄惁浣跨敤鍏变韩涓撳
+    # 鍏变韩涓撳瀵规墍鏈塼oken閮芥縺娲伙紝鐢ㄤ簬澶勭悊閫氱敤鐗瑰緛
+    # 閫氬父璁剧疆1涓叡浜笓瀹?    n_shared_experts: bool = True
+    
+    # 涓撳閫夋嫨鐨勮瘎鍒嗗嚱鏁?    # 'softmax'锛氫娇鐢╯oftmax褰掍竴鍖栧垎鏁?    # 'sigmoid'锛氫娇鐢╯igmoid鍑芥暟
+    scoring_func: str = 'softmax'
+    
+    # MoE杈呭姪鎹熷け鏉冮噸
+    # 鐢ㄤ簬骞宠　鍚勪笓瀹剁殑璐熻浇
+    # 閫氬父璁剧疆涓?.1
+    aux_loss_alpha: float = 0.1
+    
+    # 鏄惁浣跨敤搴忓垪绾ц緟鍔╂崯澶?    # 搴忓垪绾ф崯澶卞彲浠ユ洿濂藉湴骞宠　涓撳璐熻浇
+    seq_aux: bool = True
+    
+    # 鏄惁褰掍竴鍖杢op-k姒傜巼
+    # 褰掍竴鍖栧彲浠ヤ娇涓撳杈撳嚭鏇寸ǔ瀹?    norm_topk_prob: bool = True
+    
+    def __post_init__(self):
+        """
+        鍒濆鍖栧悗澶勭悊
+        鍦╠ataclass鑷姩鐢熸垚鐨刜_init__涔嬪悗璋冪敤
+        鐢ㄤ簬璁＄畻娲剧敓鍙傛暟鍜岄獙璇佸弬鏁版湁鏁堟€?        """
+        # 璁＄畻姣忎釜娉ㄦ剰鍔涘ご鐨勭淮搴?        # 渚嬪锛歞im=512, n_heads=8 -> head_dim=64
+        self.head_dim = self.dim // self.n_heads
+        
+        # 璁＄畻FFN闅愯棌灞傜淮搴?        if self.hidden_dim is None:
+            # 榛樿浣跨敤4鍊嶉殣钘忕淮搴?            hidden_dim = 4 * self.dim
+            # 璋冩暣涓簃ultiple_of鐨勫€嶆暟锛屾彁楂楪PU璁＄畻鏁堢巼
+            # 鍏紡锛氬悜涓婂彇鏁村埌multiple_of鐨勫€嶆暟
+            self.hidden_dim = int(2 * hidden_dim / 3)
+            self.hidden_dim = self.multiple_of * (
+                (self.hidden_dim + self.multiple_of - 1) // self.multiple_of
+            )
+        
+        # 楠岃瘉鍙傛暟鏈夋晥鎬?        assert self.dim % self.n_heads == 0, \
+            f"dim ({self.dim}) 蹇呴』鑳借 n_heads ({self.n_heads}) 鏁撮櫎"
+        assert self.n_heads % self.n_kv_heads == 0, \
+            f"n_heads ({self.n_heads}) 蹇呴』鑳借 n_kv_heads ({self.n_kv_heads}) 鏁撮櫎"
+```
+
+### 2.2 鍙傛暟璇﹁В涓庤绠楀叕寮?
+#### 2.2.1 妯″瀷鍙傛暟閲忚绠?
+MiniMind鐨勫弬鏁伴噺鍙互閫氳繃浠ヤ笅鍏紡浼扮畻锛?
+```
+鎬诲弬鏁伴噺 = 宓屽叆灞傚弬鏁?+ 娉ㄦ剰鍔涘眰鍙傛暟 + FFN灞傚弬鏁?+ 杈撳嚭灞傚弬鏁?
+宓屽叆灞傚弬鏁?= vocab_size 脳 dim
+杈撳嚭灞傚弬鏁?= vocab_size 脳 dim锛堜笌宓屽叆灞傚叡浜潈閲嶏級
+
+鍗曞眰娉ㄦ剰鍔涘弬鏁?= 4 脳 dim 脳 dim
+  - Q鎶曞奖: dim 脳 dim
+  - K鎶曞奖: dim 脳 dim (瀹為檯涓?dim 脳 (dim/n_heads 脳 n_kv_heads))
+  - V鎶曞奖: dim 脳 dim
+  - 杈撳嚭鎶曞奖: dim 脳 dim
+
+鍗曞眰FFN鍙傛暟 = 3 脳 dim 脳 hidden_dim
+  - 闂ㄦ帶鎶曞奖1: dim 脳 hidden_dim
+  - 闂ㄦ帶鎶曞奖2: dim 脳 hidden_dim
+  - 涓嬫姇褰? hidden_dim 脳 dim
+
+鎬诲弬鏁伴噺 鈮?vocab_size 脳 dim + n_layers 脳 (4 脳 dim虏 + 3 脳 dim 脳 hidden_dim)
+```
+
+浠im=512, n_layers=8, vocab_size=6400涓轰緥锛?
+```
+宓屽叆灞? 6400 脳 512 = 3,276,800
+鍗曞眰娉ㄦ剰鍔? 4 脳 512 脳 512 = 1,048,576
+鍗曞眰FFN: 3 脳 512 脳 1408 = 2,158,592
+8灞傛€昏: 8 脳 (1,048,576 + 2,158,592) = 25,657,344
+
+鎬昏绾? 3,276,800 + 25,657,344 鈮?29M 鍙傛暟
+```
+
+#### 2.2.2 鏄惧瓨鍗犵敤浼扮畻
+
+璁粌鏃剁殑鏄惧瓨鍗犵敤鍖呮嫭锛?
+```
+妯″瀷鍙傛暟鏄惧瓨 = 鍙傛暟閲?脳 4瀛楄妭 (float32) 鎴?2瀛楄妭 (float16/bfloat16)
+姊害鏄惧瓨 = 鍙傛暟閲?脳 4瀛楄妭
+浼樺寲鍣ㄧ姸鎬?= 鍙傛暟閲?脳 8瀛楄妭 (AdamW闇€瑕佸瓨鍌ㄤ竴闃跺拰浜岄樁鍔ㄩ噺)
+婵€娲诲€兼樉瀛?鈮?batch_size 脳 seq_len 脳 dim 脳 n_layers 脳 20瀛楄妭
+
+鎬昏 鈮?鍙傛暟閲?脳 16瀛楄妭 + 婵€娲诲€兼樉瀛?```
+
+瀵逛簬26M鍙傛暟鐨勬ā鍨嬶細
+- 妯″瀷鍙傛暟锛?6M 脳 2瀛楄妭 = 52MB (bfloat16)
+- 姊害锛?6M 脳 2瀛楄妭 = 52MB
+- 浼樺寲鍣ㄧ姸鎬侊細26M 脳 8瀛楄妭 = 208MB
+- 鎬昏绾︼細312MB + 婵€娲诲€?
+---
+
+## 3. 妯″瀷鏍稿績缁勪欢 - model.py
+
+杩欐槸MiniMind鏈€鏍稿績鐨勬枃浠讹紝鍖呭惈浜嗘ā鍨嬬殑鎵€鏈夌粍浠跺疄鐜般€傛垜浠皢閫愯鍒嗘瀽姣忎釜绫诲拰鍑芥暟銆?
+### 3.1 RMSNorm 褰掍竴鍖栧眰
+
+RMSNorm锛圧oot Mean Square Layer Normalization锛夋槸鐜颁唬澶ц瑷€妯″瀷鐨勬爣鍑嗗綊涓€鍖栨柟娉曪紝鐩告瘮浼犵粺鐨凩ayerNorm鏇村姞楂樻晥銆?
+#### 3.1.1 瀹屾暣浠ｇ爜瀹炵幇
+
+```python
+"""
+RMSNorm - 鍧囨柟鏍瑰眰褰掍竴鍖?浣嶇疆锛歮odel/model.py 绗?6-50琛?"""
+
+import torch
+import torch.nn as nn
+import math
+
+
+class RMSNorm(nn.Module):
+    """
+    RMSNorm褰掍竴鍖栧眰
+    
+    涓嶭ayerNorm鐨勫尯鍒細
+    - LayerNorm: y = (x - mean) / sqrt(var + eps) * weight + bias
+    - RMSNorm:   y = x / sqrt(mean(x^2) + eps) * weight
+    
+    RMSNorm鐪佸幓浜嗗潎鍊艰绠楋紝璁＄畻閲忓噺灏戠害30-40%
+    鍚屾椂涓嶉渶瑕乥ias鍙傛暟锛屽弬鏁伴噺涔熺暐鏈夊噺灏?    
+    鏁板鍏紡锛?        RMS(x) = sqrt(1/n * 危x_i虏 + eps)
+        y = x / RMS(x) * weight
+    """
+    
+    def __init__(self, dim: int, eps: float = 1e-6):
+        """
+        鍒濆鍖朢MSNorm灞?        
+        鍙傛暟:
+            dim: 杈撳叆鐗瑰緛鐨勭淮搴?            eps: 闃叉闄ら浂鐨勫皬甯告暟锛岄粯璁?e-6
+        """
+        super().__init__()
+        
+        # 鍙涔犵殑缂╂斁鍙傛暟
+        # 鍒濆鍖栦负鍏?锛岃缁冭繃绋嬩腑浼氬涔犲埌鏈€浼樺€?        self.weight = nn.Parameter(torch.ones(dim))
+        
+        # 闃叉闄ら浂鐨別psilon
+        self.eps = eps
+        
+        # 瀛樺偍缁村害淇℃伅锛岀敤浜庡悗缁绠?        self.dim = dim
+    
+    def _norm(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        鎵цRMS褰掍竴鍖栬绠?        
+        杩欐槸鏍稿績璁＄畻鍑芥暟锛屽疄鐜颁簡RMSNorm鐨勬暟瀛﹀叕寮?        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (..., dim)
+            
+        杩斿洖:
+            褰掍竴鍖栧悗鐨勫紶閲忥紝褰㈢姸涓庤緭鍏ョ浉鍚?            
+        璁＄畻姝ラ:
+            1. 璁＄畻骞虫柟: x.pow(2) -> x虏
+            2. 璁＄畻鍧囧€? mean(-1) -> 1/n * 危x_i虏
+            3. 鍔爀ps: + eps -> 闃叉闄ら浂
+            4. 寮€骞虫柟鏍? rsqrt -> 1/sqrt(...)
+            5. 涔樹互鍘熷€? * -> 褰掍竴鍖?        """
+        # 璁＄畻RMS (Root Mean Square)
+        # x.pow(2): 瀵规瘡涓厓绱犳眰骞虫柟
+        # mean(-1, keepdim=True): 鍦ㄦ渶鍚庝竴涓淮搴︿笂姹傚潎鍊硷紝淇濇寔缁村害
+        # rsqrt: 璁＄畻骞虫柟鏍圭殑鍊掓暟锛屽嵆 1/sqrt(x)
+        # 鏁翠綋鍏紡: 1/sqrt(mean(x虏) + eps)
+        
+        # 涓轰粈涔堜娇鐢╮sqrt鑰屼笉鏄痵qrt鐒跺悗闄わ紵
+        # 鍥犱负rsqrt鏄崟娆℃搷浣滐紝姣斿厛sqrt鍐嶉櫎娉曟洿楂樻晥
+        
+        # 涓轰粈涔坘eepdim=True锛?        # 淇濇寔缁村害鍙互鑷姩骞挎挱锛岄伩鍏嶆墜鍔╮eshape
+        
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, dim)
+               鎴栧叾浠栦换鎰忓舰鐘讹紝鍙鏈€鍚庝竴缁存槸dim
+               
+        杩斿洖:
+            褰掍竴鍖栧苟缂╂斁鍚庣殑寮犻噺锛屽舰鐘朵笌杈撳叆鐩稿悓
+            
+        璁＄畻娴佺▼:
+            1. 灏嗚緭鍏ヨ浆涓篺loat32杩涜绮剧‘璁＄畻
+            2. 鎵цRMS褰掍竴鍖?            3. 杞洖鍘熸暟鎹被鍨?            4. 涔樹互鍙涔犵殑鏉冮噸鍙傛暟
+        """
+        # 涓轰粈涔堝厛杞负float32鍐嶈绠楋紵
+        # 鍥犱负褰掍竴鍖栨秹鍙婇櫎娉曞拰寮€鏂癸紝float16绮惧害涓嶅鍙兘瀵艰嚧鏁板€间笉绋冲畾
+        # 璁＄畻瀹屾垚鍚庡啀杞洖鍘熺被鍨嬶紝涓嶅奖鍝嶆暣浣撶簿搴?        
+        # self._norm(x.float()): 鍦╢loat32绮惧害涓嬭绠楀綊涓€鍖?        # .type_as(x): 杞洖杈撳叆鐨勬暟鎹被鍨嬶紙濡俠float16锛?        # self.weight: 搴旂敤鍙涔犵殑缂╂斁鍙傛暟
+        
+        return self.weight * self._norm(x.float()).type_as(x)
+    
+    def extra_repr(self) -> str:
+        """
+        杩斿洖棰濆鐨勫瓧绗︿覆琛ㄧず锛岀敤浜巔rint(model)鏃舵樉绀?        """
+        return f'dim={self.dim}, eps={self.eps}'
+
+
+# ==================== RMSNorm vs LayerNorm 瀵规瘮 ====================
+
+class LayerNorm(nn.Module):
+    """
+    浼犵粺鐨凩ayerNorm瀹炵幇锛岀敤浜庡姣?    
+    LayerNorm鐨勬暟瀛﹀叕寮忥細
+        mean = 1/n * 危x_i
+        var = 1/n * 危(x_i - mean)虏
+        y = (x - mean) / sqrt(var + eps) * weight + bias
+    """
+    
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.bias = nn.Parameter(torch.zeros(dim))  # RMSNorm娌℃湁杩欎釜
+        self.eps = eps
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 璁＄畻鍧囧€煎拰鏂瑰樊
+        mean = x.mean(-1, keepdim=True)
+        var = x.var(-1, keepdim=True, unbiased=False)
+        
+        # 褰掍竴鍖?        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        
+        # 缂╂斁鍜屽钩绉?        return self.weight * x_norm + self.bias
+
+
+# ==================== 涓轰粈涔堥€夋嫨RMSNorm ====================
+
+"""
+RMSNorm鐨勪紭鍔匡細
+
+1. 璁＄畻鏁堢巼
+   - LayerNorm闇€瑕佽绠楀潎鍊煎拰鏂瑰樊锛?娆＄粺璁¤绠?   - RMSNorm鍙渶瑕佽绠楀潎鏂规牴锛?娆＄粺璁¤绠?   - 璁＄畻閲忓噺灏戠害30-40%
+
+2. 鍐呭瓨鏁堢巼
+   - LayerNorm闇€瑕佸瓨鍌╩ean鍜寁ar鐢ㄤ簬鍙嶅悜浼犳挱
+   - RMSNorm鍙渶瑕佸瓨鍌ㄥ钩鏂瑰潎鍊?   - 鍐呭瓨鍗犵敤鏇村皯
+
+3. 鍙傛暟閲?   - LayerNorm: weight + bias = 2 * dim
+   - RMSNorm: weight = dim
+   - 鍙傛暟閲忓噺鍗?
+4. GPU鍙嬪ソ
+   - RMSNorm鐨勮绠楁ā寮忔洿閫傚悎GPU骞惰
+   - 鍙互鏇村ソ鍦板埄鐢═ensor Core
+
+5. 瀹炶返鏁堟灉
+   - 鍦ㄥぇ璇█妯″瀷涓婏紝RMSNorm涓嶭ayerNorm鏁堟灉鐩稿綋
+   - LLaMA銆丗alcon銆丮istral绛夋ā鍨嬮兘閲囩敤RMSNorm
+
+涓轰粈涔圧MSNorm鍙互鐪佸幓鍧囧€硷紵
+- 鐞嗚涓婏紝鍧囧€间腑蹇冨寲瀵瑰綊涓€鍖栨晥鏋滃奖鍝嶄笉澶?- RMSNorm鐩存帴瀵瑰昂搴﹁繘琛屽綊涓€鍖栵紝宸茬粡瓒冲绋冲畾璁粌
+- 瀹為獙琛ㄦ槑锛屽幓鎺夊潎鍊艰绠楀妯″瀷鎬ц兘褰卞搷寰堝皬
+"""
+```
+
+#### 3.1.2 鏁板€肩ず渚?
+```python
+# RMSNorm璁＄畻绀轰緥
+import torch
+
+# 鍒涘缓绀轰緥杈撳叆
+x = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+
+# 璁＄畻RMS
+rms = torch.sqrt(torch.mean(x.pow(2), dim=-1, keepdim=True))
+# rms = sqrt((1+4+9+16)/4) = sqrt(7.5) 鈮?2.739
+
+# 褰掍竴鍖?x_norm = x / rms
+# x_norm 鈮?[0.365, 0.730, 1.095, 1.461]
+
+# 搴旂敤鏉冮噸
+weight = torch.ones(4)
+output = weight * x_norm
+# output 鈮?[0.365, 0.730, 1.095, 1.461]
+```
+
+---
+
+### 3.2 RoPE 鏃嬭浆浣嶇疆缂栫爜
+
+RoPE锛圧otary Position Embeddings锛夋槸鐜颁唬澶ц瑷€妯″瀷鐨勬爣鍑嗕綅缃紪鐮佹柟娉曪紝瀹冮€氳繃澶嶆暟鏃嬭浆鐨勬柟寮忓皢浣嶇疆淇℃伅娉ㄥ叆鍒版敞鎰忓姏璁＄畻涓€?
+#### 3.2.1 瀹屾暣浠ｇ爜瀹炵幇
+
+```python
+"""
+RoPE - 鏃嬭浆浣嶇疆缂栫爜
+浣嶇疆锛歮odel/model.py 绗?3-113琛?"""
+
+import torch
+import torch.nn as nn
+from typing import Optional, Tuple
+
+
+def precompute_pos_cis(
+    dim: int, 
+    end: int = int(32 * 1024), 
+    theta: float = 1e6
+) -> torch.Tensor:
+    """
+    棰勮绠楁棆杞綅缃紪鐮佹墍闇€鐨勫鏁板€?    
+    杩欐槸RoPE鐨勬牳蹇冮璁＄畻鍑芥暟锛屽湪妯″瀷鍒濆鍖栨椂璋冪敤涓€娆★紝
+    鐢熸垚鎵€鏈変綅缃殑浣嶇疆缂栫爜锛岄伩鍏嶆瘡娆″墠鍚戜紶鎾椂閲嶅璁＄畻銆?    
+    鍙傛暟:
+        dim: 姣忎釜娉ㄦ剰鍔涘ご鐨勭淮搴︼紙涓嶆槸鎬荤淮搴︼級
+             渚嬪锛歞im=512, n_heads=8 -> head_dim=64
+        end: 鏈€澶у簭鍒楅暱搴︼紝榛樿32K
+             杩欐槸浣嶇疆缂栫爜鏀寔鐨勬渶澶oken鏁伴噺
+        theta: RoPE鐨勫熀鏁帮紝鎺у埗棰戠巼鑼冨洿
+               榛樿1e6锛屾洿澶х殑鍊兼敮鎸佹洿闀跨殑澶栨帹
+    
+    杩斿洖:
+        pos_cis: 澶嶆暟寮犻噺锛屽舰鐘朵负 (end, dim//2)
+                 姣忎釜浣嶇疆瀵瑰簲涓€涓鏁板悜閲?                 
+    鏁板鍘熺悊:
+        RoPE鐨勬牳蹇冩€濇兂鏄娇鐢ㄥ鏁版棆杞潵缂栫爜浣嶇疆
+        
+        瀵逛簬浣嶇疆m鍜岀淮搴锛屾棆杞搴︿负锛?            胃_{m,d} = m * 胃_d
+        鍏朵腑 胃_d = 1 / (theta^(2d/dim))
+        
+        杩欎釜瑙掑害瀵瑰簲澶嶆暟锛?            e^(i*胃) = cos(胃) + i*sin(胃)
+        
+        灏嗕綅缃紪鐮佸簲鐢ㄥ埌鏌ヨq鍜岄敭k涓婏細
+            q' = q * e^(i*胃_m)
+            k' = k * e^(i*胃_n)
+        
+        杩欐牱娉ㄦ剰鍔涘垎鏁板彉涓猴細
+            q' 路 k' = q 路 k * e^(i*(胃_m - 胃_n))
+        
+        杩欏氨鑷劧鍦板紩鍏ヤ簡鐩稿浣嶇疆淇℃伅 (m-n)
+    """
+    # 姝ラ1锛氳绠椾笉鍚岀淮搴︾殑棰戠巼
+    # 鍏紡锛歠req_i = 1 / (theta^(2i/dim))
+    # torch.arange(0, dim, 2)锛氱敓鎴?[0, 2, 4, ..., dim-2]
+    # 杩欐槸鍥犱负姣忎釜棰戠巼瀵瑰簲涓や釜缁村害锛堝鏁扮殑瀹為儴鍜岃櫄閮級
+    
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+    # freqs褰㈢姸锛?dim//2,)
+    # 渚嬪dim=64鏃讹紝freqs褰㈢姸涓?32,)
+    # freqs鐨勫€间粠澶у埌灏忥紝瀵瑰簲涓嶅悓棰戠巼鐨勪綅缃紪鐮?    
+    # 姝ラ2锛氱敓鎴愪綅缃储寮?    # torch.arange(end)锛氱敓鎴?[0, 1, 2, ..., end-1]
+    # 姣忎釜浣嶇疆閮芥湁涓€涓敮涓€鐨勪綅缃紪鐮?    
+    t = torch.arange(end, device=freqs.device)
+    # t褰㈢姸锛?end,)
+    
+    # 姝ラ3锛氳绠楀绉緱鍒版瘡涓綅缃搴旂殑姣忎釜棰戠巼
+    # torch.outer锛氳绠楀绉?    # freqs = t 鈯?freqs
+    # 缁撴灉褰㈢姸锛?end, dim//2)
+    # freqs[m, d] = m * freq_d
+    
+    freqs = torch.outer(t, freqs).float()
+    
+    # 姝ラ4锛氫娇鐢ㄦ鎷夊叕寮忕敓鎴愬鏁?    # 娆ф媺鍏紡锛歟^(i*胃) = cos(胃) + i*sin(胃)
+    # torch.polar(abs, angle)锛氱敓鎴愬鏁板紶閲?    # abs=1锛氬鏁扮殑妯′负1锛堝崟浣嶅渾涓婄殑鐐癸級
+    # angle=freqs锛氭棆杞搴?    
+    pos_cis = torch.polar(torch.ones_like(freqs), freqs)
+    # pos_cis褰㈢姸锛?end, dim//2)
+    # 绫诲瀷锛歝omplex64
+    
+    return pos_cis
+
+
+def apply_rotary_emb(
+    xq: torch.Tensor, 
+    xk: torch.Tensor, 
+    pos_cis: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    灏嗘棆杞綅缃紪鐮佸簲鐢ㄥ埌鏌ヨ鍜岄敭涓?    
+    杩欐槸RoPE鐨勬牳蹇冨簲鐢ㄥ嚱鏁帮紝鍦ㄦ瘡涓敞鎰忓姏灞傜殑鍓嶅悜浼犳挱涓皟鐢ㄣ€?    
+    鍙傛暟:
+        xq: 鏌ヨ寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, n_heads, head_dim)
+        xk: 閿紶閲忥紝褰㈢姸涓?(batch_size, seq_len, n_kv_heads, head_dim)
+        pos_cis: 棰勮绠楃殑浣嶇疆缂栫爜锛屽舰鐘朵负 (seq_len, head_dim//2)
+        
+    杩斿洖:
+        xq_out: 搴旂敤浣嶇疆缂栫爜鍚庣殑鏌ヨ
+        xk_out: 搴旂敤浣嶇疆缂栫爜鍚庣殑閿?        
+    鏁板鍘熺悊:
+        灏嗗疄鏁板悜閲忚涓哄鏁板悜閲忥紝鐒跺悗涔樹互浣嶇疆缂栫爜鐨勫鏁?        
+        渚嬪锛屽浜庡悜閲?[a, b, c, d]锛?        1. 閲嶅涓哄鏁板舰寮忥細[(a+bi), (c+di)]
+        2. 涔樹互浣嶇疆缂栫爜锛歔(a+bi)*e^(i胃1), (c+di)*e^(i胃2)]
+        3. 灞曞紑鍥炲疄鏁板舰寮?        
+        澶嶆暟涔樻硶锛?        (a+bi) * (cos(胃)+i*sin(胃)) 
+        = a*cos(胃) - b*sin(胃) + i*(a*sin(胃) + b*cos(胃))
+        
+        杩欑瓑浠蜂簬鏃嬭浆鐭╅樀鍙樻崲锛?        [cos(胃)  -sin(胃)] [a]
+        [sin(胃)   cos(胃)] [b]
+    """
+    # 姝ラ1锛氳幏鍙栦綅缃紪鐮佺殑璁惧淇℃伅锛岀‘淇濆湪鍚屼竴璁惧涓?    # 鍚屾椂灏唒os_cis鎵╁睍鍒颁笌xq鐩稿悓鐨勬壒娆″拰澶存暟
+    
+    # pos_cis鐨勫舰鐘堕渶瑕佷笌xq鍖归厤
+    # 鍘熷褰㈢姸锛?seq_len, head_dim//2)
+    # 闇€瑕佹墿灞曚负锛?batch_size, seq_len, n_heads, head_dim//2)
+    
+    # 浣跨敤骞挎挱鏈哄埗锛屽彧闇€瑕佸湪閫傚綋浣嶇疆娣诲姞缁村害
+    # pos_cis: (seq_len, head_dim//2) -> (1, seq_len, 1, head_dim//2)
+    pos_cis = pos_cis.unsqueeze(0).unsqueeze(2)
+    
+    # 姝ラ2锛氬皢瀹炴暟寮犻噺杞崲涓哄鏁板舰寮?    # xq褰㈢姸锛?batch_size, seq_len, n_heads, head_dim)
+    # 閲嶅涓猴細(batch_size, seq_len, n_heads, head_dim//2, 2)
+    # 鏈€鍚庝竴涓淮搴?琛ㄧず瀹為儴鍜岃櫄閮?    
+    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+    # xq_褰㈢姸锛?batch_size, seq_len, n_heads, head_dim//2)
+    # 绫诲瀷锛歝omplex64
+    
+    # 姝ラ3锛氬湪澶嶆暟鍩熶腑搴旂敤鏃嬭浆锛堜箻浠os_cis锛?    # 澶嶆暟涔樻硶浼氳嚜鍔ㄥ箍鎾?    
+    xq_out = torch.view_as_real(xq_ * pos_cis).flatten(3)
+    xk_out = torch.view_as_real(xk_ * pos_cis).flatten(3)
+    # xq_out褰㈢姸锛?batch_size, seq_len, n_heads, head_dim)
+    # 绫诲瀷锛歠loat锛堝疄鏁帮級
+    
+    # 姝ラ4锛氳浆鍥炲師鏁版嵁绫诲瀷
+    return xq_out.type_as(xq), xk_out.type_as(xk)
+
+
+# ==================== RoPE 璇﹁В ====================
+
+"""
+涓轰粈涔圧oPE濡傛閲嶈锛?
+1. 鐩稿浣嶇疆鎰熺煡
+   - 缁濆浣嶇疆缂栫爜锛氱洿鎺ュ皢浣嶇疆淇℃伅鍔犲埌宓屽叆涓?   - RoPE锛氶€氳繃鏃嬭浆缂栫爜鐩稿浣嶇疆
+   
+   鍦ㄦ敞鎰忓姏璁＄畻涓細
+   q_m 路 k_n = |q| |k| cos(angle(q) - angle(k) + (m-n)*胃)
+   
+   鍙互鐪嬪埌锛屾敞鎰忓姏鍒嗘暟鑷劧鍦板寘鍚簡鐩稿浣嶇疆淇℃伅(m-n)
+
+2. 闀垮害澶栨帹鑳藉姏
+   - 浼犵粺浣嶇疆缂栫爜锛氳缁冮暱搴﹀鐨勪綅缃病鏈夌紪鐮?   - RoPE锛氬彲浠ラ€氳繃鎻掑€肩瓑鏂规硶鎵╁睍鍒版洿闀跨殑搴忓垪
+   
+   渚嬪锛氳缁冩椂max_seq_len=512锛屾帹鐞嗘椂鍙互澶勭悊2048鐢氳嚦鏇撮暱
+
+3. 璁＄畻鏁堢巼
+   - 涓嶉渶瑕侀澶栫殑浣嶇疆宓屽叆鐭╅樀
+   - 浣嶇疆缂栫爜鐩存帴铻嶅叆Q銆並鐨勮绠椾腑
+   - 鍐呭瓨鍗犵敤鏇村皯
+
+4. 鏁板浼橀泤
+   - 鍒╃敤澶嶆暟鏃嬭浆鐨勫嚑浣曟€ц川
+   - 鐩搁偦浣嶇疆鐨勭浉瀵硅窛绂荤敱鏃嬭浆瑙掑害鍐冲畾
+   - 鐞嗚鍩虹鎵庡疄
+
+RoPE vs 鍏朵粬浣嶇疆缂栫爜锛?
+| 鏂规硶 | 澶栨帹鑳藉姏 | 璁＄畻澶嶆潅搴?| 鏄惧瓨鍗犵敤 | 鐩稿浣嶇疆 |
+|------|---------|-----------|---------|---------|
+| Sin/Cos | 宸?| O(1) | 灏?| 鍚?|
+| Learnable | 宸?| O(1) | 灏?| 鍚?|
+| Relative | 涓?| O(n虏) | 澶?| 鏄?|
+| ALiBi | 濂?| O(1) | 灏?| 鏄?|
+| RoPE | 浼樼 | O(1) | 灏?| 鏄?|
+"""
+```
+
+#### 3.2.2 RoPE鍙鍖栫悊瑙?
+```python
+"""
+RoPE鐨勭洿瑙傜悊瑙?
+鎯宠薄涓€涓簩缁村钩闈笂鐨勫悜閲忔棆杞細
+- 浣嶇疆0锛氬悜閲忔棆杞?搴?- 浣嶇疆1锛氬悜閲忔棆杞稿害
+- 浣嶇疆2锛氬悜閲忔棆杞?胃搴?- ...
+
+涓や釜鍚戦噺鐨勭偣绉細鍖呭惈瀹冧滑鏃嬭浆瑙掑害鐨勫樊鍊硷細
+- 浣嶇疆m鍜屼綅缃畁鐨勫悜閲忕偣绉寘鍚?m-n)胃鐨勪俊鎭?- 杩欏氨鏄浉瀵逛綅缃俊鎭?
+瀵逛簬楂樼淮鍚戦噺锛屾垜浠湪涓嶅悓鐨勭淮搴﹀涓婁娇鐢ㄤ笉鍚岀殑鏃嬭浆棰戠巼锛?- 浣庣淮搴﹀锛氫娇鐢ㄤ綆棰戞棆杞紙鍙樺寲鎱級
+- 楂樼淮搴﹀锛氫娇鐢ㄩ珮棰戞棆杞紙鍙樺寲蹇級
+
+杩欐牱鍙互鍦ㄤ笉鍚屽昂搴︿笂鎹曡幏浣嶇疆淇℃伅銆?"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def visualize_rope():
+    """鍙鍖朢oPE鐨勬棆杞晥鏋?""
+    
+    # 璁剧疆鍙傛暟
+    dim = 64  # 澶寸淮搴?    theta = 1e4  # 鍩烘暟
+    
+    # 璁＄畻棰戠巼
+    freqs = 1.0 / (theta ** (np.arange(0, dim, 2) / dim))
+    
+    # 缁樺埗涓嶅悓缁村害鐨勯鐜?    plt.figure(figsize=(12, 4))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(freqs)
+    plt.xlabel('Dimension Pair')
+    plt.ylabel('Frequency')
+    plt.title('RoPE Frequency per Dimension')
+    plt.yscale('log')
+    
+    # 缁樺埗涓嶅悓浣嶇疆鐨勬棆杞搴?    positions = np.arange(0, 512)
+    angles = np.outer(positions, freqs)
+    
+    plt.subplot(1, 2, 2)
+    plt.imshow(angles[:100, :].T, aspect='auto', cmap='viridis')
+    plt.xlabel('Position')
+    plt.ylabel('Dimension Pair')
+    plt.title('Rotation Angles (first 100 positions)')
+    plt.colorbar(label='Angle (radians)')
+    
+    plt.tight_layout()
+    plt.show()
+```
+
+---
+
+### 3.3 閲嶅KV澶村嚱鏁?repeat_kv
+
+杩欎釜鍑芥暟鏄疓QA锛堝垎缁勬煡璇㈡敞鎰忓姏锛夌殑鍏抽敭缁勪欢锛岀敤浜庡皢KV澶村鍒朵互鍖归厤Q澶寸殑鏁伴噺銆?
+```python
+"""
+repeat_kv - 閲嶅KV澶翠互鍖归厤Q澶存暟閲?浣嶇疆锛歮odel/model.py 绗?16-139琛?"""
+
+import torch
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    灏咾V澶撮噸澶峮_rep娆′互鍖归厤Q澶存暟閲?    
+    杩欐槸GQA锛圙rouped-Query Attention锛夌殑鏍稿績鍑芥暟銆?    鍦℅QA涓紝Q鐨勫ご鏁版槸KV澶存暟鐨勬暣鏁板€嶏紝闇€瑕佸湪璁＄畻鏃跺皢KV澶村鍒躲€?    
+    鍙傛暟:
+        x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, n_kv_heads, head_dim)
+           杩欐槸K鎴朧鐨勫紶閲?        n_rep: 閲嶅娆℃暟
+           = n_heads / n_kv_heads
+           渚嬪锛歯_heads=8, n_kv_heads=2 -> n_rep=4
+           
+    杩斿洖:
+        鎵╁睍鍚庣殑寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, n_heads, head_dim)
+        
+    绀轰緥:
+        杈撳叆: x.shape = (2, 10, 2, 64), n_rep = 4
+        杈撳嚭: shape = (2, 10, 8, 64)
+        
+        鍘熸潵鐨?涓狵V澶达紝姣忎釜琚鍒?娆★紝鍙樻垚8涓ご
+        
+    涓轰粈涔堥渶瑕佽繖涓嚱鏁帮紵
+        - GQA涓紝Q鏈?涓ご锛屼絾K鍜孷鍙湁2涓ご
+        - 璁＄畻娉ㄦ剰鍔涙椂锛岄渶瑕佽姣忎釜Q澶撮兘鏈夊搴旂殑K鍜孷澶?        - 瑙ｅ喅鏂规锛氬皢2涓狵V澶村悇澶嶅埗4娆★紝寰楀埌8涓ご
+        
+    涓庣洿鎺xpand鐨勫尯鍒細
+        - expand鍙槸鍒涘缓瑙嗗浘锛屼笉鍗犵敤棰濆鍐呭瓨
+        - 浣嗗悗缁搷浣滃彲鑳介渶瑕佽繛缁唴瀛?        - reshape纭繚鍐呭瓨甯冨眬姝ｇ‘
+    """
+    # 濡傛灉n_rep=1锛岃鏄庢槸鏍囧噯MHA锛屼笉闇€瑕佸鍒?    if n_rep == 1:
+        return x
+    
+    # 鑾峰彇杈撳叆褰㈢姸
+    bs, slen, n_kv_heads, head_dim = x.shape
+    
+    # 姝ラ1锛氭坊鍔犱竴涓柊缁村害鐢ㄤ簬鎵╁睍
+    # x[:, :, :, None, :] 褰㈢姸鍙樹负 (bs, slen, n_kv_heads, 1, head_dim)
+    # None鐩稿綋浜巙nsqueeze锛屽湪鎸囧畾浣嶇疆娣诲姞涓€涓ぇ灏忎负1鐨勭淮搴?    
+    # 姝ラ2锛氭墿灞曡繖涓淮搴?    # .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+    # 灏嗙4缁翠粠1鎵╁睍鍒皀_rep
+    # 娉ㄦ剰锛歟xpand涓嶅疄闄呭鍒舵暟鎹紝鍙槸鍒涘缓涓€涓鍥?    
+    # 姝ラ3锛氶噸濉戝舰鐘?    # .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+    # 灏嗘渶鍚庝袱涓淮搴﹀悎骞?    # 褰㈢姸鍙樹负 (bs, slen, n_heads, head_dim)
+    
+    return (
+        x[:, :, :, None, :]
+        .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+        .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+    )
+
+
+# ==================== GQA 璇﹁В ====================
+
+"""
+GQA锛圙rouped-Query Attention锛夎瑙?
+浼犵粺MHA锛圡ulti-Head Attention锛夛細
+- Q銆並銆乂閮芥湁n涓ご
+- 姣忎釜Q澶翠笌瀵瑰簲鐨凨銆乂澶磋绠楁敞鎰忓姏
+- 闂锛氭帹鐞嗘椂闇€瑕佺紦瀛樻墍鏈塊V澶达紝鏄惧瓨鍗犵敤澶?
+MQA锛圡ulti-Query Attention锛夛細
+- Q鏈塶涓ご锛孠鍜孷鍙湁1涓ご
+- 鎵€鏈塓澶村叡浜悓涓€缁凨V
+- 浼樼偣锛欿V缂撳瓨鍑忓皯鍒?/n
+- 缂虹偣锛氭€ц兘鐣ユ湁涓嬮檷
+
+GQA锛圙rouped-Query Attention锛夛細
+- Q鏈塶涓ご锛孠鍜孷鏈塯涓ご锛坓 < n锛屼笖n鑳借g鏁撮櫎锛?- 姣忕粍Q澶村叡浜竴缁凨V
+- 浼樼偣锛氬湪MHA鍜孧QA涔嬮棿鍙栧緱骞宠　
+- 缂虹偣锛氬疄鐜扮◢澶嶆潅
+
+绀轰緥锛?鍋囪 n_heads=8, n_kv_heads=2
+
+MHA: Q=8澶? K=8澶? V=8澶?-> KV缂撳瓨 = 8 脳 seq_len 脳 head_dim
+GQA: Q=8澶? K=2澶? V=2澶?-> KV缂撳瓨 = 2 脳 seq_len 脳 head_dim (鍑忓皯75%)
+MQA: Q=8澶? K=1澶? V=1澶?-> KV缂撳瓨 = 1 脳 seq_len 脳 head_dim (鍑忓皯87.5%)
+
+GQA鐨勫疄鐜版祦绋嬶細
+1. 杈撳叆token缁忚繃鎶曞奖寰楀埌Q銆並銆乂
+2. Q鐨勫舰鐘讹細(batch, seq, 8, head_dim)
+3. K鐨勫舰鐘讹細(batch, seq, 2, head_dim)
+4. V鐨勫舰鐘讹細(batch, seq, 2, head_dim)
+5. 璋冪敤repeat_kv灏咾銆乂澶嶅埗锛?   - K: (batch, seq, 2, head_dim) -> (batch, seq, 8, head_dim)
+   - V: (batch, seq, 2, head_dim) -> (batch, seq, 8, head_dim)
+6. 鐜板湪鍙互姝ｅ父璁＄畻娉ㄦ剰鍔涗簡
+
+鎬ц兘瀵规瘮锛?| 鏂规硶 | KV缂撳瓨 | 鎺ㄧ悊閫熷害 | 妯″瀷璐ㄩ噺 |
+|------|--------|---------|---------|
+| MHA  | 100%   | 鍩哄噯    | 鍩哄噯    |
+| GQA  | 25%    | 蹇?     | 鐣ラ檷    |
+| MQA  | 12.5%  | 鏈€蹇?   | 杈冮檷    |
+
+MiniMind閫夋嫨GQA鐨勫師鍥狅細
+1. 鏄捐憲鍑忓皯鎺ㄧ悊鏃剁殑KV缂撳瓨
+2. 鐩告瘮MQA锛屾€ц兘鎹熷け鏇村皬
+3. 涓嶭LaMA 2淇濇寔涓€鑷寸殑璁捐
+"""
+```
+
+---
+
+### 3.4 娉ㄦ剰鍔涙満鍒?Attention
+
+娉ㄦ剰鍔涙満鍒舵槸Transformer鐨勬牳蹇冪粍浠讹紝MiniMind瀹炵幇浜嗛珮鏁堢殑鍒嗙粍鏌ヨ娉ㄦ剰鍔涳紙GQA锛夊苟鏀寔Flash Attention銆?
+```python
+"""
+Attention - 娉ㄦ剰鍔涙満鍒跺疄鐜?浣嶇疆锛歮odel/model.py 绗?42-280琛?"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Optional, Tuple
+import math
+
+
+class Attention(nn.Module):
+    """
+    鍒嗙粍鏌ヨ娉ㄦ剰鍔涳紙Grouped-Query Attention, GQA锛?    
+    杩欐槸MiniMind鐨勬牳蹇冩敞鎰忓姏瀹炵幇锛屾敮鎸侊細
+    1. GQA锛歈澶存暟澶氫簬KV澶存暟锛屽噺灏慘V缂撳瓨
+    2. Flash Attention 2锛氶珮鏁堢殑娉ㄦ剰鍔涜绠?    3. KV缂撳瓨锛氭敮鎸佸閲忔帹鐞?    4. RoPE锛氭棆杞綅缃紪鐮?    
+    鏁板鍏紡锛?        Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) * V
+        
+    鍏朵腑锛?        Q = X * W_q  (鏌ヨ鎶曞奖)
+        K = X * W_k  (閿姇褰?
+        V = X * W_v  (鍊兼姇褰?
+    """
+    
+    def __init__(self, args):
+        """
+        鍒濆鍖栨敞鎰忓姏灞?        
+        鍙傛暟:
+            args: LMConfig閰嶇疆瀵硅薄锛屽寘鍚細
+                - dim: 闅愯棌缁村害
+                - n_heads: 鏌ヨ澶存暟
+                - n_kv_heads: KV澶存暟
+                - head_dim: 姣忎釜澶寸殑缁村害
+                - dropout: dropout姣旂巼
+                - flash_attn: 鏄惁浣跨敤Flash Attention
+        """
+        super().__init__()
+        
+        # 瀛樺偍閰嶇疆
+        self.n_heads = args.n_heads  # Q鐨勬€诲ご鏁?        self.head_dim = args.head_dim  # 姣忎釜澶寸殑缁村害
+        
+        # GQA閰嶇疆
+        # n_kv_heads: K鍜孷鐨勫ご鏁?        # 濡傛灉n_kv_heads < n_heads锛屽惎鐢℅QA
+        # 濡傛灉n_kv_heads == n_heads锛岄€€鍖栦负鏍囧噯MHA
+        # 濡傛灉n_kv_heads == 1锛岄€€鍖栦负MQA
+        self.n_kv_heads = args.n_kv_heads if args.n_kv_heads is not None else args.n_heads
+        
+        # 璁＄畻姣忎釜KV澶村搴旂殑Q澶存暟
+        # 渚嬪锛歯_heads=8, n_kv_heads=2 -> n_rep=4
+        # 琛ㄧず姣忎釜KV澶磋4涓猀澶村叡浜?        self.n_rep = self.n_heads // self.n_kv_heads
+        
+        # 鎶曞奖灞傚畾涔?        
+        # Q鎶曞奖锛氬皢杈撳叆鎶曞奖鍒皀_heads涓ご
+        # 杈撳嚭缁村害 = n_heads * head_dim = dim
+        self.wq = nn.Linear(args.dim, self.n_heads * self.head_dim, bias=False)
+        
+        # K鎶曞奖锛氬皢杈撳叆鎶曞奖鍒皀_kv_heads涓ご
+        # 娉ㄦ剰锛氳緭鍑虹淮搴﹀彲鑳藉皬浜巇im
+        # 渚嬪锛歞im=512, n_heads=8, n_kv_heads=2
+        # wq杈撳嚭锛?12, wk杈撳嚭锛?28
+        self.wk = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        
+        # V鎶曞奖锛氫笌K鎶曞奖绫讳技
+        self.wv = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        
+        # 杈撳嚭鎶曞奖锛氬皢澶氬ご娉ㄦ剰鍔涚殑缁撴灉鎶曞奖鍥炲師濮嬬淮搴?        self.wo = nn.Linear(self.n_heads * self.head_dim, args.dim, bias=False)
+        
+        # Dropout灞?        self.dropout = nn.Dropout(args.dropout)
+        
+        # 鏄惁浣跨敤Flash Attention
+        self.flash = args.flash_attn and hasattr(F, 'scaled_dot_product_attention')
+        
+        # 娉ㄦ剰鍔涚缉鏀惧洜瀛?        # 1/sqrt(head_dim) 鐢ㄤ簬缂╂斁鐐圭Н锛岄槻姝㈡搴︽秷澶?        self.scale = 1.0 / math.sqrt(self.head_dim)
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+        pos_cis: torch.Tensor,
+        past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, dim)
+            pos_cis: RoPE浣嶇疆缂栫爜锛屽舰鐘朵负 (seq_len, head_dim//2)
+            past_key_value: 涔嬪墠鐨凨V缂撳瓨锛岀敤浜庡閲忔帹鐞?                - past_key: (batch, past_seq_len, n_kv_heads, head_dim)
+                - past_value: 鍚屼笂
+            use_cache: 鏄惁杩斿洖KV缂撳瓨
+            
+        杩斿洖:
+            output: 娉ㄦ剰鍔涜緭鍑猴紝褰㈢姸涓?(batch_size, seq_len, dim)
+            past_kv: 濡傛灉use_cache=True锛岃繑鍥炲綋鍓嶇殑KV缂撳瓨
+            
+        璁＄畻娴佺▼:
+            1. 绾挎€ф姇褰卞緱鍒癚銆並銆乂
+            2. 搴旂敤RoPE浣嶇疆缂栫爜鍒癚鍜孠
+            3. 濡傛灉鏈塊V缂撳瓨锛屾嫾鎺ュ巻鍙睰V
+            4. 閲嶅KV澶翠互鍖归厤Q澶存暟閲忥紙GQA锛?            5. 璁＄畻娉ㄦ剰鍔涘垎鏁?            6. 搴旂敤softmax鍜宒ropout
+            7. 鍔犳潈姹傚拰寰楀埌杈撳嚭
+            8. 杈撳嚭鎶曞奖
+        """
+        # 鑾峰彇杈撳叆褰㈢姸
+        bs, seqlen, _ = x.shape
+        
+        # ==================== 姝ラ1锛氱嚎鎬ф姇褰?====================
+        
+        # Q鎶曞奖锛?bs, seqlen, dim) -> (bs, seqlen, n_heads * head_dim)
+        xq = self.wq(x)
+        # K鎶曞奖锛?bs, seqlen, dim) -> (bs, seqlen, n_kv_heads * head_dim)
+        xk = self.wk(x)
+        # V鎶曞奖锛?bs, seqlen, dim) -> (bs, seqlen, n_kv_heads * head_dim)
+        xv = self.wv(x)
+        
+        # 閲嶅涓哄澶村舰寮?        # Q: (bs, seqlen, n_heads * head_dim) -> (bs, seqlen, n_heads, head_dim)
+        xq = xq.view(bs, seqlen, self.n_heads, self.head_dim)
+        # K: (bs, seqlen, n_kv_heads * head_dim) -> (bs, seqlen, n_kv_heads, head_dim)
+        xk = xk.view(bs, seqlen, self.n_kv_heads, self.head_dim)
+        # V: 鍚孠
+        xv = xv.view(bs, seqlen, self.n_kv_heads, self.head_dim)
+        
+        # ==================== 姝ラ2锛氬簲鐢≧oPE ====================
+        
+        # RoPE鍙簲鐢ㄤ簬Q鍜孠锛屼笉搴旂敤浜嶸
+        # 鍥犱负浣嶇疆淇℃伅閫氳繃Q鍜孠鐨勭偣绉紶閫?        xq, xk = apply_rotary_emb(xq, xk, pos_cis)
+        
+        # ==================== 姝ラ3锛氬鐞咾V缂撳瓨 ====================
+        
+        # 濡傛灉鏈夊巻鍙睰V缂撳瓨锛屽皢褰撳墠KV鎷兼帴鍒板巻鍙睰V鍚庨潰
+        if past_key_value is not None:
+            # past_key_value鏄竴涓厓缁?(past_k, past_v)
+            past_k, past_v = past_key_value
+            # 鎷兼帴锛歝at([past, current], dim=1) 鍦ㄥ簭鍒楃淮搴︿笂鎷兼帴
+            xk = torch.cat([past_k, xk], dim=1)
+            xv = torch.cat([past_v, xv], dim=1)
+        
+        # 淇濆瓨褰撳墠鐨凨V鐢ㄤ簬杩斿洖
+        past_kv = (xk, xv) if use_cache else None
+        
+        # ==================== 姝ラ4锛氶噸澶岾V澶达紙GQA鏍稿績锛?====================
+        
+        # 杞疆浠ラ€傚簲娉ㄦ剰鍔涜绠楃殑褰㈢姸
+        # Q: (bs, seqlen, n_heads, head_dim) -> (bs, n_heads, seqlen, head_dim)
+        xq = xq.transpose(1, 2)
+        
+        # K鍜孷闇€瑕佸厛閲嶅澶达紝鍐嶈浆缃?        # repeat_kv: (bs, seqlen, n_kv_heads, head_dim) -> (bs, seqlen, n_heads, head_dim)
+        # transpose: (bs, seqlen, n_heads, head_dim) -> (bs, n_heads, seqlen, head_dim)
+        xk = repeat_kv(xk, self.n_rep).transpose(1, 2)
+        xv = repeat_kv(xv, self.n_rep).transpose(1, 2)
+        
+        # ==================== 姝ラ5锛氳绠楁敞鎰忓姏 ====================
+        
+        if self.flash:
+            # 浣跨敤Flash Attention锛堟帹鑽愶級
+            # Flash Attention鏄竴绉岻O鎰熺煡鐨勭簿纭敞鎰忓姏绠楁硶
+            # 鏄捐憲鍑忓皯鍐呭瓨璁块棶锛屽姞閫熻绠楀苟鍑忓皯鏄惧瓨鍗犵敤
+            
+            # scaled_dot_product_attention鑷姩澶勭悊锛?            # 1. QK^T鐐圭Н
+            # 2. 缂╂斁锛堥櫎浠qrt(head_dim)锛?            # 3. 鍙€夌殑mask锛坈ausal mask锛?            # 4. softmax
+            # 5. 涓嶸鍔犳潈
+            
+            # causal=True锛氬簲鐢ㄥ洜鏋滄帺鐮侊紝纭繚鍙兘鐪嬪埌涔嬪墠鐨勪綅缃?            output = F.scaled_dot_product_attention(
+                xq, xk, xv,
+                attn_mask=None,  # 浣跨敤is_causal鍙傛暟浠ｆ浛
+                dropout_p=self.dropout.p if self.training else 0.0,
+                is_causal=True  # 鍥犳灉娉ㄦ剰鍔?            )
+        else:
+            # 鎵嬪姩瀹炵幇娉ㄦ剰鍔涜绠?            # 鐢ㄤ簬涓嶆敮鎸丗lash Attention鐨勭幆澧?            
+            # 璁＄畻娉ㄦ剰鍔涘垎鏁帮細QK^T
+            # (bs, n_heads, seqlen, head_dim) @ (bs, n_heads, head_dim, kvlen)
+            # -> (bs, n_heads, seqlen, kvlen)
+            scores = torch.matmul(xq, xk.transpose(-2, -1)) * self.scale
+            
+            # 鍒涘缓鍥犳灉鎺╃爜
+            # 鍥犳灉鎺╃爜纭繚浣嶇疆i鍙兘鐪嬪埌浣嶇疆0鍒癷鐨勪俊鎭?            # 浣跨敤涓婁笁瑙掔煩闃电殑璐熸棤绌锋潵mask鎺夋湭鏉ヤ綅缃?            seqlen_q = xq.shape[2]
+            seqlen_k = xk.shape[2]
+            
+            # 鍒涘缓鎺╃爜锛氫笂涓夎涓?inf锛屼笅涓夎鍜屽瑙掔嚎涓?
+            mask = torch.triu(
+                torch.full((seqlen_q, seqlen_k), float('-inf'), device=x.device),
+                diagonal=1
+            )
+            
+            # 搴旂敤鎺╃爜
+            scores = scores + mask
+            
+            # Softmax褰掍竴鍖?            scores = F.softmax(scores, dim=-1)
+            
+            # Dropout
+            scores = self.dropout(scores)
+            
+            # 鍔犳潈姹傚拰锛歴cores @ V
+            # (bs, n_heads, seqlen, kvlen) @ (bs, n_heads, kvlen, head_dim)
+            # -> (bs, n_heads, seqlen, head_dim)
+            output = torch.matmul(scores, xv)
+        
+        # ==================== 姝ラ6锛氳緭鍑哄鐞?====================
+        
+        # 杞疆鍥炴潵锛?bs, n_heads, seqlen, head_dim) -> (bs, seqlen, n_heads, head_dim)
+        output = output.transpose(1, 2)
+        
+        # 灞曞钩澶氬ご锛?bs, seqlen, n_heads, head_dim) -> (bs, seqlen, n_heads * head_dim)
+        output = output.contiguous().view(bs, seqlen, -1)
+        
+        # 杈撳嚭鎶曞奖锛?bs, seqlen, n_heads * head_dim) -> (bs, seqlen, dim)
+        output = self.wo(output)
+        
+        return output, past_kv
+
+
+# ==================== 娉ㄦ剰鍔涙満鍒惰瑙?====================
+
+"""
+娉ㄦ剰鍔涙満鍒剁殑鏍稿績姒傚康
+
+1. 涓轰粈涔堥渶瑕佹敞鎰忓姏锛?   - 浼犵粺RNN澶勭悊搴忓垪鏃讹紝淇℃伅闇€瑕侀€愭浼犻€?   - 闀胯窛绂讳緷璧栭毦浠ユ崟鑾?   - 娉ㄦ剰鍔涙満鍒跺厑璁告瘡涓綅缃洿鎺ヨ闂墍鏈夊叾浠栦綅缃?
+2. 鑷敞鎰忓姏锛圫elf-Attention锛?   - Q銆並銆乂閮芥潵鑷悓涓€涓緭鍏?   - 姣忎釜token鍙互"鏌ヨ"鍏朵粬鎵€鏈塼oken
+   - 閫氳繃娉ㄦ剰鍔涙潈閲嶈仛鍚堜俊鎭?
+3. 澶氬ご娉ㄦ剰鍔涳紙Multi-Head Attention锛?   - 涓嶅悓鐨勫ご鍏虫敞涓嶅悓鐨勪俊鎭?   - 渚嬪锛氭湁鐨勫ご鍏虫敞璇硶锛屾湁鐨勫ご鍏虫敞璇箟
+   - 鏈€鍚庡皢鎵€鏈夊ご鐨勪俊鎭瀺鍚?
+4. 鍥犳灉鎺╃爜锛圕ausal Mask锛?   - 璇█妯″瀷鍙兘鐪嬪埌涔嬪墠鐨勫唴瀹?   - 鎺╃爜纭繚浣嶇疆i涓嶈兘鐪嬪埌浣嶇疆i+1鍙婁箣鍚?   - 瀹炵幇鏂瑰紡锛氬皢鏈潵浣嶇疆鐨勬敞鎰忓姏鍒嗘暟璁句负璐熸棤绌?
+5. KV缂撳瓨锛圞V Cache锛?   - 鎺ㄧ悊鏃堕€愪釜鐢熸垚token
+   - 涔嬪墠璁＄畻杩囩殑K鍜孷鍙互缂撳瓨璧锋潵
+   - 閬垮厤閲嶅璁＄畻锛屽姞閫熸帹鐞?
+娉ㄦ剰鍔涜绠楀鏉傚害鍒嗘瀽锛?- 鏃堕棿澶嶆潅搴︼細O(n虏 脳 d)
+  - n鏄簭鍒楅暱搴?  - d鏄ご缁村害
+  - n虏鏉ヨ嚜QK^T鐨勮绠?  
+- 绌洪棿澶嶆潅搴︼細O(n虏 + n 脳 d)
+  - n虏瀛樺偍娉ㄦ剰鍔涘垎鏁扮煩闃?  - n 脳 d瀛樺偍Q銆並銆乂
+
+Flash Attention浼樺寲锛?- 灏嗘敞鎰忓姏璁＄畻鍒嗗潡杩涜
+- 鍑忓皯HBM锛堥珮甯﹀鍐呭瓨锛夎闂鏁?- 璁＄畻澶嶆潅搴︿笉鍙橈紝浣咺O澶嶆潅搴︿粠O(n虏)闄嶅埌O(n)
+- 鏄惧瓨鍗犵敤浠嶰(n虏)闄嶅埌O(n)
+"""
+```
+
+---
+
+### 3.5 鍓嶉绁炵粡缃戠粶 FeedForward
+
+鍓嶉绁炵粡缃戠粶锛團FN锛夋槸Transformer涓敞鎰忓姏灞備箣鍚庣殑缁勪欢锛岀敤浜庡鍔犳ā鍨嬬殑闈炵嚎鎬ц〃杈捐兘鍔涖€?
+```python
+"""
+FeedForward - 鍓嶉绁炵粡缃戠粶
+浣嶇疆锛歮odel/model.py 绗?83-320琛?"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class FeedForward(nn.Module):
+    """
+    SwiGLU鍓嶉绁炵粡缃戠粶
+    
+    MiniMind閲囩敤SwiGLU婵€娲诲嚱鏁帮紝杩欐槸鐜颁唬LLM鐨勬爣鍑嗛€夋嫨銆?    鐩告瘮浼犵粺鐨凴eLU FFN锛孲wiGLU鏈夋洿濂界殑鎬ц兘銆?    
+    浼犵粺FFN锛?        FFN(x) = ReLU(xW1 + b1)W2 + b2
+        
+    SwiGLU FFN锛?        FFN(x) = (Swish(xW_gate) 鈯?xW_up)W_down
+        
+    鍏朵腑锛?        - Swish(x) = x * sigmoid(x)
+        - 鈯?琛ㄧず閫愬厓绱犱箻娉?        - W_gate, W_up, W_down 鏄笁涓嫭绔嬬殑鏉冮噸鐭╅樀
+    
+    鍙傛暟閲忓姣旓細
+        浼犵粺FFN: 2 脳 dim 脳 hidden_dim
+        SwiGLU: 3 脳 dim 脳 hidden_dim
+        
+    铏界劧鍙傛暟閲忓鍔?0%锛屼絾鎬ц兘鎻愬崌鏄捐憲銆?    """
+    
+    def __init__(self, dim: int, hidden_dim: int, multiple_of: int, dropout: float = 0.0):
+        """
+        鍒濆鍖朏eedForward灞?        
+        鍙傛暟:
+            dim: 杈撳叆/杈撳嚭缁村害
+            hidden_dim: 闅愯棌灞傜淮搴?            multiple_of: 闅愯棌缁村害瀵归綈鍊嶆暟
+            dropout: dropout姣旂巼
+        """
+        super().__init__()
+        
+        # 璋冩暣hidden_dim涓簃ultiple_of鐨勫€嶆暟
+        # 杩欐槸涓轰簡GPU璁＄畻鏁堢巼
+        # 鍏紡锛氬悜涓婂彇鏁村埌multiple_of鐨勫€嶆暟
+        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+        
+        # 闂ㄦ帶鎶曞奖锛坓ate projection锛?        # 鐢ㄤ簬鐢熸垚闂ㄦ帶淇″彿
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        
+        # 涓婃姇褰憋紙up projection锛?        # 鐢ㄤ簬澧炲姞缁村害
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        
+        # 涓嬫姇褰憋紙down projection锛?        # 鐢ㄤ簬鎭㈠缁村害
+        # 娉ㄦ剰锛氳繖閲屼娇鐢╳3鍛藉悕锛屼笌w1銆亀2鍖哄垎
+        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        
+        # Dropout灞?        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, dim)
+            
+        杩斿洖:
+            杈撳嚭寮犻噺锛屽舰鐘朵笌杈撳叆鐩稿悓
+            
+        璁＄畻娴佺▼:
+            1. 璁＄畻闂ㄦ帶淇″彿: gate = SiLU(w1(x))
+            2. 璁＄畻涓婃姇褰卞€? up = w3(x)
+            3. 闂ㄦ帶铻嶅悎: hidden = gate 鈯?up
+            4. 涓嬫姇褰? out = w2(hidden)
+            5. Dropout: out = dropout(out)
+        """
+        # SwiGLU璁＄畻
+        # w1(x): 闂ㄦ帶鍒嗘敮锛屼娇鐢⊿iLU婵€娲?        # w3(x): 鍊煎垎鏀紝涓嶄娇鐢ㄦ縺娲?        # 涓よ€呴€愬厓绱犵浉涔橈紝瀹炵幇闂ㄦ帶鏈哄埗
+        
+        # SiLU(x) = x * sigmoid(x)锛屼篃绉颁负Swish
+        # 鐩告瘮ReLU锛孲iLU鏄钩婊戠殑锛屾湁璐熷€艰緭鍑?        # 杩欐湁鍔╀簬姊害娴佸姩鍜屾ā鍨嬫€ц兘
+        
+        return self.dropout(self.w2(F.silu(self.w1(x)) * self.w3(x)))
+
+
+# ==================== SwiGLU 璇﹁В ====================
+
+"""
+SwiGLU婵€娲诲嚱鏁拌瑙?
+1. GLU锛圙ated Linear Unit锛?   GLU(x) = (xW1) 鈯?sigmoid(xW2)
+   
+   闂ㄦ帶鏈哄埗鍏佽缃戠粶閫夋嫨鎬у湴浼犻€掍俊鎭?   绫讳技浜嶭STM涓殑闂?
+2. SwiGLU = Swish + GLU
+   SwiGLU(x) = Swish(xW_gate) 鈯?(xW_up)
+   
+   鍏朵腑 Swish(x) = x * sigmoid(x)
+
+3. 涓轰粈涔圫wiGLU鏇村ソ锛?   - 骞虫粦鎬э細Swish鏄钩婊戝嚱鏁帮紝姊害娴佸姩鏇村ソ
+   - 闈炲崟璋冩€э細鍏佽璐熷€艰緭鍑猴紝澧炲姞琛ㄨ揪鑳藉姏
+   - 闂ㄦ帶鏈哄埗锛氶€夋嫨鎬т紶閫掍俊鎭?   - 瀹為獙楠岃瘉锛氬湪澶氫釜浠诲姟涓婁紭浜嶳eLU鍜孏eLU
+
+4. 涓庡叾浠栨縺娲诲嚱鏁板姣?
+   | 婵€娲诲嚱鏁?| 鍏紡 | 骞虫粦 | 璐熷€?|
+   |---------|------|------|------|
+   | ReLU | max(0, x) | 鍚?| 鍚?|
+   | GeLU | x * 桅(x) | 鏄?| 鏄?|
+   | Swish | x * 蟽(x) | 鏄?| 鏄?|
+   | SwiGLU | Swish(x) 鈯?y | 鏄?| 鏄?|
+
+5. 璁＄畻鍥剧ず
+
+   杈撳叆 x
+     鈹?     鈹溾攢鈹€> W_gate 鈹€鈹€> Swish 鈹€鈹€鈹?     鈹?                       鈹?     鈹斺攢鈹€> W_up 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€>鈯?鈹€鈹€> W_down 鈹€鈹€> 杈撳嚭
+                              鈹?                           闂ㄦ帶铻嶅悎
+
+FFN鐨勪綔鐢細
+1. 澧炲姞闈炵嚎鎬э細娉ㄦ剰鍔涙満鍒舵湰韬槸绾挎€х殑
+2. 澧炲姞妯″瀷瀹归噺锛氶殣钘忓眰缁村害閫氬父鏄緭鍏ョ殑4鍊?3. 鐗瑰緛鍙樻崲锛氬涔犳洿澶嶆潅鐨勭壒寰佽〃绀?"""
+```
+
+---
+
+### 3.6 娣峰悎涓撳绯荤粺 MoE
+
+娣峰悎涓撳绯荤粺锛圡ixture of Experts, MoE锛夋槸涓€绉嶅湪淇濇寔鎺ㄧ悊璁＄畻閲忎笉鍙樼殑鎯呭喌涓嬪鍔犳ā鍨嬪弬鏁伴噺鐨勬妧鏈€?
+```python
+"""
+MoE - 娣峰悎涓撳绯荤粺
+浣嶇疆锛歮odel/model.py 绗?23-450琛?"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Tuple
+
+
+class MoEGate(nn.Module):
+    """
+    MoE闂ㄦ帶缃戠粶
+    
+    璐熻矗涓烘瘡涓猼oken閫夋嫨鏈€鍚堥€傜殑涓撳銆?    闂ㄦ帶缃戠粶鏄竴涓畝鍗曠殑绾挎€у眰锛岃緭鍑烘瘡涓笓瀹剁殑閫夋嫨姒傜巼銆?    
+    宸ヤ綔娴佺▼锛?        1. 杈撳叆token鐨勯殣钘忕姸鎬?        2. 璁＄畻姣忎釜涓撳鐨勫垎鏁?        3. 閫夋嫨top-k涓笓瀹?        4. 褰掍竴鍖栨潈閲?    """
+    
+    def __init__(self, config):
+        """
+        鍒濆鍖朚oE闂ㄦ帶
+        
+        鍙傛暟:
+            config: LMConfig閰嶇疆瀵硅薄锛屽寘鍚細
+                - dim: 闅愯棌缁村害
+                - n_routed_experts: 璺敱涓撳鏁伴噺
+                - num_experts_per_tok: 姣忎釜token婵€娲荤殑涓撳鏁?                - scoring_func: 璇勫垎鍑芥暟绫诲瀷
+                - aux_loss_alpha: 杈呭姪鎹熷け鏉冮噸
+                - seq_aux: 鏄惁浣跨敤搴忓垪绾ц緟鍔╂崯澶?                - norm_topk_prob: 鏄惁褰掍竴鍖杢op-k姒傜巼
+        """
+        super().__init__()
+        
+        self.dim = config.dim
+        self.top_k = config.num_experts_per_tok
+        self.n_routed_experts = config.n_routed_experts
+        
+        # 闂ㄦ帶鏉冮噸
+        # 灏嗛殣钘忕姸鎬佹槧灏勫埌涓撳鏁伴噺缁村害
+        self.weight = nn.Parameter(torch.empty((self.n_routed_experts, self.dim)))
+        
+        # 璇勫垎鍑芥暟
+        self.scoring_func = config.scoring_func
+        
+        # 杈呭姪鎹熷け鍙傛暟
+        self.aux_loss_alpha = config.aux_loss_alpha
+        self.seq_aux = config.seq_aux
+        
+        # 鏄惁褰掍竴鍖杢op-k姒傜巼
+        self.norm_topk_prob = config.norm_topk_prob
+        
+        # 鍒濆鍖栨潈閲?        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+    
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, dim)
+            
+        杩斿洖:
+            topk_idx: 閫変腑鐨勪笓瀹剁储寮曪紝褰㈢姸涓?(batch_size * seq_len, top_k)
+            topk_weight: 涓撳鏉冮噸锛屽舰鐘朵负 (batch_size * seq_len, top_k)
+            aux_loss: 杈呭姪鎹熷け锛屾爣閲?            
+        璁＄畻娴佺▼:
+            1. 璁＄畻姣忎釜token瀵规瘡涓笓瀹剁殑鍒嗘暟
+            2. 閫夋嫨top-k涓笓瀹?            3. 褰掍竴鍖栨潈閲?            4. 璁＄畻杈呭姪鎹熷け锛堢敤浜庤礋杞藉潎琛★級
+        """
+        # 灞曞钩鎵规鍜屽簭鍒楃淮搴?        # (batch_size, seq_len, dim) -> (batch_size * seq_len, dim)
+        batch_size, seq_len, dim = x.shape
+        x_flat = x.view(-1, dim)
+        
+        # 璁＄畻涓撳鍒嗘暟
+        # (batch_size * seq_len, dim) @ (dim, n_experts)
+        # -> (batch_size * seq_len, n_experts)
+        scores = F.linear(x_flat, self.weight)
+        
+        # 搴旂敤璇勫垎鍑芥暟
+        if self.scoring_func == 'softmax':
+            scores = F.softmax(scores, dim=-1)
+        elif self.scoring_func == 'sigmoid':
+            scores = torch.sigmoid(scores)
+        else:
+            raise ValueError(f"Unknown scoring function: {self.scoring_func}")
+        
+        # 閫夋嫨top-k涓撳
+        topk_scores, topk_idx = torch.topk(scores, self.top_k, dim=-1)
+        
+        # 褰掍竴鍖杢op-k鏉冮噸
+        if self.norm_topk_prob:
+            topk_scores = topk_scores / topk_scores.sum(dim=-1, keepdim=True)
+        
+        # 璁＄畻杈呭姪鎹熷け
+        # 杈呭姪鎹熷け鐢ㄤ簬纭繚鎵€鏈変笓瀹惰鍧囧寑浣跨敤
+        # 閬垮厤鏌愪簺涓撳杩囪浇鑰屽叾浠栦笓瀹堕棽缃?        aux_loss = None
+        if self.training and self.aux_loss_alpha > 0:
+            # 璁＄畻姣忎釜涓撳琚€変腑鐨勯鐜?            # 杩欓渶瑕佺粺璁℃墍鏈塼oken鐨勯€夋嫨鎯呭喌
+            aux_loss = self._compute_aux_loss(scores, topk_idx)
+        
+        return topk_idx, topk_scores, aux_loss
+    
+    def _compute_aux_loss(self, scores: torch.Tensor, topk_idx: torch.Tensor) -> torch.Tensor:
+        """
+        璁＄畻杈呭姪鎹熷け
+        
+        杈呭姪鎹熷け榧撳姳鎵€鏈変笓瀹惰鍧囧寑浣跨敤銆?        
+        鍏紡锛?            aux_loss = 伪 * n * 危(f_i * P_i)
+            
+        鍏朵腑锛?            f_i = 涓撳i琚€変腑鐨勯鐜?            P_i = 涓撳i鐨勫钩鍧囧垎鏁?            n = 涓撳鏁伴噺
+            伪 = 鎹熷け鏉冮噸
+        """
+        # 璁＄畻姣忎釜涓撳琚€変腑鐨勯鐜?        # one_hot缂栫爜
+        expert_mask = F.one_hot(topk_idx, self.n_routed_experts).float()
+        # 姹傚拰寰楀埌姣忎釜涓撳琚€変腑鐨勬鏁?        expert_freq = expert_mask.sum(dim=(0, 1)) / expert_mask.numel()
+        
+        # 璁＄畻姣忎釜涓撳鐨勫钩鍧囧垎鏁?        expert_score = scores.mean(dim=0)
+        
+        # 杈呭姪鎹熷け
+        aux_loss = self.aux_loss_alpha * self.n_routed_experts * (expert_freq * expert_score).sum()
+        
+        return aux_loss
+
+
+class MOEFeedForward(nn.Module):
+    """
+    MoE鍓嶉绁炵粡缃戠粶
+    
+    灏嗗涓笓瀹剁綉缁滅粍鍚堝湪涓€璧凤紝閫氳繃闂ㄦ帶鏈哄埗閫夋嫨鎬у湴婵€娲讳笓瀹躲€?    
+    缁撴瀯锛?        - 璺敱涓撳锛氬涓嫭绔嬬殑FeedForward缃戠粶
+        - 鍏变韩涓撳锛氬鎵€鏈塼oken閮芥縺娲荤殑涓撳
+        - 闂ㄦ帶缃戠粶锛氬喅瀹氭瘡涓猼oken浣跨敤鍝簺璺敱涓撳
+    """
+    
+    def __init__(self, config):
+        """
+        鍒濆鍖朚oE FFN
+        
+        鍙傛暟:
+            config: LMConfig閰嶇疆瀵硅薄
+        """
+        super().__init__()
+        
+        self.dim = config.dim
+        self.hidden_dim = config.hidden_dim
+        self.n_routed_experts = config.n_routed_experts
+        self.n_shared_experts = config.n_shared_experts
+        self.top_k = config.num_experts_per_tok
+        
+        # 璺敱涓撳
+        # 姣忎釜涓撳閮芥槸涓€涓嫭绔嬬殑FeedForward缃戠粶
+        self.experts = nn.ModuleList([
+            FeedForward(config.dim, config.hidden_dim, config.multiple_of)
+            for _ in range(self.n_routed_experts)
+        ])
+        
+        # 鍏变韩涓撳
+        # 杩欎簺涓撳瀵规墍鏈塼oken閮芥縺娲?        if self.n_shared_experts > 0:
+            self.shared_experts = nn.ModuleList([
+                FeedForward(config.dim, config.hidden_dim, config.multiple_of)
+                for _ in range(self.n_shared_experts)
+            ])
+        
+        # 闂ㄦ帶缃戠粶
+        self.gate = MoEGate(config)
+        
+        # 杈呭姪鎹熷け
+        self.aux_loss = 0.0
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, dim)
+            
+        杩斿洖:
+            杈撳嚭寮犻噺锛屽舰鐘朵笌杈撳叆鐩稿悓
+            
+        璁＄畻娴佺▼:
+            1. 闂ㄦ帶缃戠粶閫夋嫨涓撳
+            2. 璁＄畻璺敱涓撳杈撳嚭
+            3. 璁＄畻鍏变韩涓撳杈撳嚭
+            4. 鍔犳潈铻嶅悎鎵€鏈夎緭鍑?        """
+        batch_size, seq_len, dim = x.shape
+        
+        # 闂ㄦ帶閫夋嫨
+        topk_idx, topk_weight, aux_loss = self.gate(x)
+        self.aux_loss = aux_loss if aux_loss is not None else 0.0
+        
+        # 灞曞钩杈撳叆
+        x_flat = x.view(-1, dim)
+        
+        # 鍒濆鍖栬緭鍑?        output = torch.zeros_like(x_flat)
+        
+        # 璁＄畻璺敱涓撳杈撳嚭
+        # 瀵规瘡涓笓瀹跺崟鐙鐞?        for expert_idx in range(self.n_routed_experts):
+            # 鎵惧埌閫夋嫨浜嗚繖涓笓瀹剁殑token
+            mask = (topk_idx == expert_idx).any(dim=-1)
+            
+            if mask.any():
+                # 鑾峰彇杩欎簺token
+                expert_input = x_flat[mask]
+                
+                # 閫氳繃涓撳缃戠粶
+                expert_output = self.experts[expert_idx](expert_input)
+                
+                # 鑾峰彇杩欎簺token瀵硅涓撳鐨勬潈閲?                expert_weight = topk_weight[mask]
+                if topk_idx[mask].shape[1] > 1:
+                    # 濡傛灉閫夋嫨浜嗗涓笓瀹讹紝鎵惧埌褰撳墠涓撳鐨勬潈閲?                    expert_mask = (topk_idx[mask] == expert_idx)
+                    expert_weight = (topk_weight[mask] * expert_mask).sum(dim=-1, keepdim=True)
+                
+                # 鍔犳潈绱姞
+                output[mask] += expert_output * expert_weight
+        
+        # 璁＄畻鍏变韩涓撳杈撳嚭
+        if self.n_shared_experts > 0:
+            shared_output = torch.zeros_like(x_flat)
+            for shared_expert in self.shared_experts:
+                shared_output += shared_expert(x_flat)
+            shared_output = shared_output / self.n_shared_experts
+            output = output + shared_output
+        
+        # 鎭㈠褰㈢姸
+        output = output.view(batch_size, seq_len, dim)
+        
+        return output
+
+
+# ==================== MoE 璇﹁В ====================
+
+"""
+MoE锛堟贩鍚堜笓瀹剁郴缁燂級璇﹁В
+
+1. 鏍稿績鎬濇兂
+   - 灏嗕竴涓ぇ缃戠粶鍒嗚В涓哄涓皬缃戠粶锛堜笓瀹讹級
+   - 姣忔鍙縺娲婚儴鍒嗕笓瀹?   - 鍙傛暟閲忓鍔狅紝浣嗚绠楅噺涓嶅彉
+
+2. 涓轰粈涔圡oE鏈夋晥锛?   - 涓嶅悓涓撳鍙互瀛︿範涓嶅悓绫诲瀷鐨勭煡璇?   - 渚嬪锛氭湁鐨勪笓瀹舵搮闀胯娉曪紝鏈夌殑鎿呴暱甯歌瘑
+   - 闂ㄦ帶缃戠粶瀛︿細灏嗕笉鍚岀殑杈撳叆璺敱鍒板悎閫傜殑涓撳
+
+3. MoE vs Dense
+
+   Dense妯″瀷锛?   - 鎵€鏈夊弬鏁版瘡娆￠兘鍙備笌璁＄畻
+   - 鍙傛暟閲?= 璁＄畻閲?   
+   MoE妯″瀷锛?   - 鍙湁閮ㄥ垎鍙傛暟鍙備笌璁＄畻
+   - 鍙傛暟閲?> 璁＄畻閲?   - 鍙互鍦ㄧ浉鍚岃绠楅绠椾笅澧炲姞妯″瀷瀹归噺
+
+4. 璐熻浇鍧囪　闂
+   - 濡傛灉鏌愪簺涓撳鎬绘槸琚€変腑锛屽叾浠栦笓瀹跺氨娴垂浜?   - 杈呭姪鎹熷け榧撳姳鍧囧寑浣跨敤鎵€鏈変笓瀹?   - 杩欐槸MoE璁粌鐨勫叧閿?
+5. 鍏变韩涓撳
+   - 鍏变韩涓撳瀵规墍鏈塼oken閮芥縺娲?   - 鐢ㄤ簬澶勭悊閫氱敤鐗瑰緛
+   - 璺敱涓撳澶勭悊鐗瑰畾鐗瑰緛
+
+6. MiniMind鐨凪oE閰嶇疆
+   - 4涓矾鐢变笓瀹?+ 1涓叡浜笓瀹?   - 姣忎釜token婵€娲?涓矾鐢变笓瀹?+ 1涓叡浜笓瀹?   - 鍙傛暟閲忕害4鍊嶏紝璁＄畻閲忕害3鍊?"""
+```
+
+---
+
+### 3.7 Transformer鍧?MiniMindBlock
+
+MiniMindBlock鏄疶ransformer鐨勫熀鏈瀯寤哄潡锛屽寘鍚敞鎰忓姏灞傘€佸墠棣堢綉缁滃拰褰掍竴鍖栧眰銆?
+```python
+"""
+MiniMindBlock - Transformer鍧?浣嶇疆锛歮odel/model.py 绗?53-500琛?"""
+
+import torch
+import torch.nn as nn
+
+
+class MiniMindBlock(nn.Module):
+    """
+    MiniMind Transformer鍧?    
+    杩欐槸Transformer鐨勫熀鏈瀯寤哄潡锛屽寘鍚細
+    1. 鑷敞鎰忓姏灞傦紙Self-Attention锛?    2. 鍓嶉绁炵粡缃戠粶锛團FN鎴朚oE锛?    3. 涓や釜RMSNorm褰掍竴鍖栧眰
+    
+    鏋舵瀯閲囩敤Pre-Norm璁捐锛?        x = x + Attention(RMSNorm(x))
+        x = x + FFN(RMSNorm(x))
+    
+    鐩告瘮Post-Norm锛?        x = RMSNorm(x + Attention(x))
+        x = RMSNorm(x + FFN(x))
+    
+    Pre-Norm鐨勪紭鍔匡細
+    - 璁粌鏇寸ǔ瀹?    - 姊害娴佸姩鏇村ソ
+    - 涓嶉渶瑕亀arm-up
+    """
+    
+    def __init__(self, layer_id: int, config):
+        """
+        鍒濆鍖朤ransformer鍧?        
+        鍙傛暟:
+            layer_id: 灞傜储寮曪紝鐢ㄤ簬鏌愪簺鐗规畩鎿嶄綔
+            config: LMConfig閰嶇疆瀵硅薄
+        """
+        super().__init__()
+        
+        # 娉ㄦ剰鍔涘眰
+        self.attention = Attention(config)
+        
+        # 鍓嶉缃戠粶
+        # 鏍规嵁閰嶇疆閫夋嫨鏅€欶FN鎴朚oE FFN
+        if config.use_moe:
+            self.feed_forward = MOEFeedForward(config)
+        else:
+            self.feed_forward = FeedForward(
+                config.dim, 
+                config.hidden_dim, 
+                config.multiple_of,
+                config.dropout
+            )
+        
+        # 褰掍竴鍖栧眰
+        # 浣跨敤RMSNorm鏇夸唬LayerNorm
+        self.attention_norm = RMSNorm(config.dim, eps=config.norm_eps)
+        self.ffn_norm = RMSNorm(config.dim, eps=config.norm_eps)
+        
+        # 灞侷D
+        self.layer_id = layer_id
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+        pos_cis: torch.Tensor,
+        past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺锛屽舰鐘朵负 (batch_size, seq_len, dim)
+            pos_cis: RoPE浣嶇疆缂栫爜
+            past_key_value: KV缂撳瓨
+            use_cache: 鏄惁杩斿洖KV缂撳瓨
+            
+        杩斿洖:
+            output: 杈撳嚭寮犻噺
+            past_kv: KV缂撳瓨锛堝鏋渦se_cache=True锛?            
+        璁＄畻娴佺▼:
+            1. 娉ㄦ剰鍔涙畫宸繛鎺?               h = x + Attention(RMSNorm(x))
+            2. FFN娈嬪樊杩炴帴
+               out = h + FFN(RMSNorm(h))
+        """
+        # 娉ㄦ剰鍔涘瓙灞?        # Pre-Norm: 鍏堝綊涓€鍖栵紝鍐嶈绠楁敞鎰忓姏
+        # 娈嬪樊杩炴帴锛氬皢杈撳叆鍔犲埌娉ㄦ剰鍔涜緭鍑轰笂
+        attn_output, past_kv = self.attention(
+            self.attention_norm(x),
+            pos_cis,
+            past_key_value,
+            use_cache
+        )
+        h = x + attn_output
+        
+        # FFN瀛愬眰
+        # 鍚屾牱浣跨敤Pre-Norm鍜屾畫宸繛鎺?        ffn_output = self.feed_forward(self.ffn_norm(h))
+        out = h + ffn_output
+        
+        return out, past_kv
+
+
+# ==================== Transformer鍧楄瑙?====================
+
+"""
+Transformer鍧楃殑璁捐閫夋嫨
+
+1. Pre-Norm vs Post-Norm
+
+   Pre-Norm锛圡iniMind浣跨敤锛夛細
+   ```
+   x = x + Attention(LayerNorm(x))
+   x = x + FFN(LayerNorm(x))
+   ```
+   
+   Post-Norm锛堝師濮婽ransformer锛夛細
+   ```
+   x = LayerNorm(x + Attention(x))
+   x = LayerNorm(x + FFN(x))
+   ```
+   
+   Pre-Norm浼樺娍锛?   - 姊害鐩存帴閫氳繃娈嬪樊杩炴帴娴佸姩
+   - 涓嶉渶瑕佸涔犵巼warm-up
+   - 璁粌鏇寸ǔ瀹?   - 娣卞眰缃戠粶鏁堟灉鏇村ソ
+
+2. 娈嬪樊杩炴帴鐨勪綔鐢?   - 缂撹В姊害娑堝け
+   - 鍏佽璁粌鏇存繁鐨勭綉缁?   - 姣忓眰鍙渶瀛︿範娈嬪樊锛堝閲忎俊鎭級
+
+3. 褰掍竴鍖栫殑浣嶇疆
+   - Pre-Norm锛氬湪瀛愬眰涔嬪墠褰掍竴鍖?   - 淇濊瘉瀛愬眰杈撳叆鐨勭ǔ瀹氭€?   - 娈嬪樊杩炴帴浼犻€掑師濮嬩俊鎭?
+4. 灞傛暟鐨勯€夋嫨
+   - MiniMind浣跨敤8灞?   - 鏇村灞傚彲浠ュ涔犳洿澶嶆潅鐨勭壒寰?   - 浣嗕篃澧炲姞璁＄畻閲忓拰杩囨嫙鍚堥闄?   - 灏忔ā鍨嬮€氬父8-12灞傝冻澶?"""
+```
+
+---
+
+### 3.8 瀹屾暣璇█妯″瀷 MiniMindLM
+
+MiniMindLM鏄畬鏁寸殑璇█妯″瀷绫伙紝灏嗘墍鏈夌粍浠剁粍瑁呭湪涓€璧枫€?
+```python
+"""
+MiniMindLM - 瀹屾暣璇█妯″瀷
+浣嶇疆锛歮odel/model.py 绗?03-600琛?"""
+
+import torch
+import torch.nn as nn
+from typing import Optional, List, Tuple
+from transformers import PreTrainedModel
+from dataclasses import dataclass
+
+
+@dataclass
+class CausalLMOutputWithPast:
+    """
+    妯″瀷杈撳嚭鏁版嵁绫?    
+    鍖呭惈锛?    - logits: 棰勬祴鐨勪笅涓€涓猼oken姒傜巼鍒嗗竷
+    - past_key_values: KV缂撳瓨
+    - aux_loss: MoE杈呭姪鎹熷け
+    """
+    logits: torch.Tensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor]]] = None
+    aux_loss: Optional[torch.Tensor] = None
+
+
+class MiniMindLM(PreTrainedModel):
+    """
+    MiniMind璇█妯″瀷
+    
+    瀹屾暣鐨凞ecoder-Only Transformer璇█妯″瀷銆?    缁ф壙鑷狧uggingFace鐨凱reTrainedModel锛屼究浜庝笌transformers搴撻泦鎴愩€?    
+    鏋舵瀯缁勬垚锛?    1. Token宓屽叆灞傦細灏唗oken ID杞崲涓哄悜閲?    2. Dropout灞傦細姝ｅ垯鍖?    3. 澶氫釜Transformer鍧楋細鏍稿績璁＄畻
+    4. 鏈€缁堝綊涓€鍖栧眰
+    5. 杈撳嚭灞傦細棰勬祴涓嬩竴涓猼oken
+    
+    鐗圭偣锛?    - 鏉冮噸鍏变韩锛氬祵鍏ュ眰鍜岃緭鍑哄眰鍏变韩鏉冮噸
+    - RoPE棰勮绠楋細鍦ㄥ垵濮嬪寲鏃堕璁＄畻浣嶇疆缂栫爜
+    - 鏀寔KV缂撳瓨锛氬姞閫熸帹鐞?    """
+    
+    config_class = LMConfig  # 閰嶇疆绫?    
+    def __init__(self, params: LMConfig = None):
+        """
+        鍒濆鍖朚iniMind妯″瀷
+        
+        鍙傛暟:
+            params: LMConfig閰嶇疆瀵硅薄
+        """
+        # 璋冪敤鐖剁被鍒濆鍖?        self.params = params or LMConfig()
+        super().__init__(self.params)
+        
+        # 淇濆瓨閰嶇疆
+        self.vocab_size = params.vocab_size
+        self.n_layers = params.n_layers
+        
+        # Token宓屽叆灞?        # 灏唗oken ID锛堟暣鏁帮級鏄犲皠涓哄悜閲?        # 杈撳叆锛?batch_size, seq_len) 鐨勬暣鏁皌ensor
+        # 杈撳嚭锛?batch_size, seq_len, dim) 鐨勫悜閲弔ensor
+        self.tok_embeddings = nn.Embedding(params.vocab_size, params.dim)
+        
+        # Dropout灞?        # 鍦ㄥ祵鍏ュ悗搴旂敤锛岄槻姝㈣繃鎷熷悎
+        self.dropout = nn.Dropout(params.dropout)
+        
+        # Transformer鍧楀垪琛?        # 浣跨敤nn.ModuleList绠＄悊澶氫釜鍧?        # 姣忎釜鍧楁槸鐙珛鐨勶紝鍙互鏈変笉鍚岀殑鍙傛暟
+        self.layers = nn.ModuleList([
+            MiniMindBlock(l, params) for l in range(self.n_layers)
+        ])
+        
+        # 鏈€缁堝綊涓€鍖栧眰
+        # 鍦ㄨ緭鍑哄眰涔嬪墠搴旂敤
+        self.norm = RMSNorm(params.dim, eps=params.norm_eps)
+        
+        # 杈撳嚭灞傦紙璇█妯″瀷澶达級
+        # 灏嗛殣钘忕姸鎬佹槧灏勫埌璇嶆眹琛ㄥぇ灏忕殑logits
+        # bias=False锛氫笉浣跨敤鍋忕疆锛屽噺灏戝弬鏁?        self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
+        
+        # 鏉冮噸鍏变韩
+        # 宓屽叆灞傚拰杈撳嚭灞傚叡浜潈閲?        # 杩欏彲浠ュ噺灏戝弬鏁伴噺锛屽苟鎻愰珮妯″瀷鎬ц兘
+        # 鍘熺悊锛氳緭鍏ュ拰杈撳嚭閮借〃绀簍oken锛屽簲璇ュ湪鍚屼竴绌洪棿
+        self.tok_embeddings.weight = self.output.weight
+        
+        # 棰勮绠桼oPE浣嶇疆缂栫爜
+        # 鍦ㄦā鍨嬪垵濮嬪寲鏃朵竴娆℃€ц绠楋紝閬垮厤姣忔鍓嶅悜浼犳挱閲嶅璁＄畻
+        # register_buffer锛氭敞鍐屼负妯″瀷鐘舵€佺殑涓€閮ㄥ垎锛屼絾涓嶅弬涓庤缁?        # persistent=False锛氫笉淇濆瓨鍒癱heckpoint涓?        self.register_buffer(
+            "pos_cis",
+            precompute_pos_cis(
+                dim=params.dim // params.n_heads,  # 姣忎釜澶寸殑缁村害
+                theta=params.rope_theta
+            ),
+            persistent=False
+        )
+        
+        # 杈撳嚭瀵硅薄
+        self.OUT = CausalLMOutputWithPast()
+        
+        # 鍒濆鍖栨潈閲?        self.apply(self._init_weights)
+    
+    def _init_weights(self, module):
+        """
+        鏉冮噸鍒濆鍖?        
+        浣跨敤姝ｆ€佸垎甯冨垵濮嬪寲绾挎€у眰鍜屽祵鍏ュ眰
+        鏍囧噯宸?= 1/sqrt(dim)
+        """
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+    
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False,
+        **kwargs
+    ) -> CausalLMOutputWithPast:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            input_ids: 杈撳叆token ID锛屽舰鐘朵负 (batch_size, seq_len)
+            past_key_values: 涔嬪墠璁＄畻鐨凨V缂撳瓨
+            use_cache: 鏄惁杩斿洖褰撳墠鐨凨V缂撳瓨
+            
+        杩斿洖:
+            CausalLMOutputWithPast瀵硅薄锛屽寘鍚細
+            - logits: 棰勬祴鐨勪笅涓€涓猼oken姒傜巼鍒嗗竷
+            - past_key_values: KV缂撳瓨
+            - aux_loss: MoE杈呭姪鎹熷け
+            
+        璁＄畻娴佺▼:
+            1. Token宓屽叆
+            2. Dropout
+            3. 鑾峰彇浣嶇疆缂栫爜
+            4. 閫愬眰閫氳繃Transformer鍧?            5. 鏈€缁堝綊涓€鍖?            6. 杈撳嚭灞傞娴?        """
+        # 鑾峰彇杈撳叆褰㈢姸
+        batch_size, seq_len = input_ids.shape
+        
+        # 濡傛灉娌℃湁鎻愪緵KV缂撳瓨锛屽垵濮嬪寲涓篘one鍒楄〃
+        past_key_values = past_key_values or [None] * len(self.layers)
+        
+        # 鑾峰彇璧峰浣嶇疆
+        # 濡傛灉鏈塊V缂撳瓨锛岃捣濮嬩綅缃槸缂撳瓨鐨勯暱搴?        start_pos = kwargs.get('start_pos', 0)
+        
+        # ==================== 姝ラ1锛歍oken宓屽叆 ====================
+        
+        # 灏唗oken ID杞崲涓哄悜閲?        # (batch_size, seq_len) -> (batch_size, seq_len, dim)
+        h = self.tok_embeddings(input_ids)
+        
+        # 搴旂敤Dropout
+        h = self.dropout(h)
+        
+        # ==================== 姝ラ2锛氳幏鍙栦綅缃紪鐮?====================
+        
+        # 浠庨璁＄畻鐨勪綅缃紪鐮佷腑鍒囩墖鑾峰彇褰撳墠搴忓垪鐨勪綅缃紪鐮?        # pos_cis褰㈢姸锛?max_seq_len, head_dim//2)
+        # 鍒囩墖鍚庯細(seq_len, head_dim//2)
+        pos_cis = self.pos_cis[start_pos:start_pos + seq_len]
+        
+        # ==================== 姝ラ3锛歍ransformer灞?====================
+        
+        # 瀛樺偍姣忓眰鐨凨V缂撳瓨
+        past_kvs = []
+        
+        # 閫愬眰澶勭悊
+        for l, layer in enumerate(self.layers):
+            # 閫氳繃Transformer鍧?            # h: 闅愯棌鐘舵€?            # pos_cis: 浣嶇疆缂栫爜
+            # past_key_values[l]: 璇ュ眰鐨凨V缂撳瓨
+            # use_cache: 鏄惁杩斿洖KV缂撳瓨
+            h, past_kv = layer(
+                h,
+                pos_cis,
+                past_key_value=past_key_values[l],
+                use_cache=use_cache
+            )
+            past_kvs.append(past_kv)
+        
+        # ==================== 姝ラ4锛氳緭鍑洪娴?====================
+        
+        # 鏈€缁堝綊涓€鍖?        h = self.norm(h)
+        
+        # 杈撳嚭灞傦細棰勬祴涓嬩竴涓猼oken
+        # (batch_size, seq_len, dim) -> (batch_size, seq_len, vocab_size)
+        logits = self.output(h)
+        
+        # ==================== 姝ラ5锛氳绠楄緟鍔╂崯澶?====================
+        
+        # 濡傛灉浣跨敤MoE锛岀疮鍔犳墍鏈夊眰鐨勮緟鍔╂崯澶?        aux_loss = sum(
+            l.feed_forward.aux_loss 
+            for l in self.layers 
+            if hasattr(l.feed_forward, 'aux_loss')
+        )
+        
+        # 璁剧疆杈撳嚭
+        self.OUT.logits = logits
+        self.OUT.past_key_values = past_kvs if use_cache else None
+        self.OUT.aux_loss = aux_loss if aux_loss != 0 else None
+        
+        return self.OUT
+    
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 100,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 0.9
+    ) -> torch.Tensor:
+        """
+        鏂囨湰鐢熸垚
+        
+        鍙傛暟:
+            input_ids: 杈撳叆token ID
+            max_new_tokens: 鏈€澶х敓鎴恡oken鏁?            temperature: 娓╁害鍙傛暟锛屾帶鍒堕殢鏈烘€?            top_k: top-k閲囨牱鍙傛暟
+            top_p: nucleus閲囨牱鍙傛暟
+            
+        杩斿洖:
+            鐢熸垚鐨則oken搴忓垪
+        """
+        # 鍒濆鍖朘V缂撳瓨
+        past_key_values = None
+        
+        for _ in range(max_new_tokens):
+            # 鍓嶅悜浼犳挱
+            outputs = self.forward(
+                input_ids if past_key_values is None else input_ids[:, -1:],
+                past_key_values=past_key_values,
+                use_cache=True
+            )
+            
+            # 鑾峰彇鏈€鍚庝竴涓綅缃殑logits
+            logits = outputs.logits[:, -1, :]
+            
+            # 搴旂敤娓╁害
+            logits = logits / temperature
+            
+            # Top-k閲囨牱
+            if top_k > 0:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = float('-inf')
+            
+            # Top-p (nucleus) 閲囨牱
+            if top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                
+                # 绉婚櫎绱Н姒傜巼瓒呰繃top_p鐨則oken
+                sorted_indices_to_remove = cumulative_probs > top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                
+                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                logits[indices_to_remove] = float('-inf')
+            
+            # 閲囨牱涓嬩竴涓猼oken
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            
+            # 鎷兼帴鍒拌緭鍏?            input_ids = torch.cat([input_ids, next_token], dim=-1)
+            
+            # 鏇存柊KV缂撳瓨
+            past_key_values = outputs.past_key_values
+        
+        return input_ids
+
+
+# ==================== 妯″瀷鏁翠綋鏋舵瀯鎬荤粨 ====================
+
+"""
+MiniMind妯″瀷鏁翠綋鏋舵瀯
+
+杈撳叆: token ID搴忓垪
+  鈹?  鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   Token Embedding                           鈹?鈹?             (vocab_size, dim) -> (seq_len, dim)             鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?  鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                     Dropout                                 鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?  鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                 Transformer Block 脳 N                       鈹?鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹愨攤
+鈹? 鈹?                  RMSNorm                                鈹傗攤
+鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹樷攤
+鈹?                       鈹?                                    鈹?鈹?                       鈻?                                    鈹?鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹愨攤
+鈹? 鈹?           Attention (GQA + RoPE)                        鈹傗攤
+鈹? 鈹?  鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹傗攤
+鈹? 鈹?  鈹?Q, K, V Projection                               鈹?  鈹傗攤
+鈹? 鈹?  鈹?RoPE Position Encoding                           鈹?  鈹傗攤
+鈹? 鈹?  鈹?KV Cache (optional)                              鈹?  鈹傗攤
+鈹? 鈹?  鈹?Multi-Head Attention                             鈹?  鈹傗攤
+鈹? 鈹?  鈹?Output Projection                                鈹?  鈹傗攤
+鈹? 鈹?  鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹傗攤
+鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹樷攤
+鈹?                       鈹?                                    鈹?鈹?             鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹粹攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?鈹?             鈹?   Residual Add    鈹?                         鈹?鈹?             鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?鈹?                       鈹?                                    鈹?鈹?                       鈻?                                    鈹?鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹愨攤
+鈹? 鈹?                  RMSNorm                                鈹傗攤
+鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹樷攤
+鈹?                       鈹?                                    鈹?鈹?                       鈻?                                    鈹?鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹愨攤
+鈹? 鈹?           FeedForward (SwiGLU) / MoE                    鈹傗攤
+鈹? 鈹?  鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹傗攤
+鈹? 鈹?  鈹?Gate Projection (w1)                             鈹?  鈹傗攤
+鈹? 鈹?  鈹?Up Projection (w3)                               鈹?  鈹傗攤
+鈹? 鈹?  鈹?SiLU Activation & Element-wise Multiply          鈹?  鈹傗攤
+鈹? 鈹?  鈹?Down Projection (w2)                             鈹?  鈹傗攤
+鈹? 鈹?  鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹傗攤
+鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹樷攤
+鈹?                       鈹?                                    鈹?鈹?             鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹粹攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?鈹?             鈹?   Residual Add    鈹?                         鈹?鈹?             鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹尖攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?                         鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                     RMSNorm                                 鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?                         鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                 Output Projection                           鈹?鈹?             (dim) -> (vocab_size)                           鈹?鈹?             (鏉冮噸鍏变韩 with Embedding)                        鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                         鈹?                         鈻?                    Logits (棰勬祴涓嬩竴涓猼oken)
+"""
+```
+
+---
+
+## 3.9 妯″瀷鏍稿績缁勪欢娣卞害瑙ｆ瀽
+
+鏈妭灏嗗MiniMind鐨勬牳蹇冪粍浠惰繘琛屾洿娣卞叆鐨勫墫鏋愶紝鍖呮嫭鏁板鎺ㄥ銆佸疄鐜扮粏鑺傘€佹€ц兘浼樺寲鍜屽疄闄呭簲鐢ㄥ満鏅€?
+### 3.9.1 RMSNorm 娣卞害瑙ｆ瀽
+
+#### 鏁板鎺ㄥ
+
+RMSNorm鐨勬牳蹇冩€濇兂鏄杈撳叆鍚戦噺杩涜灏哄害褰掍竴鍖栵紝鑰屼笉杩涜鍧囧€间腑蹇冨寲銆傝鎴戜滑浠庢暟瀛﹁搴︽繁鍏ョ悊瑙ｏ細
+
+```
+缁欏畾杈撳叆鍚戦噺 x = [x鈧? x鈧? ..., x鈧橾
+
+LayerNorm璁＄畻锛?    mean = (1/n) * 危x岬?    var = (1/n) * 危(x岬?- mean)虏
+    y岬?= (x岬?- mean) / sqrt(var + 蔚) * 纬岬?+ 尾岬?
+RMSNorm璁＄畻锛?    rms = sqrt((1/n) * 危x岬⒙?
+    y岬?= x岬?/ rms * 纬岬?
+鍏抽敭鍖哄埆锛?1. RMSNorm涓嶈绠楀潎鍊硷紝鐩存帴浣跨敤骞虫柟鏍瑰潎鍊?2. RMSNorm娌℃湁鍋忕疆鍙傛暟尾
+3. RMSNorm鐨勮绠楅噺鏇村皯
+```
+
+#### 涓轰粈涔圧MSNorm鏈夋晥锛?
+```python
+"""
+RMSNorm鏈夋晥鐨勭悊璁鸿В閲?
+1. 灏哄害涓嶅彉鎬?   绁炵粡缃戠粶鐨勮緭鍑哄杈撳叆鐨勫昂搴︽晱鎰?   RMSNorm纭繚姣忎釜鏍锋湰鐨勫悜閲忛暱搴︿竴鑷?   杩欐湁鍔╀簬姊害绋冲畾浼犳挱
+
+2. 鍧囧€间腑蹇冨寲鐨勪綔鐢ㄦ湁闄?   LayerNorm涓殑鍧囧€间腑蹇冨寲涓昏褰卞搷鍒嗗竷鐨勪綅缃?   浣嗗浜嶳eLU绛夋縺娲诲嚱鏁帮紝浣嶇疆淇℃伅涓嶅灏哄害閲嶈
+   瀹為獙琛ㄦ槑锛屽幓鎺夊潎鍊煎鎬ц兘褰卞搷寰堝皬
+
+3. 姊害鍒嗘瀽
+   LayerNorm姊害锛?   鈭侺/鈭倄岬?= (1/蟽) * [鈭侺/鈭倅岬?- mean(鈭侺/鈭倅) - y岬?* mean(鈭侺/鈭倅 * y)]
+   
+   RMSNorm姊害锛?   鈭侺/鈭倄岬?= (1/rms) * [鈭侺/鈭倅岬?- (x岬?rms虏) * mean(鈭侺/鈭倅 * x)]
+   
+   RMSNorm鐨勬搴﹁绠楁洿绠€鍗曪紝璁＄畻鏁堢巼鏇撮珮
+
+4. 瀹為獙楠岃瘉
+   鍦↙LaMA銆丗alcon銆丮istral绛夋ā鍨嬩笂鐨勫疄楠岃〃鏄?   RMSNorm涓嶭ayerNorm鎬ц兘鐩稿綋锛屼絾璁＄畻鏇村揩
+"""
+```
+
+#### RMSNorm鐨勫彉浣撲笌鏀硅繘
+
+```python
+"""
+RMSNorm鐨勫彉浣?
+1. Group RMSNorm
+   灏嗙壒寰佸垎缁勶紝姣忕粍鐙珛褰掍竴鍖?   閫傜敤浜庢煇浜涚壒娈婃灦鏋?
+2. LayerScale + RMSNorm
+   鍦≧MSNorm鍚庢坊鍔犲彲瀛︿範鐨勭缉鏀?   鏈夊姪浜庢繁灞傜綉缁滅殑璁粌
+
+3. Adaptive RMSNorm
+   鏍规嵁杈撳叆鍔ㄦ€佽皟鏁村綊涓€鍖栧弬鏁?   鐢ㄤ簬鏉′欢鐢熸垚妯″瀷
+"""
+
+class LayerScaleRMSNorm(nn.Module):
+    """
+    甯ayerScale鐨凴MSNorm
+    鐢ㄤ簬娣卞眰Transformer鐨勭ǔ瀹氳缁?    """
+    def __init__(self, dim, eps=1e-6, init_scale=1e-5):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.scale = nn.Parameter(torch.ones(dim) * init_scale)
+        self.eps = eps
+    
+    def forward(self, x):
+        norm_x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        return self.scale * self.weight * norm_x
+```
+
+#### RMSNorm鐨勫疄鐜扮粏鑺?
+```python
+"""
+RMSNorm瀹炵幇鐨勫叧閿粏鑺?
+1. 鏁板€肩ǔ瀹氭€?   - 浣跨敤float32璁＄畻褰掍竴鍖?   - 闃叉float16涓嬬殑鏁板€兼孩鍑?   
+2. 鍐呭瓨鏁堢巼
+   - 浣跨敤inplace鎿嶄綔鍑忓皯鍐呭瓨鍒嗛厤
+   - 閬垮厤涓嶅繀瑕佺殑涓棿鍙橀噺
+   
+3. GPU浼樺寲
+   - 浣跨敤torch.rsqrt鑰屼笉鏄?/torch.sqrt
+   - 鍒╃敤Tensor Core鍔犻€?"""
+
+class OptimizedRMSNorm(nn.Module):
+    """
+    浼樺寲鐨凴MSNorm瀹炵幇
+    """
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.eps = eps
+        self.dim = dim
+        
+        # 棰勮绠梔im鐨勫€掓暟锛岄伩鍏嶉噸澶嶈绠?        self.register_buffer('rms_scale', torch.tensor(1.0 / dim))
+    
+    def forward(self, x):
+        # 浣跨敤float32璁＄畻锛岀‘淇濇暟鍊肩ǔ瀹氭€?        x_fp32 = x.float()
+        
+        # 璁＄畻骞虫柟鍜岋紝浣跨敤sum鑰屼笉鏄痬ean + pow
+        # 杩欐牱鍙互鍑忓皯涓€娆￠櫎娉曟搷浣?        sum_sq = x_fp32.pow(2).sum(-1, keepdim=True)
+        
+        # 璁＄畻RMS鐨勫€掓暟
+        rms_inv = torch.rsqrt(sum_sq * self.rms_scale + self.eps)
+        
+        # 褰掍竴鍖栧苟搴旂敤鏉冮噸
+        output = x_fp32 * rms_inv * self.weight.float()
+        
+        # 杞洖鍘熸暟鎹被鍨?        return output.type_as(x)
+```
+
+---
+
+### 3.9.2 RoPE 娣卞害瑙ｆ瀽
+
+#### RoPE鐨勬暟瀛﹀熀纭€
+
+RoPE鍩轰簬澶嶆暟鏃嬭浆鐨勬蹇碉紝璁╂垜浠粠鏁板瑙掑害娣卞叆鐞嗚В锛?
+```
+澶嶆暟琛ㄧず锛?    z = a + bi = r * e^(i胃) = r * (cos(胃) + i*sin(胃))
+    
+    鍏朵腑锛?    - r = |z| = sqrt(a虏 + b虏) 鏄ā闀?    - 胃 = arg(z) = atan2(b, a) 鏄箙瑙?
+澶嶆暟涔樻硶锛?    z鈧?* z鈧?= r鈧?* r鈧?* e^(i(胃鈧?+ 胃鈧?)
+    
+    涔樻硶鐨勬晥鏋滐細
+    - 妯￠暱鐩镐箻锛歳鈧?* r鈧?    - 骞呰鐩稿姞锛毼糕倎 + 胃鈧?
+鏃嬭浆鐭╅樀锛?    R(胃) = [cos(胃)  -sin(胃)]
+           [sin(胃)   cos(胃)]
+    
+    杩欑瓑浠蜂簬澶嶆暟涔樻硶 e^(i胃)
+```
+
+#### RoPE鐨勪綅缃紪鐮佸叕寮?
+```python
+"""
+RoPE鐨勫畬鏁存暟瀛︽帹瀵?
+瀵逛簬浣嶇疆m鐨則oken锛屽叾鏌ヨ鍚戦噺q鐨勭i瀵圭淮搴﹀簲鐢ㄦ棆杞細
+
+璁?q = [q鈧? q鈧? q鈧? q鈧? ..., q_{d-1}, q_d]
+灏唓閲嶇粍涓哄鏁板舰寮忥細z = [(q鈧?iq鈧?, (q鈧?iq鈧?, ..., (q_{d-1}+iq_d)]
+
+浣嶇疆m鐨勬棆杞搴︼細
+    胃_{m,i} = m * 胃_i
+    
+鍏朵腑 胃_i = 1 / (base^(2i/d))
+
+鏃嬭浆鍚庣殑鍚戦噺锛?    z'_i = z_i * e^(im*胃_i)
+    
+灞曞紑涓哄疄鏁帮細
+    q'_{2i}   = q_{2i}   * cos(m*胃_i) - q_{2i+1} * sin(m*胃_i)
+    q'_{2i+1} = q_{2i}   * sin(m*胃_i) + q_{2i+1} * cos(m*胃_i)
+
+杩欏氨鏄疪oPE鐨勬牳蹇冨叕寮忥紒
+"""
+
+def rope_rotation_matrix(dim, position, base=10000):
+    """
+    鐢熸垚RoPE鐨勬棆杞煩闃?    
+    鍙傛暟:
+        dim: 鍚戦噺缁村害
+        position: 浣嶇疆绱㈠紩
+        base: 棰戠巼鍩烘暟
+    
+    杩斿洖:
+        鏃嬭浆鐭╅樀锛屽舰鐘朵负 (dim, dim)
+    """
+    # 璁＄畻棰戠巼
+    freqs = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+    
+    # 璁＄畻瑙掑害
+    angles = position * freqs
+    
+    # 鏋勫缓鏃嬭浆鐭╅樀
+    cos = torch.cos(angles)
+    sin = torch.sin(angles)
+    
+    # 鍒涘缓瀹屾暣鐨勬棆杞煩闃?    # 瀵逛簬姣忓缁村害 (2i, 2i+1)锛屾棆杞煩闃典负锛?    # [cos  -sin]
+    # [sin   cos]
+    
+    rot_matrix = torch.zeros(dim, dim)
+    for i in range(dim // 2):
+        rot_matrix[2*i, 2*i] = cos[i]
+        rot_matrix[2*i, 2*i+1] = -sin[i]
+        rot_matrix[2*i+1, 2*i] = sin[i]
+        rot_matrix[2*i+1, 2*i+1] = cos[i]
+    
+    return rot_matrix
+```
+
+#### RoPE鐨勭浉瀵逛綅缃€ц川
+
+```python
+"""
+RoPE鐨勬牳蹇冧紭鍔匡細鑷劧缂栫爜鐩稿浣嶇疆
+
+鍏抽敭鎬ц川锛?褰撴煡璇鍦ㄤ綅缃甿锛岄敭k鍦ㄤ綅缃畁鏃讹紝娉ㄦ剰鍔涘垎鏁颁负锛?
+score(m, n) = q_m 路 k_n
+            = (R_m * q) 路 (R_n * k)
+            = q^T * R_m^T * R_n * k
+            = q^T * R_{n-m} * k
+
+鍏朵腑 R_{n-m} = R_m^T * R_n 鏄浉瀵逛綅缃?n-m)鐨勬棆杞煩闃?
+杩欐剰鍛崇潃娉ㄦ剰鍔涘垎鏁板彧渚濊禆浜庣浉瀵逛綅缃?n-m)锛岃€屼笉鏄粷瀵逛綅缃紒
+"""
+
+def demonstrate_relative_position():
+    """婕旂ずRoPE鐨勭浉瀵逛綅缃€ц川"""
+    import torch
+    
+    dim = 64
+    base = 10000
+    
+    # 涓や釜涓嶅悓浣嶇疆鐨勫悜閲?    q = torch.randn(dim)
+    k = torch.randn(dim)
+    
+    # 浣嶇疆缂栫爜
+    def apply_rope(x, pos):
+        freqs = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        angles = pos * freqs
+        
+        x_rotated = torch.zeros_like(x)
+        for i in range(dim // 2):
+            cos_val = torch.cos(angles[i])
+            sin_val = torch.sin(angles[i])
+            x_rotated[2*i] = x[2*i] * cos_val - x[2*i+1] * sin_val
+            x_rotated[2*i+1] = x[2*i] * sin_val + x[2*i+1] * cos_val
+        
+        return x_rotated
+    
+    # 璁＄畻涓嶅悓浣嶇疆鐨勬敞鎰忓姏鍒嗘暟
+    pos_m, pos_n = 10, 15
+    q_m = apply_rope(q, pos_m)
+    k_n = apply_rope(k, pos_n)
+    
+    score = torch.dot(q_m, k_n)
+    
+    # 楠岃瘉鐩稿浣嶇疆鎬ц川
+    # 濡傛灉鎴戜滑灏嗕袱涓綅缃悓鏃剁Щ鍔ㄧ浉鍚岃窛绂伙紝鍒嗘暟搴旇涓嶅彉
+    delta = 5
+    q_m_shifted = apply_rope(q, pos_m + delta)
+    k_n_shifted = apply_rope(k, pos_n + delta)
+    
+    score_shifted = torch.dot(q_m_shifted, k_n_shifted)
+    
+    print(f"鍘熷鍒嗘暟: {score:.6f}")
+    print(f"绉讳綅鍚庡垎鏁? {score_shifted:.6f}")
+    print(f"宸紓: {abs(score - score_shifted):.10f}")
+    # 宸紓搴旇闈炲父灏忥紙鏁板€艰宸級
+```
+
+#### RoPE鐨勯暱搴﹀鎺ㄦ妧鏈?
+```python
+"""
+RoPE闀垮害澶栨帹锛氬鐞嗘瘮璁粌鏃舵洿闀跨殑搴忓垪
+
+闂锛氭ā鍨嬭缁冩椂鏈€澶у簭鍒楅暱搴︿负L锛屾帹鐞嗘椂闇€瑕佸鐞哃' > L鐨勫簭鍒?
+瑙ｅ喅鏂规锛?
+1. 绾挎€ф彃鍊硷紙Linear Interpolation锛?   灏嗕綅缃储寮曠缉鏀惧埌璁粌鑼冨洿鍐?   pos' = pos * L / L'
+   
+2. NTK鎰熺煡鎻掑€?   鍔ㄦ€佽皟鏁撮鐜囧熀鏁?   base' = base * (L'/L)^(dim/(dim-2))
+   
+3. YaRN锛圷et another RoPE extensioN锛?   缁撳悎娓╁害缂╂斁鍜孨TK鎻掑€?
+4. 鍔ㄦ€丯TK
+   鏍规嵁褰撳墠搴忓垪闀垮害鍔ㄦ€佽皟鏁村熀鏁?"""
+
+def apply_linear_interpolation(pos, original_max, target_max):
+    """
+    绾挎€ф彃鍊间綅缃紪鐮?    
+    鍙傛暟:
+        pos: 鍘熷浣嶇疆绱㈠紩
+        original_max: 璁粌鏃剁殑鏈€澶ч暱搴?        target_max: 鐩爣鏈€澶ч暱搴?    
+    杩斿洖:
+        鎻掑€煎悗鐨勪綅缃储寮?    """
+    scale = original_max / target_max
+    return pos * scale
+
+def apply_ntk_interpolation(dim, original_max, target_max, base=10000):
+    """
+    NTK鎰熺煡鎻掑€?    
+    鏍规嵁鐩爣闀垮害鍔ㄦ€佽皟鏁撮鐜囧熀鏁?    """
+    # 璁＄畻鏂扮殑鍩烘暟
+    new_base = base * ((target_max / original_max) ** (dim / (dim - 2)))
+    return new_base
+
+class DynamicNTKRoPE:
+    """
+    鍔ㄦ€丯TK RoPE瀹炵幇
+    """
+    def __init__(self, dim, max_position=2048, base=10000):
+        self.dim = dim
+        self.max_position = max_position
+        self.base = base
+        
+    def get_freqs(self, seq_len):
+        """鏍规嵁搴忓垪闀垮害鍔ㄦ€佽绠楅鐜?""
+        if seq_len <= self.max_position:
+            # 鍦ㄨ缁冭寖鍥村唴锛屼娇鐢ㄥ師濮嬪熀鏁?            base = self.base
+        else:
+            # 瓒呭嚭璁粌鑼冨洿锛屽姩鎬佽皟鏁村熀鏁?            base = self.base * ((seq_len / self.max_position) ** (self.dim / (self.dim - 2)))
+        
+        # 璁＄畻棰戠巼
+        freqs = 1.0 / (base ** (torch.arange(0, self.dim, 2).float() / self.dim))
+        return freqs
+```
+
+---
+
+### 3.9.3 Attention 娣卞害瑙ｆ瀽
+
+#### 娉ㄦ剰鍔涙満鍒剁殑瀹屾暣鏁板鎺ㄥ
+
+```python
+"""
+缂╂斁鐐圭Н娉ㄦ剰鍔涚殑鏁板鎺ㄥ
+
+鍩烘湰鍏紡锛?    Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) * V
+
+涓轰粈涔堥渶瑕佺缉鏀惧洜瀛?1/sqrt(d_k)锛?
+鍋囪Q鍜孠鐨勫厓绱犳槸鍧囧€间负0銆佹柟宸负1鐨勭嫭绔嬮殢鏈哄彉閲?鍒?QK^T 鐨勫厓绱犳槸d_k涓嫭绔嬮殢鏈哄彉閲忕殑涔樼Н涔嬪拰
+
+E[(QK^T)_{ij}] = 0
+Var[(QK^T)_{ij}] = d_k
+
+褰揹_k杈冨ぇ鏃讹紝QK^T鐨勫厓绱犲€间細寰堝ぇ
+杩欎細瀵艰嚧softmax鐨勬搴︽帴杩?锛堟搴︽秷澶憋級
+
+缂╂斁鍚庯細
+    E[(QK^T / sqrt(d_k))_{ij}] = 0
+    Var[(QK^T / sqrt(d_k))_{ij}] = 1
+
+杩欐牱softmax鐨勮緭鍏ヤ繚鎸佸湪鍚堢悊鑼冨洿锛屾搴︾ǔ瀹?"""
+
+def analyze_softmax_gradient():
+    """鍒嗘瀽softmax鐨勬搴︾壒鎬?""
+    import torch
+    import matplotlib.pyplot as plt
+    
+    # 鍒涘缓涓嶅悓灏哄害鐨勮緭鍏?    scales = [1, 5, 10, 20, 50]
+    
+    for scale in scales:
+        x = torch.randn(100) * scale
+        x.requires_grad = True
+        
+        # 璁＄畻softmax
+        y = torch.softmax(x, dim=0)
+        
+        # 璁＄畻姊害锛堝亣璁炬崯澶变负y鐨勫拰锛?        loss = y.sum()
+        loss.backward()
+        
+        print(f"Scale={scale}:")
+        print(f"  杈撳叆鑼冨洿: [{x.min():.2f}, {x.max():.2f}]")
+        print(f"  姊害鑼冨洿: [{x.grad.min():.6f}, {x.grad.max():.6f}]")
+        print(f"  姊害鍧囧€? {x.grad.mean():.6f}")
+        print()
+```
+
+#### 澶氬ご娉ㄦ剰鍔涚殑骞惰璁＄畻
+
+```python
+"""
+澶氬ご娉ㄦ剰鍔涚殑骞惰璁＄畻绛栫暐
+
+鍏抽敭鎬濇兂锛氬皢鎵€鏈夊ご鐨勮绠楀悎骞朵负鐭╅樀杩愮畻
+
+鍘熷鏂规硶锛堝惊鐜級锛?    for h in range(n_heads):
+        Q_h = W_q[h] @ X
+        K_h = W_k[h] @ X
+        V_h = W_v[h] @ X
+        output_h = attention(Q_h, K_h, V_h)
+    output = concat([output_0, ..., output_{n-1}])
+
+骞惰鏂规硶锛?    Q = X @ W_q  # 涓€娆℃€ц绠楁墍鏈夊ご鐨凲
+    K = X @ W_k  # 涓€娆℃€ц绠楁墍鏈夊ご鐨凨
+    V = X @ W_v  # 涓€娆℃€ц绠楁墍鏈夊ご鐨刅
+    
+    # 閲嶅涓哄澶村舰寮?    Q = Q.view(batch, seq, n_heads, head_dim).transpose(1, 2)
+    K = K.view(batch, seq, n_heads, head_dim).transpose(1, 2)
+    V = V.view(batch, seq, n_heads, head_dim).transpose(1, 2)
+    
+    # 骞惰璁＄畻鎵€鏈夊ご鐨勬敞鎰忓姏
+    output = scaled_dot_product_attention(Q, K, V)
+    
+    # 鍚堝苟杈撳嚭
+    output = output.transpose(1, 2).reshape(batch, seq, dim)
+"""
+
+class ParallelMultiHeadAttention(nn.Module):
+    """
+    骞惰澶氬ご娉ㄦ剰鍔涘疄鐜?    """
+    def __init__(self, dim, n_heads, dropout=0.0):
+        super().__init__()
+        self.n_heads = n_heads
+        self.head_dim = dim // n_heads
+        
+        # 鍚堝苟鐨凲KV鎶曞奖锛堟洿楂樻晥锛?        self.qkv_proj = nn.Linear(dim, 3 * dim, bias=False)
+        self.out_proj = nn.Linear(dim, dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
+        
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+    
+    def forward(self, x, mask=None):
+        batch, seq, dim = x.shape
+        
+        # 涓€娆℃€ц绠桻銆並銆乂
+        qkv = self.qkv_proj(x)
+        qkv = qkv.reshape(batch, seq, 3, self.n_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch, n_heads, seq, head_dim)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        
+        # 骞惰璁＄畻娉ㄦ剰鍔?        attn = (q @ k.transpose(-2, -1)) * self.scale
+        
+        if mask is not None:
+            attn = attn.masked_fill(mask == 0, float('-inf'))
+        
+        attn = torch.softmax(attn, dim=-1)
+        attn = self.dropout(attn)
+        
+        # 鍔犳潈姹傚拰
+        out = attn @ v
+        
+        # 鍚堝苟澶氬ご
+        out = out.transpose(1, 2).reshape(batch, seq, dim)
+        out = self.out_proj(out)
+        
+        return out
+```
+
+#### Flash Attention鐨勫師鐞?
+```python
+"""
+Flash Attention锛欼O鎰熺煡鐨勭簿纭敞鎰忓姏绠楁硶
+
+鏍稿績鎬濇兂锛?浼犵粺娉ㄦ剰鍔涢渶瑕佸瓨鍌ㄥ畬鏁寸殑娉ㄦ剰鍔涚煩闃碉紝澶у皬涓篛(n虏)
+Flash Attention閫氳繃鍒嗗潡璁＄畻锛屽皢鏄惧瓨鍗犵敤闄嶅埌O(n)
+
+鍏抽敭娲炲療锛?- GPU鏈変笉鍚屽眰绾х殑鍐呭瓨锛欻BM锛堥珮甯﹀鍐呭瓨锛夊拰SRAM
+- HBM瀹归噺澶т絾閫熷害鎱紝SRAM瀹归噺灏忎絾閫熷害蹇?- 浼犵粺娉ㄦ剰鍔涢绻佽闂瓾BM瀛樺偍娉ㄦ剰鍔涚煩闃?
+Flash Attention绛栫暐锛?1. 灏哘銆並銆乂鍒嗘垚灏忓潡锛屾瘡鍧楅€傚悎SRAM澶у皬
+2. 鍦⊿RAM涓绠楀皬鍧楃殑娉ㄦ剰鍔?3. 浣跨敤鍦ㄧ嚎softmax鎶€宸ч€愭绱Н缁撴灉
+4. 閬垮厤瀛樺偍瀹屾暣鐨勬敞鎰忓姏鐭╅樀
+
+鏁板鍩虹锛氬湪绾縎oftmax
+    softmax([x1, x2, x3]) 鍙互鍒嗘璁＄畻锛?    
+    姝ラ1锛氳绠楀眬閮╯oftmax
+        m1 = max(x1), o1 = exp(x1 - m1)
+    
+    姝ラ2锛氭洿鏂?        m2 = max(m1, max(x2))
+        o2 = o1 * exp(m1 - m2) + exp(x2 - m2)
+    
+    姝ラ3锛氱户缁?        m3 = max(m2, max(x3))
+        o3 = o2 * exp(m2 - m3) + exp(x3 - m3)
+    
+    鏈€缁堬細softmax = o3 / sum(o3)
+"""
+
+def flash_attention_reference(q, k, v, block_size=64):
+    """
+    Flash Attention鐨勫弬鑰冨疄鐜?    
+    鍙傛暟:
+        q: 鏌ヨ鐭╅樀 (batch, n_heads, seq, head_dim)
+        k: 閿煩闃?(batch, n_heads, seq, head_dim)
+        v: 鍊肩煩闃?(batch, n_heads, seq, head_dim)
+        block_size: 鍒嗗潡澶у皬
+    
+    杩斿洖:
+        娉ㄦ剰鍔涜緭鍑?(batch, n_heads, seq, head_dim)
+    """
+    batch, n_heads, seq, head_dim = q.shape
+    
+    # 鍒濆鍖栬緭鍑?    output = torch.zeros_like(q)
+    
+    # 鍒嗗潡璁＄畻
+    for i in range(0, seq, block_size):
+        i_end = min(i + block_size, seq)
+        q_block = q[:, :, i:i_end, :]
+        
+        # 鍒濆鍖栫疮绉彉閲?        max_score = torch.full((batch, n_heads, i_end - i, 1), float('-inf'), device=q.device)
+        sum_exp = torch.zeros((batch, n_heads, i_end - i, 1), device=q.device)
+        acc_output = torch.zeros((batch, n_heads, i_end - i, head_dim), device=q.device)
+        
+        for j in range(0, seq, block_size):
+            j_end = min(j + block_size, seq)
+            k_block = k[:, :, j:j_end, :]
+            v_block = v[:, :, j:j_end, :]
+            
+            # 璁＄畻褰撳墠鍧楃殑娉ㄦ剰鍔涘垎鏁?            scores = torch.matmul(q_block, k_block.transpose(-2, -1)) / math.sqrt(head_dim)
+            
+            # 搴旂敤鍥犳灉鎺╃爜
+            if j > i_end:
+                continue  # 璺宠繃鏈潵浣嶇疆
+            
+            # 鍦ㄧ嚎softmax鏇存柊
+            new_max = torch.maximum(max_score, scores.max(dim=-1, keepdim=True)[0])
+            exp_scores = torch.exp(scores - new_max)
+            correction = torch.exp(max_score - new_max)
+            
+            sum_exp = sum_exp * correction + exp_scores.sum(dim=-1, keepdim=True)
+            acc_output = acc_output * correction + torch.matmul(exp_scores, v_block)
+            max_score = new_max
+        
+        # 褰掍竴鍖栬緭鍑?        output[:, :, i:i_end, :] = acc_output / sum_exp
+    
+    return output
+```
+
+---
+
+### 3.9.4 FeedForward 娣卞害瑙ｆ瀽
+
+#### SwiGLU鐨勫畬鏁存暟瀛︽帹瀵?
+```python
+"""
+SwiGLU婵€娲诲嚱鏁扮殑鏁板鎺ㄥ
+
+1. GLU锛圙ated Linear Unit锛?   GLU(x) = (xW鈧? 鈯?蟽(xW鈧?
+   
+   鍏朵腑 蟽 鏄痵igmoid鍑芥暟
+   闂ㄦ帶鏈哄埗鍏佽缃戠粶閫夋嫨鎬у湴浼犻€掍俊鎭?
+2. Swish婵€娲诲嚱鏁?   Swish(x) = x * 蟽(x) = x / (1 + e^{-x})
+   
+   Swish鐨勭壒鐐癸細
+   - 骞虫粦锛堝澶勫彲寰級
+   - 闈炲崟璋冿紙鏈夎礋鍊艰緭鍑猴級
+   - 鑷棬鎺э紙杈撳嚭鍙楄緭鍏ユ帶鍒讹級
+
+3. SwiGLU = Swish + GLU
+   SwiGLU(x) = Swish(xW_gate) 鈯?(xW_up)
+             = (xW_gate * 蟽(xW_gate)) 鈯?(xW_up)
+
+4. 瀹屾暣鐨凷wiGLU FFN
+   FFN_SwiGLU(x) = (Swish(xW鈧? 鈯?xW鈧?W鈧?   
+   鍏朵腑锛?   - W鈧? 闂ㄦ帶鎶曞奖 (dim 鈫?hidden_dim)
+   - W鈧? 涓嬫姇褰?(hidden_dim 鈫?dim)
+   - W鈧? 涓婃姇褰?(dim 鈫?hidden_dim)
+
+鍙傛暟閲忓垎鏋愶細
+   浼犵粺FFN: 2 * dim * hidden_dim
+   SwiGLU:  3 * dim * hidden_dim
+   
+   鍙傛暟閲忓鍔?0%锛屼絾鎬ц兘鎻愬崌鏄捐憲
+"""
+
+def compare_activation_functions():
+    """姣旇緝涓嶅悓婵€娲诲嚱鏁扮殑鐗规€?""
+    import torch
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    x = torch.linspace(-5, 5, 1000)
+    
+    # ReLU
+    relu = torch.relu(x)
+    
+    # GELU
+    gelu = x * 0.5 * (1 + torch.erf(x / math.sqrt(2)))
+    
+    # Swish/SiLU
+    swish = x * torch.sigmoid(x)
+    
+    # 缁樺埗瀵规瘮鍥?    plt.figure(figsize=(12, 4))
+    
+    plt.subplot(1, 3, 1)
+    plt.plot(x.numpy(), relu.numpy(), label='ReLU')
+    plt.plot(x.numpy(), gelu.numpy(), label='GELU')
+    plt.plot(x.numpy(), swish.numpy(), label='Swish')
+    plt.legend()
+    plt.title('Activation Functions')
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    
+    # 璁＄畻姊害
+    x_grad = x.requires_grad_(True)
+    
+    # ReLU姊害
+    relu_grad = torch.autograd.grad(torch.relu(x_grad).sum(), x_grad, retain_graph=True)[0]
+    
+    # Swish姊害
+    swish_out = x_grad * torch.sigmoid(x_grad)
+    swish_grad = torch.autograd.grad(swish_out.sum(), x_grad, retain_graph=True)[0]
+    
+    plt.subplot(1, 3, 2)
+    plt.plot(x.detach().numpy(), relu_grad.numpy(), label='ReLU grad')
+    plt.plot(x.detach().numpy(), swish_grad.numpy(), label='Swish grad')
+    plt.legend()
+    plt.title('Gradients')
+    plt.xlabel('x')
+    plt.ylabel('df/dx')
+    
+    # 璐熷€艰緭鍑哄姣?    plt.subplot(1, 3, 3)
+    neg_mask = x < 0
+    plt.bar(['ReLU', 'GELU', 'Swish'], 
+            [relu[neg_mask].sum().item(), gelu[neg_mask].sum().item(), swish[neg_mask].sum().item()])
+    plt.title('Negative Output Sum')
+    plt.ylabel('Sum of f(x) for x < 0')
+    
+    plt.tight_layout()
+    plt.show()
+```
+
+#### FFN鐨勪綔鐢ㄤ笌璁捐鍘熷垯
+
+```python
+"""
+FFN鍦═ransformer涓殑浣滅敤
+
+1. 澧炲姞闈炵嚎鎬?   娉ㄦ剰鍔涙満鍒舵湰璐ㄤ笂鏄嚎鎬у彉鎹?   FFN寮曞叆闈炵嚎鎬э紝澧炲己妯″瀷琛ㄨ揪鑳藉姏
+
+2. 澧炲姞妯″瀷瀹归噺
+   FFN鐨勯殣钘忓眰缁村害閫氬父鏄緭鍏ョ淮搴︾殑4鍊?   杩欐樉钁楀鍔犱簡妯″瀷鐨勫弬鏁伴噺鍜岃〃杈捐兘鍔?
+3. 鐗瑰緛鍙樻崲
+   FFN瀛︿範鏇村鏉傜殑鐗瑰緛鍙樻崲
+   涓嶅悓灞傚彲浠ュ涔犱笉鍚屽眰娆＄殑鐗瑰緛
+
+璁捐鍘熷垯锛?
+1. 闅愯棌缁村害閫夋嫨
+   - 浼犵粺閫夋嫨锛? * dim
+   - SwiGLU鎺ㄨ崘锛?/3 * 4 * dim 鈮?2.67 * dim
+   - 闇€瑕佸榻愬埌64鐨勫€嶆暟锛圙PU鏁堢巼锛?
+2. 婵€娲诲嚱鏁伴€夋嫨
+   - ReLU锛氱畝鍗曚絾鍙兘涓㈠け淇℃伅
+   - GELU锛氬钩婊戯紝BERT浣跨敤
+   - SwiGLU锛氬綋鍓嶆渶浼橈紝LLaMA浣跨敤
+
+3. Dropout浣嶇疆
+   - 閫氬父鍦‵FN杈撳嚭鍚庡簲鐢?   - 灏忔ā鍨嬪彲浠ヤ笉鐢―ropout
+"""
+
+class FlexibleFFN(nn.Module):
+    """
+    鐏垫椿鐨凢FN瀹炵幇锛屾敮鎸佸绉嶆縺娲诲嚱鏁?    """
+    def __init__(self, dim, hidden_dim=None, activation='swiglu', dropout=0.0, multiple_of=64):
+        super().__init__()
+        
+        # 璁＄畻闅愯棌缁村害
+        if hidden_dim is None:
+            hidden_dim = int(2 * 4 * dim / 3)  # SwiGLU鎺ㄨ崘
+            hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+        
+        self.hidden_dim = hidden_dim
+        self.activation = activation
+        
+        if activation == 'swiglu':
+            self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+            self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+            self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        elif activation == 'gelu':
+            self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+            self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        elif activation == 'relu':
+            self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+            self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
+        
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x):
+        if self.activation == 'swiglu':
+            return self.dropout(self.w2(F.silu(self.w1(x)) * self.w3(x)))
+        elif self.activation == 'gelu':
+            return self.dropout(self.w2(F.gelu(self.w1(x))))
+        elif self.activation == 'relu':
+            return self.dropout(self.w2(F.relu(self.w1(x))))
+```
+
+---
+
+### 3.9.5 MoE 娣卞害瑙ｆ瀽
+
+#### MoE鐨勮礋杞藉潎琛￠棶棰?
+```python
+"""
+MoE璐熻浇鍧囪　闂璇﹁В
+
+闂鎻忚堪锛?濡傛灉闂ㄦ帶缃戠粶鎬绘槸閫夋嫨灏戞暟鍑犱釜涓撳锛屼細瀵艰嚧锛?1. 琚€変腑鐨勪笓瀹惰繃杞斤紝璁粌涓嶅厖鍒?2. 鏈閫変腑鐨勪笓瀹堕棽缃紝娴垂鍙傛暟
+3. 妯″瀷鎬ц兘涓嬮檷
+
+瑙ｅ喅鏂规锛氳緟鍔╂崯澶憋紙Auxiliary Loss锛?
+璐熻浇鍧囪　鎹熷け鍏紡锛?    L_aux = 伪 * n * 危岬?f岬?* P岬?
+
+鍏朵腑锛?- f岬?= 涓撳i琚€変腑鐨勯鐜?- P岬?= 涓撳i鐨勫钩鍧囪矾鐢卞垎鏁?- n = 涓撳鎬绘暟
+- 伪 = 鎹熷け鏉冮噸
+
+杩欎釜鎹熷け榧撳姳锛?1. 鎵€鏈変笓瀹惰鍧囧寑閫変腑锛坒岬㈡帴杩?/n锛?2. 鎵€鏈変笓瀹剁殑璺敱鍒嗘暟鐩歌繎锛圥岬㈡帴杩戝潎鍊硷級
+"""
+
+class LoadBalancingLoss(nn.Module):
+    """
+    璐熻浇鍧囪　鎹熷け
+    """
+    def __init__(self, n_experts, alpha=0.1):
+        super().__init__()
+        self.n_experts = n_experts
+        self.alpha = alpha
+    
+    def forward(self, router_probs, expert_indices):
+        """
+        璁＄畻璐熻浇鍧囪　鎹熷け
+        
+        鍙傛暟:
+            router_probs: 璺敱姒傜巼 (batch * seq, n_experts)
+            expert_indices: 閫変腑鐨勪笓瀹剁储寮?(batch * seq, top_k)
+        
+        杩斿洖:
+            璐熻浇鍧囪　鎹熷け
+        """
+        # 璁＄畻姣忎釜涓撳琚€変腑鐨勯鐜?        expert_mask = F.one_hot(expert_indices, self.n_experts).float()
+        expert_freq = expert_mask.sum(dim=(0, 1)) / expert_mask.numel() * self.n_experts
+        
+        # 璁＄畻姣忎釜涓撳鐨勫钩鍧囪矾鐢卞垎鏁?        expert_prob = router_probs.mean(dim=0)
+        
+        # 璐熻浇鍧囪　鎹熷け
+        loss = self.alpha * self.n_experts * (expert_freq * expert_prob).sum()
+        
+        return loss
+```
+
+#### MoE鐨勯珮绾ц矾鐢辩瓥鐣?
+```python
+"""
+MoE楂樼骇璺敱绛栫暐
+
+1. Top-K璺敱锛堝熀纭€锛?   閫夋嫨鍒嗘暟鏈€楂樼殑K涓笓瀹?
+2. 涓撳閫夋嫨璺敱锛圗xpert Choice锛?   璁╀笓瀹堕€夋嫨token锛岃€屼笉鏄痶oken閫夋嫨涓撳
+   鑷姩瀹炵幇璐熻浇鍧囪　
+
+3. Soft璺敱
+   浣跨敤鎵€鏈変笓瀹剁殑鍔犳潈骞冲潎
+   璁＄畻閲忓ぇ浣嗗钩婊?
+4. 娣峰悎璺敱
+   缁撳悎Top-K鍜孲oft璺敱鐨勪紭鐐?
+5. 瀹归噺鍥犲瓙
+   闄愬埗姣忎釜涓撳澶勭悊鐨則oken鏁伴噺
+   瓒呭嚭瀹归噺鐨則oken璺宠繃鎴栭噸鏂拌矾鐢?"""
+
+class ExpertChoiceRouter(nn.Module):
+    """
+    涓撳閫夋嫨璺敱
+    璁╀笓瀹朵富鍔ㄩ€夋嫨瑕佸鐞嗙殑token
+    """
+    def __init__(self, dim, n_experts, top_k, capacity_factor=1.25):
+        super().__init__()
+        self.n_experts = n_experts
+        self.top_k = top_k
+        self.capacity_factor = capacity_factor
+        
+        self.gate = nn.Linear(dim, n_experts, bias=False)
+    
+    def forward(self, x):
+        """
+        涓撳閫夋嫨璺敱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺 (batch, seq, dim)
+        
+        杩斿洖:
+            璺敱鍚庣殑杈撳嚭
+        """
+        batch, seq, dim = x.shape
+        
+        # 璁＄畻璺敱鍒嗘暟
+        router_logits = self.gate(x)  # (batch, seq, n_experts)
+        
+        # 杞疆锛氳涓撳缁村害鍦ㄥ墠
+        router_logits = router_logits.transpose(0, 2)  # (n_experts, seq, batch)
+        router_logits = router_logits.reshape(self.n_experts, -1)  # (n_experts, batch * seq)
+        
+        # 璁＄畻姣忎釜涓撳鐨勫閲?        capacity = int(self.capacity_factor * seq * batch / self.n_experts)
+        
+        # 姣忎釜涓撳閫夋嫨top-capacity涓猼oken
+        top_k_scores, top_k_indices = torch.topk(
+            router_logits, capacity, dim=-1
+        )
+        
+        # 搴旂敤softmax
+        top_k_scores = F.softmax(top_k_scores, dim=-1)
+        
+        return top_k_scores, top_k_indices
+
+
+class SoftRouter(nn.Module):
+    """
+    Soft璺敱锛氫娇鐢ㄦ墍鏈変笓瀹剁殑鍔犳潈骞冲潎
+    """
+    def __init__(self, dim, n_experts):
+        super().__init__()
+        self.n_experts = n_experts
+        self.gate = nn.Linear(dim, n_experts, bias=False)
+    
+    def forward(self, x, experts):
+        """
+        Soft璺敱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺 (batch, seq, dim)
+            experts: 涓撳缃戠粶鍒楄〃
+        
+        杩斿洖:
+            鍔犳潈骞冲潎杈撳嚭
+        """
+        # 璁＄畻璺敱鏉冮噸
+        router_weights = F.softmax(self.gate(x), dim=-1)  # (batch, seq, n_experts)
+        
+        # 璁＄畻鎵€鏈変笓瀹剁殑杈撳嚭
+        expert_outputs = []
+        for expert in experts:
+            expert_outputs.append(expert(x))
+        
+        # 鍫嗗彔涓撳杈撳嚭
+        expert_outputs = torch.stack(expert_outputs, dim=-1)  # (batch, seq, dim, n_experts)
+        
+        # 鍔犳潈骞冲潎
+        output = (expert_outputs * router_weights.unsqueeze(-2)).sum(dim=-1)
+        
+        return output
+```
+
+#### 鍏变韩涓撳鐨勮璁″師鐞?
+```python
+"""
+鍏变韩涓撳锛圫hared Experts锛夌殑璁捐鍘熺悊
+
+鍔ㄦ満锛?1. 鏌愪簺鐭ヨ瘑鏄€氱敤鐨勶紝鎵€鏈塼oken閮介渶瑕?2. 璺敱涓撳涓撴敞浜庣壒瀹氶鍩熺殑鐭ヨ瘑
+3. 鍏变韩涓撳澶勭悊閫氱敤鐭ヨ瘑
+
+瀹炵幇锛?- 鍏变韩涓撳瀵规墍鏈塼oken閮芥縺娲?- 杈撳嚭涓庤矾鐢变笓瀹惰緭鍑虹浉鍔?- 涓嶉渶瑕佽矾鐢卞喅绛?
+浼樺娍锛?1. 鍑忓皯璺敱涓撳鐨勮礋鎷?2. 淇濈暀閫氱敤鐭ヨ瘑
+3. 鎻愰珮妯″瀷绋冲畾鎬?
+MiniMind鐨勯厤缃細
+- 4涓矾鐢变笓瀹讹紙姣忎釜token婵€娲?涓級
+- 1涓叡浜笓瀹讹紙鎵€鏈塼oken閮芥縺娲伙級
+"""
+
+class SharedExpertMoE(nn.Module):
+    """
+    甯﹀叡浜笓瀹剁殑MoE瀹炵幇
+    """
+    def __init__(self, dim, hidden_dim, n_routed_experts, n_shared_experts, top_k):
+        super().__init__()
+        
+        self.n_routed_experts = n_routed_experts
+        self.n_shared_experts = n_shared_experts
+        self.top_k = top_k
+        
+        # 璺敱涓撳
+        self.routed_experts = nn.ModuleList([
+            FeedForward(dim, hidden_dim, multiple_of=64)
+            for _ in range(n_routed_experts)
+        ])
+        
+        # 鍏变韩涓撳
+        self.shared_experts = nn.ModuleList([
+            FeedForward(dim, hidden_dim, multiple_of=64)
+            for _ in range(n_shared_experts)
+        ])
+        
+        # 璺敱闂ㄦ帶
+        self.gate = nn.Linear(dim, n_routed_experts, bias=False)
+    
+    def forward(self, x):
+        batch, seq, dim = x.shape
+        x_flat = x.view(-1, dim)
+        
+        # 璁＄畻璺敱鏉冮噸
+        router_logits = self.gate(x_flat)  # (batch * seq, n_routed_experts)
+        router_weights = F.softmax(router_logits, dim=-1)
+        
+        # 閫夋嫨top-k璺敱涓撳
+        top_k_weights, top_k_indices = torch.topk(router_weights, self.top_k, dim=-1)
+        top_k_weights = top_k_weights / top_k_weights.sum(dim=-1, keepdim=True)
+        
+        # 鍒濆鍖栬緭鍑?        output = torch.zeros_like(x_flat)
+        
+        # 璁＄畻璺敱涓撳杈撳嚭
+        for i in range(self.top_k):
+            expert_idx = top_k_indices[:, i]  # (batch * seq,)
+            weight = top_k_weights[:, i:i+1]  # (batch * seq, 1)
+            
+            for e in range(self.n_routed_experts):
+                mask = (expert_idx == e)
+                if mask.any():
+                    expert_input = x_flat[mask]
+                    expert_output = self.routed_experts[e](expert_input)
+                    output[mask] += weight[mask] * expert_output
+        
+        # 璁＄畻鍏变韩涓撳杈撳嚭
+        shared_output = torch.zeros_like(x_flat)
+        for shared_expert in self.shared_experts:
+            shared_output += shared_expert(x_flat)
+        shared_output = shared_output / self.n_shared_experts
+        
+        # 鍚堝苟杈撳嚭
+        output = output + shared_output
+        
+        return output.view(batch, seq, dim)
+```
+
+---
+
+### 3.9.6 妯″瀷鍒濆鍖栦笌鏉冮噸鍏变韩
+
+#### 鏉冮噸鍒濆鍖栫瓥鐣?
+```python
+"""
+妯″瀷鏉冮噸鍒濆鍖栫殑閲嶈鎬?
+濂界殑鍒濆鍖栧彲浠ワ細
+1. 鍔犻€熸敹鏁?2. 閬垮厤姊害娑堝け/鐖嗙偢
+3. 鎻愰珮鏈€缁堟€ц兘
+
+甯哥敤鍒濆鍖栨柟娉曪細
+
+1. Xavier/Glorot鍒濆鍖?   閫傜敤浜巗igmoid/tanh婵€娲?   std = sqrt(2 / (fan_in + fan_out))
+
+2. Kaiming/He鍒濆鍖?   閫傜敤浜嶳eLU鍙婂叾鍙樹綋
+   std = sqrt(2 / fan_in)
+
+3. 姝ｆ€佸垎甯冨垵濮嬪寲
+   Transformer甯哥敤
+   std = 0.02 鎴?1/sqrt(dim)
+
+4. 鎴柇姝ｆ€佸垎甯?   閬垮厤鏋佺鍊?   鍦╗-2*std, 2*std]鑼冨洿鍐呮埅鏂?"""
+
+def init_weights(module, method='normal', std=0.02):
+    """
+    鏉冮噸鍒濆鍖栧嚱鏁?    
+    鍙傛暟:
+        module: 瑕佸垵濮嬪寲鐨勬ā鍧?        method: 鍒濆鍖栨柟娉?        std: 鏍囧噯宸?    """
+    if isinstance(module, nn.Linear):
+        if method == 'normal':
+            nn.init.normal_(module.weight, mean=0.0, std=std)
+        elif method == 'xavier':
+            nn.init.xavier_normal_(module.weight)
+        elif method == 'kaiming':
+            nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
+        
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+    
+    elif isinstance(module, nn.Embedding):
+        nn.init.normal_(module.weight, mean=0.0, std=std)
+    
+    elif isinstance(module, nn.LayerNorm):
+        nn.init.ones_(module.weight)
+        nn.init.zeros_(module.bias)
+    
+    elif isinstance(module, RMSNorm):
+        nn.init.ones_(module.weight)
+
+
+def scaled_init(module, dim, n_layers):
+    """
+    缂╂斁鍒濆鍖?    
+    瀵逛簬娣卞眰缃戠粶锛屼娇鐢ㄨ緝灏忕殑鍒濆鍖栨柟宸?    std = 0.02 / sqrt(2 * n_layers)
+    
+    杩欐湁鍔╀簬绋冲畾娣卞眰缃戠粶鐨勮缁?    """
+    std = 0.02 / math.sqrt(2 * n_layers)
+    init_weights(module, std=std)
+```
+
+#### 鏉冮噸鍏变韩鐨勫師鐞?
+```python
+"""
+鏉冮噸鍏变韩锛圵eight Tying锛夌殑鍘熺悊
+
+鍦ㄨ瑷€妯″瀷涓紝杈撳叆宓屽叆灞傚拰杈撳嚭灞傚叡浜潈閲嶏細
+
+杈撳叆宓屽叆灞傦細
+    E: vocab_size 脳 dim
+    灏唗oken ID鏄犲皠涓哄悜閲?
+杈撳嚭灞傦細
+    W: dim 脳 vocab_size
+    灏嗛殣钘忕姸鎬佹槧灏勪负logits
+
+鍏变韩鏉冮噸锛?    W = E^T
+    鍗?output = hidden @ E^T
+
+涓轰粈涔堝叡浜潈閲嶏紵
+
+1. 鍙傛暟鏁堢巼
+   鍑忓皯鍙傛暟閲忥細vocab_size 脳 dim
+   瀵逛簬vocab_size=6400, dim=512锛氬噺灏戠害3.3M鍙傛暟
+
+2. 姝ｅ垯鍖栨晥鏋?   鍏变韩鏉冮噸鐩稿綋浜庢坊鍔犱簡绾︽潫
+   鏈夊姪浜庨槻姝㈣繃鎷熷悎
+
+3. 璇箟涓€鑷存€?   杈撳叆鍜岃緭鍑洪兘琛ㄧずtoken
+   搴旇鍦ㄥ悓涓€璇箟绌洪棿涓?
+4. 瀹為獙楠岃瘉
+   鍦ㄥ涓换鍔′笂锛屽叡浜潈閲嶆晥鏋滄洿濂?
+娉ㄦ剰浜嬮」锛?- 鍏变韩鏉冮噸鍙兘涓嶉€傜敤浜庢墍鏈変换鍔?- 瀵逛簬鏌愪簺鐗瑰畾浠诲姟锛岀嫭绔嬫潈閲嶅彲鑳芥洿濂?"""
+
+class WeightTiedLM(nn.Module):
+    """
+    甯︽潈閲嶅叡浜殑璇█妯″瀷
+    """
+    def __init__(self, vocab_size, dim):
+        super().__init__()
+        
+        # 宓屽叆灞?        self.embedding = nn.Embedding(vocab_size, dim)
+        
+        # 鍏朵粬灞?..
+        # ...
+        
+        # 杈撳嚭灞傦紙涓嶅垱寤烘柊鐨勬潈閲嶏級
+        # 浣跨敤embedding鐨勬潈閲嶄綔涓鸿緭鍑烘潈閲?    
+    def forward(self, input_ids):
+        # 宓屽叆
+        x = self.embedding(input_ids)
+        
+        # 閫氳繃鍏朵粬灞?..
+        # x = self.layers(x)
+        
+        # 杈撳嚭logits
+        # 浣跨敤embedding鏉冮噸杩涜璁＄畻
+        logits = F.linear(x, self.embedding.weight)
+        
+        return logits
+```
+
+---
+
+### 3.9.7 姊害娴佷笌鍙嶅悜浼犳挱
+
+```python
+"""
+Transformer涓殑姊害娴佸垎鏋?
+鐞嗚В姊害濡備綍鍦═ransformer涓祦鍔ㄥ浜庤皟璇曞拰浼樺寲鑷冲叧閲嶈
+
+1. 娈嬪樊杩炴帴鐨勬搴︽祦
+   y = x + f(x)
+   鈭侺/鈭倄 = 鈭侺/鈭倅 + 鈭侺/鈭倅 * 鈭俧/鈭倄
+   
+   姊害鍙互鐩存帴閫氳繃娈嬪樊杩炴帴娴佸姩锛屼笉缁忚繃f
+   杩欐湁鍔╀簬缂撹В姊害娑堝け
+
+2. LayerNorm/RMSNorm鐨勬搴︽祦
+   y = x / ||x|| * 纬
+   
+   姊害浼氶噸鏂板垎閰嶅埌鎵€鏈夌淮搴?   鏈夊姪浜庣ǔ瀹氳缁?
+3. 娉ㄦ剰鍔涚殑姊害娴?   Attention(Q, K, V) = softmax(QK^T) * V
+   
+   姊害浠嶸鍙嶅悜浼犳挱鍒癚銆並
+   Softmax鐨勬搴﹀彲鑳藉鑷存搴︽秷澶?
+4. FFN鐨勬搴︽祦
+   y = W2 * activation(W1 * x)
+   
+   婵€娲诲嚱鏁扮殑姊害褰卞搷姊害娴佸姩
+   SwiGLU鐨勬搴︽瘮ReLU鏇村钩婊?"""
+
+def analyze_gradient_flow(model, input_ids):
+    """
+    鍒嗘瀽妯″瀷鐨勬搴︽祦
+    
+    鍙傛暟:
+        model: 璇█妯″瀷
+        input_ids: 杈撳叆token ID
+    
+    杩斿洖:
+        鍚勫眰鐨勬搴︾粺璁′俊鎭?    """
+    # 鍓嶅悜浼犳挱
+    outputs = model(input_ids)
+    loss = outputs.logits.sum()
+    
+    # 鍙嶅悜浼犳挱
+    loss.backward()
+    
+    # 鏀堕泦姊害缁熻淇℃伅
+    gradient_stats = {}
+    
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad = param.grad
+            stats = {
+                'mean': grad.mean().item(),
+                'std': grad.std().item(),
+                'min': grad.min().item(),
+                'max': grad.max().item(),
+                'norm': grad.norm().item(),
+            }
+            gradient_stats[name] = stats
+    
+    return gradient_stats
+
+
+def gradient_clipping_analysis(model, max_norm=1.0):
+    """
+    姊害瑁佸壀鍒嗘瀽
+    
+    鍙傛暟:
+        model: 璇█妯″瀷
+        max_norm: 鏈€澶ф搴﹁寖鏁?    
+    杩斿洖:
+        瑁佸壀鍓嶅悗鐨勬搴﹁寖鏁?    """
+    # 璁＄畻鎬绘搴﹁寖鏁?    total_norm = 0.0
+    for param in model.parameters():
+        if param.grad is not None:
+            param_norm = param.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** 0.5
+    
+    # 璁＄畻瑁佸壀绯绘暟
+    clip_coef = max_norm / (total_norm + 1e-6)
+    
+    if clip_coef < 1:
+        # 闇€瑕佽鍓?        for param in model.parameters():
+            if param.grad is not None:
+                param.grad.data.mul_(clip_coef)
+    
+    return {
+        'original_norm': total_norm,
+        'clipped': clip_coef < 1,
+        'clip_coef': clip_coef,
+        'final_norm': min(total_norm, max_norm)
+    }
+```
+
+---
+
+### 3.9.8 妯″瀷鎬ц兘浼樺寲鎶€宸?
+```python
+"""
+妯″瀷鎬ц兘浼樺寲鎶€宸?
+1. 绠楀瓙铻嶅悎
+   灏嗗涓搷浣滃悎骞朵负涓€涓紝鍑忓皯鍐呭瓨璁块棶
+
+2. 姊害妫€鏌ョ偣
+   浠ヨ绠楁崲鍐呭瓨锛屽噺灏戞樉瀛樺崰鐢?
+3. 娣峰悎绮惧害璁粌
+   浣跨敤float16/bfloat16鍔犻€熻绠?
+4. 缂栬瘧浼樺寲
+   浣跨敤torch.compile杩涜鍥句紭鍖?
+5. 鍐呭瓨浼樺寲
+   浣跨敤inplace鎿嶄綔锛屽噺灏戝唴瀛樺垎閰?"""
+
+# 1. 绠楀瓙铻嶅悎绀轰緥
+class FusedQKVProjection(nn.Module):
+    """
+    铻嶅悎鐨凲KV鎶曞奖
+    灏嗕笁涓姇褰卞悎骞朵负涓€涓?    """
+    def __init__(self, dim, n_heads, n_kv_heads):
+        super().__init__()
+        self.n_heads = n_heads
+        self.n_kv_heads = n_kv_heads
+        self.head_dim = dim // n_heads
+        
+        # 铻嶅悎鐨凲KV鎶曞奖
+        total_dim = n_heads * self.head_dim + 2 * n_kv_heads * self.head_dim
+        self.qkv_proj = nn.Linear(dim, total_dim, bias=False)
+    
+    def forward(self, x):
+        batch, seq, _ = x.shape
+        
+        # 涓€娆℃€ц绠桻銆並銆乂
+        qkv = self.qkv_proj(x)
+        
+        # 鍒嗙Q銆並銆乂
+        q_dim = self.n_heads * self.head_dim
+        kv_dim = self.n_kv_heads * self.head_dim
+        
+        q = qkv[:, :, :q_dim]
+        k = qkv[:, :, q_dim:q_dim + kv_dim]
+        v = qkv[:, :, q_dim + kv_dim:]
+        
+        return q, k, v
+
+
+# 2. 姊害妫€鏌ョ偣绀轰緥
+from torch.utils.checkpoint import checkpoint
+
+class CheckpointedTransformerBlock(nn.Module):
+    """
+    甯︽搴︽鏌ョ偣鐨凾ransformer鍧?    浠ヨ绠楁崲鍐呭瓨
+    """
+    def __init__(self, config):
+        super().__init__()
+        self.attention = Attention(config)
+        self.feed_forward = FeedForward(config.dim, config.hidden_dim, config.multiple_of)
+        self.attention_norm = RMSNorm(config.dim)
+        self.ffn_norm = RMSNorm(config.dim)
+    
+    def _forward(self, x, pos_cis):
+        # 娉ㄦ剰鍔涘瓙灞?        h = x + self.attention(self.attention_norm(x), pos_cis)[0]
+        # FFN瀛愬眰
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+    
+    def forward(self, x, pos_cis):
+        # 浣跨敤姊害妫€鏌ョ偣
+        return checkpoint(self._forward, x, pos_cis, use_reentrant=False)
+
+
+# 3. 缂栬瘧浼樺寲绀轰緥
+def compile_model(model):
+    """
+    浣跨敤torch.compile浼樺寲妯″瀷
+    
+    缂栬瘧浼樺寲鍖呮嫭锛?    - 绠楀瓙铻嶅悎
+    - 姝讳唬鐮佹秷闄?    - 甯搁噺鎶樺彔
+    - 鍐呭瓨甯冨眬浼樺寲
+    """
+    # 浣跨敤榛樿妯″紡
+    compiled_model = torch.compile(model)
+    
+    # 鎴栬€呬娇鐢ㄦ洿婵€杩涚殑浼樺寲
+    # compiled_model = torch.compile(model, mode='max-autotune')
+    
+    return compiled_model
+
+
+# 4. 鍐呭瓨浼樺寲绀轰緥
+class MemoryEfficientAttention(nn.Module):
+    """
+    鍐呭瓨楂樻晥鐨勬敞鎰忓姏瀹炵幇
+    浣跨敤inplace鎿嶄綔鍜屽唴瀛樺鐢?    """
+    def __init__(self, dim, n_heads):
+        super().__init__()
+        self.n_heads = n_heads
+        self.head_dim = dim // n_heads
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+        
+        self.qkv_proj = nn.Linear(dim, 3 * dim, bias=False)
+        self.out_proj = nn.Linear(dim, dim, bias=False)
+    
+    def forward(self, x):
+        batch, seq, dim = x.shape
+        
+        # 璁＄畻QKV
+        qkv = self.qkv_proj(x)
+        qkv = qkv.view(batch, seq, 3, self.n_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        
+        # 浣跨敤Flash Attention锛堝鏋滃彲鐢級
+        if hasattr(F, 'scaled_dot_product_attention'):
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        else:
+            # 鎵嬪姩瀹炵幇锛屼娇鐢ㄥ垎鍧楄绠楀噺灏戝唴瀛?            out = self._blockwise_attention(q, k, v)
+        
+        # 鍚堝苟杈撳嚭
+        out = out.transpose(1, 2).contiguous()
+        out = out.view(batch, seq, dim)
+        
+        return self.out_proj(out)
+    
+    def _blockwise_attention(self, q, k, v, block_size=64):
+        """鍒嗗潡娉ㄦ剰鍔涜绠?""
+        batch, n_heads, seq, head_dim = q.shape
+        
+        output = torch.zeros_like(q)
+        
+        for i in range(0, seq, block_size):
+            i_end = min(i + block_size, seq)
+            q_block = q[:, :, i:i_end, :]
+            
+            # 璁＄畻褰撳墠鍧楃殑娉ㄦ剰鍔?            scores = torch.matmul(q_block, k.transpose(-2, -1)) * self.scale
+            
+            # 搴旂敤鍥犳灉鎺╃爜
+            mask = torch.triu(
+                torch.ones(i_end - i, seq, dtype=torch.bool, device=q.device),
+                diagonal=seq - i
+            )
+            scores = scores.masked_fill(mask, float('-inf'))
+            
+            # Softmax鍜屽姞鏉?            attn = F.softmax(scores, dim=-1)
+            output[:, :, i:i_end, :] = torch.matmul(attn, v)
+        
+        return output
+```
+
+---
+
+## 4. 鏁版嵁澶勭悊绯荤粺
+
+鏁版嵁澶勭悊鏄缁冨ぇ璇█妯″瀷鐨勫叧閿幆鑺傦紝MiniMind鎻愪緵浜嗗畬鏁寸殑鏁版嵁澶勭悊娴佺▼銆傛暟鎹川閲忕洿鎺ュ喅瀹氫簡妯″瀷鐨勪笂闄愶紝鍥犳鐞嗚В鏁版嵁澶勭悊绯荤粺鑷冲叧閲嶈銆?
+### 4.0 鏁版嵁澶勭悊绯荤粺鏋舵瀯鎬昏
+
+```
+鏁版嵁澶勭悊娴佺▼锛?
+鍘熷鏁版嵁锛堟枃鏈?瀵硅瘽锛?       鈹?       鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   鏁版嵁娓呮礂涓庨澶勭悊                           鈹?鈹? - 鍘婚櫎HTML鏍囩銆佺壒娈婂瓧绗?                                    鈹?鈹? - 鏂囨湰瑙勮寖鍖栵紙缁熶竴缂栫爜銆佸幓闄ゅ浣欑┖鐧斤級                        鈹?鈹? - 鏁版嵁鍘婚噸锛堥槻姝㈤噸澶嶆牱鏈級                                   鈹?鈹? - 璐ㄩ噺杩囨护锛堝幓闄や綆璐ㄩ噺鏂囨湰锛?                                鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?       鈹?       鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   鍒嗚瘝鍣ㄥ鐞?                                鈹?鈹? - 鍔犺浇棰勮缁冨垎璇嶅櫒                                          鈹?鈹? - 鏂囨湰 鈫?Token ID搴忓垪                                       鈹?鈹? - 娣诲姞鐗规畩Token锛圔OS/EOS/PAD锛?                             鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?       鈹?       鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   搴忓垪澶勭悊                                   鈹?鈹? - 鎴柇锛堣秴杩噈ax_length锛?                                   鈹?鈹? - 濉厖锛堜笉瓒砿ax_length锛?                                   鈹?鈹? - 鍒涘缓娉ㄦ剰鍔涙帺鐮?                                           鈹?鈹? - 鍒涘缓鏍囩锛堢敤浜庤缁冿級                                       鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?       鈹?       鈻?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   鎵归噺缁勭粐                                   鈹?鈹? - DataLoader鎵瑰鐞?                                         鈹?鈹? - 鍒嗗竷寮忛噰鏍凤紙DDP锛?                                         鈹?鈹? - 鍔ㄦ€佹壒澶勭悊锛堝彲閫夛級                                         鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?       鈹?       鈻?    妯″瀷杈撳叆
+```
+
+### 4.0.1 鏁版嵁鏍煎紡瀵规瘮
+
+| 鏁版嵁绫诲瀷 | 鏂囦欢鏍煎紡 | 涓昏鐢ㄩ€?| 鐗规畩澶勭悊 |
+|---------|---------|---------|---------|
+| 棰勮缁冩暟鎹?| .jsonl | 瀛︿範璇█鐭ヨ瘑 | 绾枃鏈紝鏃犺鑹插尯鍒?|
+| SFT鏁版嵁 | .jsonl | 瀛︿範瀵硅瘽鑳藉姏 | 澶氳疆瀵硅瘽锛岃鑹插尯鍒?|
+| DPO鏁版嵁 | .jsonl | 瀛︿範浜虹被鍋忓ソ | 姝ｈ礋鏍锋湰瀵规瘮 |
+
+### 4.1 棰勮缁冩暟鎹泦
+
+```python
+"""
+棰勮缁冩暟鎹泦澶勭悊
+浣嶇疆锛歞ataset/lm_dataset.py
+"""
+
+import torch
+from torch.utils.data import Dataset
+import json
+from typing import Optional
+
+
+class PretrainDataset(Dataset):
+    """
+    棰勮缁冩暟鎹泦
+    
+    鐢ㄤ簬鍔犺浇鍜屽鐞嗛璁粌璇枡銆?    鏁版嵁鏍煎紡锛氭瘡琛屼竴涓狫SON瀵硅薄锛屽寘鍚?text"瀛楁
+    
+    绀轰緥鏁版嵁鏍煎紡锛?    {"text": "杩欐槸涓€娈甸璁粌鏂囨湰..."}
+    {"text": "鍙︿竴娈甸璁粌鏂囨湰..."}
+    """
+    
+    def __init__(
+        self,
+        data_path: str,
+        tokenizer,
+        max_length: int = 512,
+        buffer_size: int = 10000
+    ):
+        """
+        鍒濆鍖栭璁粌鏁版嵁闆?        
+        鍙傛暟:
+            data_path: 鏁版嵁鏂囦欢璺緞锛?jsonl鏍煎紡锛?            tokenizer: 鍒嗚瘝鍣?            max_length: 鏈€澶у簭鍒楅暱搴?            buffer_size: 缂撳啿鍖哄ぇ灏忥紙鐢ㄤ簬鍐呭瓨浼樺寲锛?        """
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.buffer_size = buffer_size
+        
+        # 鍔犺浇鏁版嵁
+        self.data = []
+        with open(data_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                item = json.loads(line.strip())
+                self.data.append(item['text'])
+        
+        print(f"鍔犺浇浜?{len(self.data)} 鏉￠璁粌鏁版嵁")
+    
+    def __len__(self):
+        """杩斿洖鏁版嵁闆嗗ぇ灏?""
+        return len(self.data)
+    
+    def __getitem__(self, idx: int) -> dict:
+        """
+        鑾峰彇鍗曚釜鏍锋湰
+        
+        鍙傛暟:
+            idx: 鏍锋湰绱㈠紩
+            
+        杩斿洖:
+            鍖呭惈input_ids鍜宭abels鐨勫瓧鍏?            
+        澶勭悊娴佺▼:
+            1. 鑾峰彇鏂囨湰
+            2. Tokenize
+            3. 鎴柇鍒版渶澶ч暱搴?            4. 鍒涘缓labels锛堜笌input_ids鐩稿悓锛岀敤浜庤瑷€妯″瀷璁粌锛?        """
+        # 鑾峰彇鏂囨湰
+        text = self.data[idx]
+        
+        # Tokenize
+        # add_special_tokens=True: 娣诲姞BOS鍜孍OS token
+        encoding = self.tokenizer(
+            text,
+            max_length=self.max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt',
+            add_special_tokens=True
+        )
+        
+        input_ids = encoding['input_ids'].squeeze(0)
+        
+        # 瀵逛簬璇█妯″瀷锛宭abels灏辨槸input_ids
+        # 妯″瀷浼氶娴嬩笅涓€涓猼oken锛屾墍浠abels鏄痠nput_ids鐨勭Щ浣嶇増鏈?        # 浣嗗湪PyTorch涓紝浜ゅ弶鐔垫崯澶卞嚱鏁颁細鑷姩澶勭悊杩欎釜
+        labels = input_ids.clone()
+        
+        # 灏唒adding token鐨刲abels璁句负-100锛岃繖鏍锋崯澶卞嚱鏁颁細蹇界暐瀹冧滑
+        labels[labels == self.tokenizer.pad_token_id] = -100
+        
+        return {
+            'input_ids': input_ids,
+            'labels': labels
+        }
+
+
+class SFTDataset(Dataset):
+    """
+    鐩戠潱寰皟鏁版嵁闆?    
+    鐢ㄤ簬鍔犺浇鍜屽鐞嗗璇濇暟鎹€?    鏁版嵁鏍煎紡锛氭瘡琛屼竴涓狫SON瀵硅薄锛屽寘鍚?conversations"瀛楁
+    
+    绀轰緥鏁版嵁鏍煎紡锛?    {
+        "conversations": [
+            {"role": "user", "content": "浣犲ソ"},
+            {"role": "assistant", "content": "浣犲ソ锛佹湁浠€涔堟垜鍙互甯姪浣犵殑鍚楋紵"}
+        ]
+    }
+    """
+    
+    def __init__(
+        self,
+        data_path: str,
+        tokenizer,
+        max_length: int = 512
+    ):
+        """
+        鍒濆鍖朣FT鏁版嵁闆?        
+        鍙傛暟:
+            data_path: 鏁版嵁鏂囦欢璺緞
+            tokenizer: 鍒嗚瘝鍣?            max_length: 鏈€澶у簭鍒楅暱搴?        """
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        
+        # 鍔犺浇鏁版嵁
+        self.data = []
+        with open(data_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                item = json.loads(line.strip())
+                self.data.append(item)
+        
+        print(f"鍔犺浇浜?{len(self.data)} 鏉FT鏁版嵁")
+    
+    def _create_chat_prompt(self, conversations: list) -> str:
+        """
+        鍒涘缓瀵硅瘽鎻愮ず
+        
+        浣跨敤ChatML鏍煎紡锛?        <|im_start|>user
+        鐢ㄦ埛娑堟伅<|im_end|>
+        <|im_start|>assistant
+        鍔╂墜鍥炲<|im_end|>
+        
+        鍙傛暟:
+            conversations: 瀵硅瘽鍒楄〃
+            
+        杩斿洖:
+            鏍煎紡鍖栧悗鐨勫璇濆瓧绗︿覆
+        """
+        prompt = ""
+        for conv in conversations:
+            role = conv['role']
+            content = conv['content']
+            
+            if role == 'user':
+                prompt += f"<|im_start|>user\n{content}<|im_end|>\n"
+            elif role == 'assistant':
+                prompt += f"<|im_start|>assistant\n{content}<|im_end|>\n"
+        
+        return prompt
+    
+    def __len__(self):
+        """杩斿洖鏁版嵁闆嗗ぇ灏?""
+        return len(self.data)
+    
+    def __getitem__(self, idx: int) -> dict:
+        """
+        鑾峰彇鍗曚釜鏍锋湰
+        
+        鍙傛暟:
+            idx: 鏍锋湰绱㈠紩
+            
+        杩斿洖:
+            鍖呭惈input_ids鍜宭abels鐨勫瓧鍏?            
+        澶勭悊娴佺▼:
+            1. 鑾峰彇瀵硅瘽
+            2. 鏍煎紡鍖栦负ChatML鏍煎紡
+            3. Tokenize
+            4. 鍒涘缓labels锛堝彧璁＄畻assistant鍥炲鐨勬崯澶憋級
+        """
+        # 鑾峰彇瀵硅瘽
+        conversations = self.data[idx]['conversations']
+        
+        # 鍒涘缓鎻愮ず
+        prompt = self._create_chat_prompt(conversations)
+        
+        # Tokenize
+        encoding = self.tokenizer(
+            prompt,
+            max_length=self.max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt'
+        )
+        
+        input_ids = encoding['input_ids'].squeeze(0)
+        
+        # 鍒涘缓labels
+        # 鍙绠梐ssistant鍥炲閮ㄥ垎鐨勬崯澶?        labels = input_ids.clone()
+        
+        # 鎵惧埌assistant鍥炲鐨勪綅缃?        # 灏唘ser閮ㄥ垎鍜宲adding閮ㄥ垎鐨刲abels璁句负-100
+        # 杩欐牱鎹熷け鍑芥暟鍙細璁＄畻assistant鍥炲閮ㄥ垎
+        
+        # 绠€鍖栧鐞嗭細杩欓噷鎴戜滑璁＄畻鎵€鏈塼oken鐨勬崯澶?        # 瀹為檯搴旂敤涓簲璇ュ彧璁＄畻assistant閮ㄥ垎
+        labels[labels == self.tokenizer.pad_token_id] = -100
+        
+        return {
+            'input_ids': input_ids,
+            'labels': labels
+        }
+```
+
+---
+
+## 5. 棰勮缁冩祦绋?
+棰勮缁冩槸澶ц瑷€妯″瀷瀛︿範鍩虹鐭ヨ瘑鐨勫叧閿樁娈点€傚湪杩欎釜闃舵锛屾ā鍨嬮€氳繃澶ц妯℃棤鏍囨敞鏂囨湰瀛︿範璇█鐨勭粺璁¤寰嬪拰涓栫晫鐭ヨ瘑銆?
+### 5.0 棰勮缁冪悊璁鸿儗鏅?
+#### 5.0.1 璇█妯″瀷鐨勭洰鏍?
+```
+璇█寤烘ā鐩爣锛氶娴嬩笅涓€涓猼oken
+
+缁欏畾鏂囨湰搴忓垪 x = [x鈧? x鈧? ..., x鈧橾
+鐩爣锛氭渶澶у寲 P(x鈧? x鈧? ..., x鈧?
+
+鏍规嵁閾惧紡娉曞垯锛?    P(x鈧? x鈧? ..., x鈧? = P(x鈧? 脳 P(x鈧倈x鈧? 脳 P(x鈧億x鈧?x鈧? 脳 ... 脳 P(x鈧檤x鈧?...,x鈧欌倠鈧?
+
+璁粌鐩爣锛?    L = -危 log P(x岬?| x鈧? ..., x岬⑩倠鈧?
+    
+杩欏氨鏄?涓嬩竴涓猼oken棰勬祴"浠诲姟锛屼篃绉颁负"鍥犳灉璇█寤烘ā"锛圕ausal Language Modeling锛?```
+
+#### 5.0.2 棰勮缁冨鍒颁簡浠€涔堬紵
+
+```
+棰勮缁冮樁娈垫ā鍨嬪涔犵殑鍐呭锛?
+1. 璇█鐭ヨ瘑
+   - 璇硶缁撴瀯
+   - 璇嶆眹璇箟
+   - 鍙ュ瓙缁勬垚瑙勫垯
+   
+2. 涓栫晫鐭ヨ瘑
+   - 甯歌瘑鎺ㄧ悊
+   - 浜嬪疄鎬х煡璇?   - 閫昏緫鍏崇郴
+   
+3. 涓婁笅鏂囩悊瑙?   - 鎸囦唬娑堣В
+   - 涓婚璺熻釜
+   - 淇℃伅鏁村悎
+   
+4. 娑岀幇鑳藉姏锛圗mergent Abilities锛?   - 灏戞牱鏈涔?   - 閾惧紡鎺ㄧ悊
+   - 鎸囦护閬靛惊锛堥渶瑕丼FT婵€娲伙級
+```
+
+#### 5.0.3 棰勮缁冩暟鎹妯″缓璁?
+| 妯″瀷鍙傛暟閲?| 寤鸿鏁版嵁閲?| 鏁版嵁/鍙傛暟姣?|
+|-----------|-----------|------------|
+| 26M | 1-5GB | 20-100x |
+| 100M | 5-20GB | 20-100x |
+| 1B | 50-200GB | 20-100x |
+| 7B | 1-3TB | 50-150x |
+
+**Chinchilla瀹氬緥**锛氭渶浼樿缁冩暟鎹噺绾︿负鍙傛暟閲忕殑20鍊?
+### 5.1 棰勮缁冭剼鏈畬鏁磋В鏋?
+```python
+"""
+棰勮缁冭剼鏈?浣嶇疆锛?-pretrain.py
+"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+import argparse
+import math
+import os
+from contextlib import nullcontext
+
+# 瀵煎叆妯″瀷鍜屾暟鎹泦
+from model.model import MiniMindLM
+from model.LMConfig import LMConfig
+from dataset.lm_dataset import PretrainDataset
+from transformers import AutoTokenizer
+
+
+def get_lr(current_step: int, total_steps: int, lr: float) -> float:
+    """
+    浣欏鸡瀛︿範鐜囪皟搴?    
+    鍏紡锛?        lr = min_lr + 0.5 * (lr - min_lr) * (1 + cos(蟺 * step / total_steps))
+    
+    鍙傛暟:
+        current_step: 褰撳墠姝ユ暟
+        total_steps: 鎬绘鏁?        lr: 鍩虹瀛︿範鐜?        
+    杩斿洖:
+        褰撳墠瀛︿範鐜?        
+    瀛︿範鐜囧彉鍖栨洸绾匡細
+        寮€濮嬫椂锛歭r
+        涓棿锛氶€愭笎涓嬮檷
+        缁撴潫鏃讹細lr / 10
+    """
+    # 鏈€灏忓涔犵巼
+    min_lr = lr / 10
+    
+    # 浣欏鸡閫€鐏?    return min_lr + 0.5 * (lr - min_lr) * (1 + math.cos(math.pi * current_step / total_steps))
+
+
+def train(args):
+    """
+    涓昏缁冨嚱鏁?    
+    鍙傛暟:
+        args: 鍛戒护琛屽弬鏁?    """
+    # ==================== 鍒濆鍖栧垎甯冨紡璁粌 ====================
+    
+    # 妫€鏌ユ槸鍚︿娇鐢ㄥ垎甯冨紡璁粌
+    ddp = int(os.environ.get('RANK', -1)) != -1
+    
+    if ddp:
+        # 鍒濆鍖栬繘绋嬬粍
+        dist.init_process_group(backend='nccl')
+        ddp_rank = int(os.environ['RANK'])
+        ddp_local_rank = int(os.environ['LOCAL_RANK'])
+        ddp_world_size = int(os.environ['WORLD_SIZE'])
+        device = f'cuda:{ddp_local_rank}'
+        torch.cuda.set_device(device)
+        master_process = ddp_rank == 0
+    else:
+        ddp_rank = 0
+        ddp_local_rank = 0
+        ddp_world_size = 1
+        device = args.device
+        master_process = True
+    
+    # ==================== 璁剧疆闅忔満绉嶅瓙 ====================
+    
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+    
+    # ==================== 鍔犺浇鍒嗚瘝鍣?====================
+    
+    tokenizer = AutoTokenizer.from_pretrained('./model/minimind_tokenizer')
+    print(f"璇嶆眹琛ㄥぇ灏? {len(tokenizer)}")
+    
+    # ==================== 鍒涘缓妯″瀷閰嶇疆 ====================
+    
+    lm_config = LMConfig(
+        dim=args.dim,
+        n_layers=args.n_layers,
+        max_seq_len=args.max_seq_len,
+        use_moe=args.use_moe
+    )
+    
+    # ==================== 鍒涘缓妯″瀷 ====================
+    
+    model = MiniMindLM(lm_config).to(device)
+    
+    # 璁＄畻鍙傛暟閲?    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"妯″瀷鍙傛暟閲? {total_params / 1e6:.2f}M")
+    
+    # 鍖呰DDP
+    if ddp:
+        model = DDP(model, device_ids=[ddp_local_rank])
+    
+    # ==================== 鍒涘缓鏁版嵁闆嗗拰鏁版嵁鍔犺浇鍣?====================
+    
+    train_dataset = PretrainDataset(
+        args.data_path,
+        tokenizer,
+        max_length=lm_config.max_seq_len
+    )
+    
+    # 鍒嗗竷寮忛噰鏍峰櫒
+    train_sampler = DistributedSampler(train_dataset) if ddp else None
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        drop_last=False,
+        shuffle=False if ddp else True,
+        num_workers=args.num_workers,
+        sampler=train_sampler
+    )
+    
+    # ==================== 鍒涘缓浼樺寲鍣?====================
+    
+    # AdamW浼樺寲鍣?    # weight_decay: 鏉冮噸琛板噺锛岄槻姝㈣繃鎷熷悎
+    # betas: Adam鐨勫姩閲忓弬鏁?    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=args.learning_rate,
+        betas=(0.9, 0.95),
+        weight_decay=0.1
+    )
+    
+    # ==================== 鍒涘缓姊害缂╂斁鍣?====================
+    
+    # 鐢ㄤ簬娣峰悎绮惧害璁粌
+    # 娣峰悎绮惧害鍙互鍑忓皯鏄惧瓨鍗犵敤骞跺姞閫熻缁?    scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
+    
+    # ==================== 璁＄畻璁粌姝ユ暟 ====================
+    
+    total_steps = args.epochs * len(train_loader) // args.accumulation_steps
+    
+    # ==================== 璁粌寰幆 ====================
+    
+    model.train()
+    
+    for epoch in range(args.epochs):
+        # 璁剧疆閲囨牱鍣╡poch
+        if ddp:
+            train_sampler.set_epoch(epoch)
+        
+        # 绱Н姊害璁℃暟
+        accumulation_step = 0
+        
+        for step, batch in enumerate(train_loader):
+            # 鑾峰彇杈撳叆
+            input_ids = batch['input_ids'].to(device)
+            labels = batch['labels'].to(device)
+            
+            # 娣峰悎绮惧害涓婁笅鏂?            with torch.cuda.amp.autocast(enabled=(args.dtype in ['float16', 'bfloat16'])):
+                # 鍓嶅悜浼犳挱
+                outputs = model(input_ids)
+                logits = outputs.logits
+                
+                # 璁＄畻鎹熷け
+                # 浜ゅ弶鐔垫崯澶?                # logits: (batch, seq_len, vocab_size)
+                # labels: (batch, seq_len)
+                loss = nn.functional.cross_entropy(
+                    logits.view(-1, logits.size(-1)),
+                    labels.view(-1),
+                    ignore_index=-100
+                )
+                
+                # 娣诲姞MoE杈呭姪鎹熷け
+                if outputs.aux_loss is not None:
+                    loss += outputs.aux_loss
+                
+                # 姊害绱Н缂╂斁
+                loss = loss / args.accumulation_steps
+            
+            # 鍙嶅悜浼犳挱
+            scaler.scale(loss).backward()
+            
+            # 姊害绱Н
+            accumulation_step += 1
+            
+            if accumulation_step >= args.accumulation_steps:
+                # 姊害瑁佸壀
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                
+                # 鏇存柊鍙傛暟
+                scaler.step(optimizer)
+                scaler.update()
+                
+                # 娓呴浂姊害
+                optimizer.zero_grad(set_to_none=True)
+                
+                # 鏇存柊瀛︿範鐜?                current_step = epoch * len(train_loader) + step
+                lr = get_lr(current_step, total_steps, args.learning_rate)
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr
+                
+                accumulation_step = 0
+                
+                # 鏃ュ織
+                if master_process and step % args.log_interval == 0:
+                    print(f"Epoch {epoch}, Step {step}, Loss: {loss.item():.4f}, LR: {lr:.6f}")
+                
+                # 淇濆瓨妫€鏌ョ偣
+                if master_process and step % args.save_interval == 0:
+                    checkpoint = {
+                        'model': model.module.state_dict() if ddp else model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'epoch': epoch,
+                        'step': step
+                    }
+                    torch.save(checkpoint, f'{args.out_dir}/pretrain_{args.dim}.pth')
+    
+    # 淇濆瓨鏈€缁堟ā鍨?    if master_process:
+        checkpoint = {
+            'model': model.module.state_dict() if ddp else model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        }
+        torch.save(checkpoint, f'{args.out_dir}/pretrain_{args.dim}.pth')
+        print("璁粌瀹屾垚锛?)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="MiniMind Pretraining")
+    
+    # 璁粌鍙傛暟
+    parser.add_argument("--out_dir", type=str, default="out")
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--learning_rate", type=float, default=5e-4)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--dtype", type=str, default="bfloat16")
+    parser.add_argument("--num_workers", type=int, default=1)
+    parser.add_argument("--accumulation_steps", type=int, default=8)
+    parser.add_argument("--grad_clip", type=float, default=1.0)
+    parser.add_argument("--log_interval", type=int, default=100)
+    parser.add_argument("--save_interval", type=int, default=100)
+    
+    # 妯″瀷鍙傛暟
+    parser.add_argument("--dim", type=int, default=512)
+    parser.add_argument("--n_layers", type=int, default=8)
+    parser.add_argument("--max_seq_len", type=int, default=512)
+    parser.add_argument("--use_moe", action="store_true")
+    
+    # 鏁版嵁鍙傛暟
+    parser.add_argument("--data_path", type=str, default="./dataset/pretrain_hq.jsonl")
+    
+    args = parser.parse_args()
+    
+    # 鍒涘缓杈撳嚭鐩綍
+    os.makedirs(args.out_dir, exist_ok=True)
+    
+    # 寮€濮嬭缁?    train(args)
+```
+
+---
+
+## 6. 鐩戠潱寰皟 SFT
+
+鐩戠潱寰皟锛圫upervised Fine-Tuning锛夎妯″瀷瀛︿細閬靛惊鎸囦护鍜岃繘琛屽璇濄€係FT鏄皢棰勮缁冩ā鍨嬭浆鍖栦负瀵硅瘽鍔╂墜鐨勫叧閿楠ゃ€?
+### 6.0 SFT鐞嗚鑳屾櫙
+
+#### 6.0.1 涓轰粈涔堥渶瑕丼FT锛?
+```
+棰勮缁冩ā鍨嬬殑闂锛?1. 鍙細"缁啓"锛屼笉浼?鍥炵瓟"
+   杈撳叆锛?浠€涔堟槸鏈哄櫒瀛︿範锛?
+   棰勮缁冩ā鍨嬭緭鍑猴細"浠€涔堟槸娣卞害瀛︿範锛熶粈涔堟槸浜哄伐鏅鸿兘锛?锛堢户缁彁闂級
+   
+2. 涓嶇悊瑙ｆ寚浠ゆ牸寮?   鏃犳硶鍖哄垎鐢ㄦ埛杈撳叆鍜屽姪鎵嬪洖澶?   
+3. 缂轰箯瀵归綈
+   鍙兘鐢熸垚鏈夊銆佷笉鍑嗙‘鎴栦笉鐩稿叧鐨勫唴瀹?
+SFT鐨勪綔鐢細
+1. 瀛︿範瀵硅瘽鏍煎紡锛圕hatML鏍煎紡锛?2. 瀛︿細鍥炵瓟鑰岄潪缁啓
+3. 鍒濇瀵归綈浜虹被鎰忓浘
+```
+
+#### 6.0.2 SFT鏁版嵁鏍煎紡璇﹁В
+
+```
+ChatML鏍煎紡璇﹁В锛?
+<|im_start|>system
+浣犳槸涓€涓湁甯姪鐨凙I鍔╂墜銆?|im_end|>
+<|im_start|>user
+浠€涔堟槸鏈哄櫒瀛︿範锛?|im_end|>
+<|im_start|>assistant
+鏈哄櫒瀛︿範鏄汉宸ユ櫤鑳界殑涓€涓垎鏀?..<|im_end|>
+
+鏍煎紡璇存槑锛?- <|im_start|>role锛氳鑹插紑濮嬫爣璁?- <|im_end|>锛氳鑹茬粨鏉熸爣璁?- role鍙互鏄細system銆乽ser銆乤ssistant
+
+涓轰粈涔堜娇鐢–hatML锛?1. 鏄庣‘鐨勮鑹茶竟鐣?2. 鏀寔澶氳疆瀵硅瘽
+3. 鏄撲簬瑙ｆ瀽鍜屽鐞?4. 涓庝富娴佹ā鍨嬶紙Qwen銆丟LM绛夛級鍏煎
+```
+
+#### 6.0.3 SFT璁粌绛栫暐
+
+```
+SFT璁粌鐨勫叧閿缃細
+
+1. 瀛︿範鐜?   - 棰勮缁冨涔犵巼锛?e-4
+   - SFT瀛︿範鐜囷細1e-5 鍒?1e-4
+   - 鍘熷洜锛氬井璋冮渶瑕佸皬骞呭害璋冩暣锛岄伩鍏嶇牬鍧忛璁粌鐭ヨ瘑
+
+2. 璁粌杞暟
+   - 棰勮缁冿細1-3杞?   - SFT锛?-10杞?   - 鍘熷洜锛歋FT鏁版嵁閲忓皬锛岄渶瑕佸杞涔?
+3. 鎹熷け璁＄畻
+   - 棰勮缁冿細璁＄畻鎵€鏈塼oken鐨勬崯澶?   - SFT锛氬彧璁＄畻assistant鍥炲鐨勬崯澶?   - 鍘熷洜锛氶伩鍏嶆ā鍨嬪涔犳ā浠跨敤鎴?
+4. 鏁版嵁閰嶆瘮
+   - 澶氫换鍔℃贩鍚堬細涓嶅悓绫诲瀷浠诲姟鐨勬暟鎹贩鍚?   - 鏁版嵁澧炲己锛氭敼鍐欍€佺炕璇戠瓑鏂瑰紡鎵╁厖鏁版嵁
+   - 璐ㄩ噺浼樺厛锛氶珮璐ㄩ噺鏁版嵁姣斿ぇ閲忔暟鎹洿閲嶈
+```
+
+### 6.0.4 SFT鏁版嵁璐ㄩ噺鏍囧噯
+
+| 缁村害 | 楂樿川閲忔爣鍑?| 浣庤川閲忕ず渚?|
+|------|-----------|-----------|
+| 鎸囦护娓呮櫚搴?| 鏄庣‘銆佸叿浣撱€佸彲鎵ц | 妯＄硦銆佸涔夈€佷笉瀹屾暣 |
+| 鍥炲鐩稿叧鎬?| 鐩存帴鍥炵瓟闂 | 鍋忛銆佺瓟闈炴墍闂?|
+| 鍥炲鍑嗙‘鎬?| 浜嬪疄姝ｇ‘銆侀€昏緫娓呮櫚 | 閿欒淇℃伅銆侀€昏緫娣蜂贡 |
+| 鍥炲瀹屾暣鎬?| 鍏呭垎鍥炵瓟銆佹湁绀轰緥 | 杩囦簬绠€鐭€佷俊鎭笉瓒?|
+| 璇█娴佺晠鎬?| 鑷劧銆佹祦鐣呫€佷笓涓?| 鐢熺‖銆佽娉曢敊璇?|
+
+### 6.1 SFT寰皟鑴氭湰瀹屾暣瑙ｆ瀽
+  
+  ```python
+"""
+SFT寰皟鑴氭湰
+浣嶇疆锛?-full_sft.py
+"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+import argparse
+import os
+
+from model.model import MiniMindLM
+from model.LMConfig import LMConfig
+from dataset.lm_dataset import SFTDataset
+from transformers import AutoTokenizer
+
+
+def train_sft(args):
+    """
+    SFT璁粌鍑芥暟
+    
+    SFT涓庨璁粌鐨勪富瑕佸尯鍒細
+    1. 鏁版嵁鏍煎紡锛氬璇濇暟鎹€岄潪绾枃鏈?    2. 鎹熷け璁＄畻锛氬彧璁＄畻assistant鍥炲閮ㄥ垎
+    3. 瀛︿範鐜囷細閫氬父鏇村皬
+    4. 璁粌杞暟锛氶€氬父鏇村
+    """
+    # 璁惧
+    device = args.device
+    
+    # 鍔犺浇鍒嗚瘝鍣?    tokenizer = AutoTokenizer.from_pretrained('./model/minimind_tokenizer')
+    
+    # 鍒涘缓妯″瀷閰嶇疆
+    lm_config = LMConfig(
+        dim=args.dim,
+        n_layers=args.n_layers,
+        max_seq_len=args.max_seq_len
+    )
+    
+    # 鍒涘缓妯″瀷
+    model = MiniMindLM(lm_config).to(device)
+    
+    # 鍔犺浇棰勮缁冩潈閲?    if args.pretrain_path:
+        checkpoint = torch.load(args.pretrain_path, map_location=device)
+        model.load_state_dict(checkpoint['model'])
+        print(f"鍔犺浇棰勮缁冩潈閲? {args.pretrain_path}")
+    
+    # 鍒涘缓鏁版嵁闆?    train_dataset = SFTDataset(
+        args.data_path,
+        tokenizer,
+        max_length=lm_config.max_seq_len
+    )
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers
+    )
+    
+    # 浼樺寲鍣?    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=args.learning_rate,
+        weight_decay=0.01
+    )
+    
+    # 璁粌寰幆
+    model.train()
+    
+    for epoch in range(args.epochs):
+        for step, batch in enumerate(train_loader):
+            input_ids = batch['input_ids'].to(device)
+            labels = batch['labels'].to(device)
+            
+            # 鍓嶅悜浼犳挱
+            outputs = model(input_ids)
+            logits = outputs.logits
+            
+            # 璁＄畻鎹熷け
+            loss = nn.functional.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                ignore_index=-100
+            )
+            
+            # 鍙嶅悜浼犳挱
+            optimizer.zero_grad()
+            loss.backward()
+            
+            # 姊害瑁佸壀
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            
+            # 鏇存柊鍙傛暟
+            optimizer.step()
+            
+            # 鏃ュ織
+            if step % 10 == 0:
+                print(f"Epoch {epoch}, Step {step}, Loss: {loss.item():.4f}")
+    
+    # 淇濆瓨妯″瀷
+    torch.save(model.state_dict(), f'{args.out_dir}/full_sft_{args.dim}.pth')
+    print("SFT璁粌瀹屾垚锛?)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="MiniMind SFT")
+    parser.add_argument("--out_dir", type=str, default="out")
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--learning_rate", type=float, default=1e-5)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--dim", type=int, default=512)
+    parser.add_argument("--n_layers", type=int, default=8)
+    parser.add_argument("--max_seq_len", type=int, default=512)
+    parser.add_argument("--data_path", type=str, default="./dataset/sft_mini_512.jsonl")
+    parser.add_argument("--pretrain_path", type=str, default="./out/pretrain_512.pth")
+    parser.add_argument("--num_workers", type=int, default=1)
+    
+    args = parser.parse_args()
+    train_sft(args)
+```
+
+---
+
+## 7. LoRA寰皟
+
+LoRA锛圠ow-Rank Adaptation锛夋槸涓€绉嶅弬鏁伴珮鏁堢殑寰皟鏂规硶锛屽畠閫氳繃鍦ㄩ璁粌鏉冮噸鏃佽竟娣诲姞浣庣З鍒嗚В鐭╅樀鏉ュ疄鐜板井璋冿紝澶у箙鍑忓皯浜嗛渶瑕佽缁冪殑鍙傛暟閲忋€?
+### 7.0 LoRA鐞嗚鑳屾櫙
+
+#### 7.0.1 LoRA鐨勬牳蹇冩€濇兂
+
+```
+LoRA鐨勬牳蹇冨亣璁撅細
+妯″瀷閫傚簲鏂颁换鍔℃椂锛屾潈閲嶆洿鏂扮殑鍐呭湪缁村害寰堜綆
+
+鏁板琛ㄨ揪锛?鍋囪棰勮缁冩潈閲?W鈧€ 鈭?R^(d脳k)
+寰皟鍚庣殑鏉冮噸 W = W鈧€ + 螖W
+LoRA鍋囪 螖W 鍙互鍒嗚В涓轰綆绉╃煩闃碉細螖W = BA
+
+鍏朵腑锛?- B 鈭?R^(d脳r)锛氶檷缁寸煩闃?- A 鈭?R^(r脳k)锛氬崌缁寸煩闃?- r << min(d, k)锛氱З
+
+鍓嶅悜浼犳挱锛?h = W鈧€x + 螖Wx = W鈧€x + BAx
+
+鍏抽敭浼樺娍锛?1. 鍙傛暟閲忓ぇ骞呭噺灏?   鍘熷锛歞 脳 k
+   LoRA锛歞 脳 r + r 脳 k = r 脳 (d + k)
+   
+2. 璁粌鏁堢巼鎻愬崌
+   鍙渶璁粌A鍜孊锛屽喕缁揥鈧€
+   
+3. 鏄撲簬鍒囨崲浠诲姟
+   涓嶅悓浠诲姟鍙渶涓嶅悓鐨凩oRA鏉冮噸
+```
+
+#### 7.0.2 LoRA鍙傛暟璇﹁В
+
+```
+LoRA鍏抽敭鍙傛暟锛?
+1. 绉╋紙rank锛?   - 鍐冲畾浣庣З鐭╅樀鐨勭淮搴?   - 甯哥敤鍊硷細4, 8, 16, 32, 64
+   - 绉╄秺澶э紝琛ㄨ揪鑳藉姏瓒婂己锛屼絾鍙傛暟瓒婂
+   
+2. 缂╂斁鍥犲瓙锛坅lpha锛?   - 鎺у埗LoRA杈撳嚭鐨勫奖鍝嶇▼搴?   - 瀹為檯缂╂斁 = alpha / rank
+   - 甯哥敤鍊硷細16, 32
+   
+3. 鐩爣妯″潡锛坱arget_modules锛?   - 鍐冲畾鍦ㄥ摢浜涘眰搴旂敤LoRA
+   - 甯歌閫夋嫨锛?     * 娉ㄦ剰鍔涘眰锛歸q, wk, wv, wo
+     * FFN灞傦細w1, w2, w3
+     * 鍏ㄩ儴锛氭墍鏈夌嚎鎬у眰
+   
+4. Dropout
+   - LoRA灞傚唴閮ㄧ殑dropout
+   - 闃叉杩囨嫙鍚?   - 甯哥敤鍊硷細0.0 - 0.1
+```
+
+#### 7.0.3 LoRA鍙傛暟閲忚绠?
+```
+浠iniMind-26M涓轰緥锛?
+鍘熷妯″瀷鍙傛暟锛?- dim = 512
+- n_layers = 8
+- 娉ㄦ剰鍔涘眰锛? 脳 512 脳 512 = 1,048,576 鍙傛暟/灞?- FFN灞傦細3 脳 512 脳 1408 = 2,158,592 鍙傛暟/灞?
+LoRA閰嶇疆锛?- rank = 8
+- alpha = 16
+- target_modules = ['wq', 'wk', 'wv', 'wo', 'w1', 'w2', 'w3']
+
+姣忓眰LoRA鍙傛暟锛?- wq: 512 脳 8 + 8 脳 512 = 8,192
+- wk: 512 脳 8 + 8 脳 512 = 8,192
+- wv: 512 脳 8 + 8 脳 512 = 8,192
+- wo: 512 脳 8 + 8 脳 512 = 8,192
+- w1: 512 脳 8 + 8 脳 1408 = 15,360
+- w2: 1408 脳 8 + 8 脳 512 = 15,360
+- w3: 512 脳 8 + 8 脳 1408 = 15,360
+
+姣忓眰鎬昏锛?8,848 鍙傛暟
+8灞傛€昏锛?30,784 鍙傛暟
+
+鍙傛暟鍗犳瘮锛?30,784 / 26,000,000 鈮?2.4%
+
+缁撹锛歀oRA鍙渶璁粌绾?.4%鐨勫弬鏁帮紒
+```
+
+#### 7.0.4 LoRA vs 鍏ㄥ弬鏁板井璋冨姣?
+| 鐗规€?| 鍏ㄥ弬鏁板井璋?| LoRA寰皟 |
+|------|-----------|---------|
+| 鍙缁冨弬鏁伴噺 | 100% | 1-5% |
+| 鏄惧瓨鍗犵敤锛堣缁冿級 | 楂?| 浣?|
+| 璁粌閫熷害 | 鎱?| 蹇?|
+| 妯″瀷鎬ц兘 | 鏈€浼?| 鎺ヨ繎鏈€浼?|
+| 澶氫换鍔″垏鎹?| 闇€瑕佸畬鏁存潈閲?| 鍙渶鍒囨崲LoRA |
+| 瀹炵幇澶嶆潅搴?| 绠€鍗?| 涓瓑 |
+| 閫傜敤鍦烘櫙 | 璧勬簮鍏呰冻 | 璧勬簮鍙楅檺 |
+
+### 7.1 LoRA寰皟鑴氭湰瀹屾暣瑙ｆ瀽
+  
+  ```python
+"""
+LoRA寰皟鑴氭湰
+浣嶇疆锛?-lora_sft.py
+"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+import argparse
+import os
+import math
+
+from model.model import MiniMindLM
+from model.LMConfig import LMConfig
+from dataset.lm_dataset import SFTDataset
+from transformers import AutoTokenizer
+
+
+class LoRALayer(nn.Module):
+    """
+    LoRA灞?    
+    LoRA鐨勬牳蹇冩€濇兂锛氬湪棰勮缁冩潈閲嶆梺杈规坊鍔犱綆绉╁垎瑙ｇ煩闃?    
+    鍏紡锛?        W' = W + BA
+        鍏朵腑 B 鈭?R^(d脳r), A 鈭?R^(r脳k)
+        r << min(d, k) 鏄З
+    
+    鍙傛暟閲忓姣旓細
+        鍘熷锛歞 脳 k
+        LoRA锛歞 脳 r + r 脳 k = r 脳 (d + k)
+        
+        褰?r << min(d, k) 鏃讹紝鍙傛暟閲忓ぇ骞呭噺灏?    
+    渚嬪锛?        d = 512, k = 512, r = 8
+        鍘熷锛?12 脳 512 = 262,144
+        LoRA锛? 脳 (512 + 512) = 8,192
+        鍑忓皯浜?97% 鐨勫弬鏁?    """
+    
+    def __init__(self, in_features: int, out_features: int, rank: int = 8, alpha: float = 16.0):
+        """
+        鍒濆鍖朙oRA灞?        
+        鍙傛暟:
+            in_features: 杈撳叆缁村害
+            out_features: 杈撳嚭缁村害
+            rank: LoRA绉?            alpha: 缂╂斁鍥犲瓙
+        """
+        super().__init__()
+        
+        self.rank = rank
+        self.alpha = alpha
+        self.scaling = alpha / rank
+        
+        # 浣庣З鐭╅樀
+        # A: 闅忔満鍒濆鍖?        self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
+        # B: 鍒濆鍖栦负闆讹紝纭繚鍒濆鏃禠oRA涓嶈捣浣滅敤
+        self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
+    
+    def forward(self, x: torch.Tensor, original_output: torch.Tensor) -> torch.Tensor:
+        """
+        鍓嶅悜浼犳挱
+        
+        鍙傛暟:
+            x: 杈撳叆寮犻噺
+            original_output: 鍘熷灞傜殑杈撳嚭
+            
+        杩斿洖:
+            娣诲姞LoRA璋冩暣鍚庣殑杈撳嚭
+        """
+        # 璁＄畻 LoRA 杈撳嚭
+        # x @ A^T @ B^T * scaling
+        lora_output = (x @ self.lora_A.T @ self.lora_B.T) * self.scaling
+        
+        return original_output + lora_output
+
+
+def apply_lora_to_model(model, rank=8, alpha=16.0, target_modules=['wq', 'wk', 'wv', 'wo', 'w1', 'w2', 'w3']):
+    """
+    灏哃oRA搴旂敤鍒版ā鍨?    
+    鍙傛暟:
+        model: 鍘熷妯″瀷
+        rank: LoRA绉?        alpha: 缂╂斁鍥犲瓙
+        target_modules: 瑕佸簲鐢↙oRA鐨勬ā鍧楀悕
+        
+    杩斿洖:
+        搴旂敤浜哃oRA鐨勬ā鍨?    """
+    for name, module in model.named_modules():
+        # 妫€鏌ユ槸鍚︽槸鐩爣妯″潡
+        for target in target_modules:
+            if target in name and isinstance(module, nn.Linear):
+                # 鍒涘缓LoRA灞?                lora_layer = LoRALayer(
+                    module.in_features,
+                    module.out_features,
+                    rank=rank,
+                    alpha=alpha
+                )
+                
+                # 灏哃oRA灞傛坊鍔犲埌妯″潡
+                setattr(module, 'lora', lora_layer)
+                
+                # 鍐荤粨鍘熷鏉冮噸
+                module.weight.requires_grad = False
+    
+    return model
+
+
+def train_lora(args):
+    """
+    LoRA璁粌鍑芥暟
+    """
+    device = args.device
+    
+    # 鍔犺浇鍒嗚瘝鍣?    tokenizer = AutoTokenizer.from_pretrained('./model/minimind_tokenizer')
+    
+    # 鍒涘缓妯″瀷
+    lm_config = LMConfig(dim=args.dim, n_layers=args.n_layers)
+    model = MiniMindLM(lm_config).to(device)
+    
+    # 鍔犺浇棰勮缁冩潈閲?    checkpoint = torch.load(args.pretrain_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+    
+    # 搴旂敤LoRA
+    model = apply_lora_to_model(model, rank=args.lora_rank, alpha=args.lora_alpha)
+    
+    # 鍙缁僉oRA鍙傛暟
+    lora_params = [p for n, p in model.named_parameters() if 'lora' in n and p.requires_grad]
+    
+    print(f"LoRA鍙傛暟閲? {sum(p.numel() for p in lora_params) / 1e6:.2f}M")
+    
+    # 浼樺寲鍣?    optimizer = optim.AdamW(lora_params, lr=args.learning_rate)
+    
+    # 鏁版嵁闆?    train_dataset = SFTDataset(args.data_path, tokenizer, max_length=lm_config.max_seq_len)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    
+    # 璁粌
+    model.train()
+    
+    for epoch in range(args.epochs):
+        for step, batch in enumerate(train_loader):
+            input_ids = batch['input_ids'].to(device)
+            labels = batch['labels'].to(device)
+            
+            # 鍓嶅悜浼犳挱
+            outputs = model(input_ids)
+            loss = nn.functional.cross_entropy(
+                outputs.logits.view(-1, outputs.logits.size(-1)),
+                labels.view(-1),
+                ignore_index=-100
+            )
+            
+            # 鍙嶅悜浼犳挱
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            if step % 10 == 0:
+                print(f"Epoch {epoch}, Step {step}, Loss: {loss.item():.4f}")
+    
+    # 淇濆瓨LoRA鏉冮噸
+    lora_state_dict = {n: p for n, p in model.named_parameters() if 'lora' in n}
+    torch.save(lora_state_dict, f'{args.out_dir}/lora_{args.dim}.pth')
+    print("LoRA璁粌瀹屾垚锛?)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="MiniMind LoRA SFT")
+    parser.add_argument("--dim", type=int, default=512)
+    parser.add_argument("--n_layers", type=int, default=8)
+    parser.add_argument("--lora_rank", type=int, default=8)
+    parser.add_argument("--lora_alpha", type=float, default=16.0)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--data_path", type=str, default="./dataset/sft_mini_512.jsonl")
+    parser.add_argument("--pretrain_path", type=str, default="./out/pretrain_512.pth")
+    parser.add_argument("--out_dir", type=str, default="out")
+    
+    args = parser.parse_args()
+    train_lora(args)
+```
+
+---
+
+## 8. DPO寮哄寲瀛︿範
+
+DPO锛圖irect Preference Optimization锛夋槸涓€绉嶇畝鍗曢珮鏁堢殑寮哄寲瀛︿範鏂规硶銆?
+```python
+"""
+DPO璁粌鑴氭湰
+浣嶇疆锛?-dpo_train.py
+"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+import argparse
+import json
+
+from model.model import MiniMindLM
+from model.LMConfig import LMConfig
+from transformers import AutoTokenizer
+
+
+class DPODataset(Dataset):
+    """
+    DPO鏁版嵁闆?    
+    鏁版嵁鏍煎紡锛?    {
+        "prompt": "鐢ㄦ埛闂",
+        "chosen": "濂界殑鍥炵瓟",
+        "rejected": "宸殑鍥炵瓟"
+    }
+    """
+    
+    def __init__(self, data_path: str, tokenizer, max_length: int = 512):
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        
+        self.data = []
+        with open(data_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                self.data.append(json.loads(line.strip()))
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        item = self.data[idx]
+        
+        # 缂栫爜prompt + chosen
+        chosen_encoding = self.tokenizer(
+            item['prompt'] + item['chosen'],
+            max_length=self.max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt'
+        )
+        
+        # 缂栫爜prompt + rejected
+        rejected_encoding = self.tokenizer(
+            item['prompt'] + item['rejected'],
+            max_length=self.max_length,
+            truncation=True,
+            padding='max_length',
+            return_tensors='pt'
+        )
+        
+        return {
+            'chosen_input_ids': chosen_encoding['input_ids'].squeeze(0),
+            'rejected_input_ids': rejected_encoding['input_ids'].squeeze(0)
+        }
+
+
+def dpo_loss(
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_chosen_logps: torch.Tensor,
+    reference_rejected_logps: torch.Tensor,
+    beta: float = 0.1
+) -> torch.Tensor:
+    """
+    DPO鎹熷け鍑芥暟
+    
+    鍏紡锛?        L = -E[log 蟽(尾 * (log 蟺(y_chosen|x) - log 蟺(y_rejected|x) 
+                          - log 蟺_ref(y_chosen|x) + log 蟺_ref(y_rejected|x)))]
+    
+    鍙傛暟:
+        policy_chosen_logps: 绛栫暐妯″瀷瀵筩hosen鐨勫鏁版鐜?        policy_rejected_logps: 绛栫暐妯″瀷瀵箁ejected鐨勫鏁版鐜?        reference_chosen_logps: 鍙傝€冩ā鍨嬪chosen鐨勫鏁版鐜?        reference_rejected_logps: 鍙傝€冩ā鍨嬪rejected鐨勫鏁版鐜?        beta: KL鏁ｅ害鎯╃綒绯绘暟
+        
+    杩斿洖:
+        DPO鎹熷け
+    """
+    # 璁＄畻瀵规暟姣旂巼
+    chosen_logratios = policy_chosen_logps - reference_chosen_logps
+    rejected_logratios = policy_rejected_logps - reference_rejected_logps
+    
+    # DPO鎹熷け
+    loss = -F.logsigmoid(beta * (chosen_logratios - rejected_logratios)).mean()
+    
+    return loss
+
+
+def get_logprobs(model, input_ids):
+    """
+    璁＄畻妯″瀷瀵硅緭鍏ョ殑瀵规暟姒傜巼
+    
+    鍙傛暟:
+        model: 璇█妯″瀷
+        input_ids: 杈撳叆token ID
+        
+    杩斿洖:
+        瀵规暟姒傜巼
+    """
+    outputs = model(input_ids)
+    logits = outputs.logits
+    
+    # 璁＄畻瀵规暟姒傜巼
+    log_probs = F.log_softmax(logits, dim=-1)
+    
+    # 鑾峰彇瀹為檯token鐨勫鏁版鐜?    token_log_probs = log_probs.gather(2, input_ids.unsqueeze(-1)).squeeze(-1)
+    
+    # 姹傚拰寰楀埌搴忓垪瀵规暟姒傜巼
+    return token_log_probs.sum(dim=-1)
+
+
+def train_dpo(args):
+    """
+    DPO璁粌鍑芥暟
+    """
+    device = args.device
+    
+    # 鍔犺浇鍒嗚瘝鍣?    tokenizer = AutoTokenizer.from_pretrained('./model/minimind_tokenizer')
+    
+    # 鍒涘缓绛栫暐妯″瀷
+    lm_config = LMConfig(dim=args.dim, n_layers=args.n_layers)
+    policy_model = MiniMindLM(lm_config).to(device)
+    
+    # 鍔犺浇SFT鏉冮噸
+    checkpoint = torch.load(args.sft_path, map_location=device)
+    policy_model.load_state_dict(checkpoint)
+    
+    # 鍒涘缓鍙傝€冩ā鍨嬶紙鍐荤粨锛?    reference_model = MiniMindLM(lm_config).to(device)
+    reference_model.load_state_dict(checkpoint)
+    reference_model.eval()
+    for param in reference_model.parameters():
+        param.requires_grad = False
+    
+    # 鏁版嵁闆?    train_dataset = DPODataset(args.data_path, tokenizer, max_length=lm_config.max_seq_len)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    
+    # 浼樺寲鍣?    optimizer = optim.AdamW(policy_model.parameters(), lr=args.learning_rate)
+    
+    # 璁粌
+    policy_model.train()
+    
+    for epoch in range(args.epochs):
+        for step, batch in enumerate(train_loader):
+            chosen_input_ids = batch['chosen_input_ids'].to(device)
+            rejected_input_ids = batch['rejected_input_ids'].to(device)
+            
+            # 璁＄畻绛栫暐妯″瀷鐨勫鏁版鐜?            policy_chosen_logps = get_logprobs(policy_model, chosen_input_ids)
+            policy_rejected_logps = get_logprobs(policy_model, rejected_input_ids)
+            
+            # 璁＄畻鍙傝€冩ā鍨嬬殑瀵规暟姒傜巼
+            with torch.no_grad():
+                reference_chosen_logps = get_logprobs(reference_model, chosen_input_ids)
+                reference_rejected_logps = get_logprobs(reference_model, rejected_input_ids)
+            
+            # 璁＄畻DPO鎹熷け
+            loss = dpo_loss(
+                policy_chosen_logps,
+                policy_rejected_logps,
+                reference_chosen_logps,
+                reference_rejected_logps,
+                beta=args.beta
+            )
+            
+            # 鍙嶅悜浼犳挱
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            if step % 10 == 0:
+                print(f"Epoch {epoch}, Step {step}, Loss: {loss.item():.4f}")
+    
+    # 淇濆瓨妯″瀷
+    torch.save(policy_model.state_dict(), f'{args.out_dir}/dpo_{args.dim}.pth')
+    print("DPO璁粌瀹屾垚锛?)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="MiniMind DPO")
+    parser.add_argument("--dim", type=int, default=512)
+    parser.add_argument("--n_layers", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--learning_rate", type=float, default=1e-6)
+    parser.add_argument("--beta", type=float, default=0.1)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--data_path", type=str, default="./dataset/dpo_data.jsonl")
+    parser.add_argument("--sft_path", type=str, default="./out/full_sft_512.pth")
+    parser.add_argument("--out_dir", type=str, default="out")
+    
+    args = parser.parse_args()
+    train_dpo(args)
+```
+
+---
+
+## 9. 妯″瀷鎺ㄧ悊
+
+```python
+"""
+妯″瀷鎺ㄧ悊鑴氭湰
+浣嶇疆锛?-eval.py
+"""
+
+import torch
+import argparse
+from transformers import AutoTokenizer
+
+from model.model import MiniMindLM
+from model.LMConfig import LMConfig
+
+
+def generate(
+    model,
+    tokenizer,
+    prompt: str,
+    max_new_tokens: int = 100,
+    temperature: float = 0.7,
+    top_k: int = 50,
+    top_p: float = 0.9,
+    device: str = "cuda:0"
+):
+    """
+    鏂囨湰鐢熸垚鍑芥暟
+    
+    鍙傛暟:
+        model: 璇█妯″瀷
+        tokenizer: 鍒嗚瘝鍣?        prompt: 杈撳叆鎻愮ず
+        max_new_tokens: 鏈€澶х敓鎴恡oken鏁?        temperature: 娓╁害鍙傛暟
+        top_k: top-k閲囨牱
+        top_p: nucleus閲囨牱
+        device: 璁惧
+        
+    杩斿洖:
+        鐢熸垚鐨勬枃鏈?    """
+    model.eval()
+    
+    # 缂栫爜杈撳叆
+    input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device)
+    
+    # 鐢熸垚
+    with torch.no_grad():
+        output_ids = model.generate(
+            input_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p
+        )
+    
+    # 瑙ｇ爜
+    output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    
+    return output_text
+
+
+def main():
+    parser = argparse.ArgumentParser(description="MiniMind Inference")
+    parser.add_argument("--weight", type=str, default="full_sft")
+    parser.add_argument("--dim", type=int, default=512)
+    parser.add_argument("--n_layers", type=int, default=8)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    
+    args = parser.parse_args()
+    
+    # 鍔犺浇鍒嗚瘝鍣?    tokenizer = AutoTokenizer.from_pretrained('./model/minimind_tokenizer')
+    
+    # 鍒涘缓妯″瀷
+    lm_config = LMConfig(dim=args.dim, n_layers=args.n_layers)
+    model = MiniMindLM(lm_config).to(args.device)
+    
+    # 鍔犺浇鏉冮噸
+    weight_path = f'./out/{args.weight}_{args.dim}.pth'
+    checkpoint = torch.load(weight_path, map_location=args.device)
+    model.load_state_dict(checkpoint['model'] if 'model' in checkpoint else checkpoint)
+    
+    print(f"鍔犺浇妯″瀷: {weight_path}")
+    print("杈撳叆 'quit' 閫€鍑?)
+    
+    # 浜や簰寮忓璇?    while True:
+        prompt = input("\n鐢ㄦ埛: ")
+        if prompt.lower() == 'quit':
+            break
+        
+        # 鏍煎紡鍖栬緭鍏?        formatted_prompt = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+        
+        # 鐢熸垚鍥炲
+        response = generate(model, tokenizer, formatted_prompt, device=args.device)
+        
+        # 鎻愬彇鍔╂墜鍥炲
+        if '<|im_start|>assistant' in response:
+            response = response.split('<|im_start|>assistant')[-1]
+        if '<|im_end|>' in response:
+            response = response.split('<|im_end|>')[0]
+        
+        print(f"鍔╂墜: {response.strip()}")
+
+
+if __name__ == '__main__':
+    main()
+```
+
+---
+
+## 10. 鍒嗚瘝鍣紙Tokenizer锛夎瑙?
+鍒嗚瘝鍣ㄦ槸璇█妯″瀷鐨勯噸瑕佺粍鎴愰儴鍒嗭紝璐熻矗灏嗘枃鏈浆鎹负妯″瀷鍙互澶勭悊鐨則oken搴忓垪銆侻iniMind浣跨敤鑷畾涔夌殑鍒嗚瘝鍣紝璇嶆眹琛ㄥぇ灏忎负6400锛岃繙灏忎簬GPT-2鐨?0257銆?
+### 10.1 鍒嗚瘝鍣ㄧ殑鍩烘湰姒傚康
+
+```python
+"""
+鍒嗚瘝鍣ㄥ伐浣滄祦绋?
+1. 鏂囨湰杈撳叆: "浣犲ソ锛屼笘鐣岋紒"
+       鈹?       鈻?2. 鍒嗚瘝锛圱okenize锛? ["浣?, "濂?, "锛?, "涓栫晫", "锛?]
+       鈹?       鈻?3. 杞崲涓篒D: [1024, 2048, 512, 3456, 1025]
+       鈹?       鈻?4. 宓屽叆鏌ユ壘: 姣忎釜ID鏌ヨ〃寰楀埌鍚戦噺
+       鈹?       鈻?5. 妯″瀷杈撳叆: tensor(batch, seq_len, hidden_dim)
+```
+
+### 10.2 BPE鍒嗚瘝鍣ㄥ師鐞?
+MiniMind閲囩敤鍩轰簬BPE锛圔yte Pair Encoding锛夌殑鍒嗚瘝鍣紝鍏舵牳蹇冩€濇兂锛?
+```
+鍘熷鏂囨湰: "绁炵粡缃戠粶"
+瀛楃绾? ["绁?, "缁?, "缃?, "缁?]
+璇嶆眹琛? ["绁?, "缁?, "缃?, "缁?, "绁炵粡", "缃戠粶"]
+
+BPE鍚堝苟瑙勫垯:
+1. 缁熻鐩搁偦瀛楃瀵瑰嚭鐜伴鐜?2. 鎵惧埌鏈€楂橀鐨勫: "绁?+"缁? = "绁炵粡" (鍑虹幇100娆?
+3. 鍚堝苟涓烘柊token: "绁炵粡"
+4. 閲嶅鐩村埌杈惧埌鐩爣璇嶆眹閲?```
+
+BPE鐨勪紭鍔匡細
+- 骞宠　璇嶇骇鍜屽瓧绗︾骇鐨勭矑搴?- 鑳藉澶勭悊鏈櫥褰曡瘝锛圤OV锛?- 鍘嬬缉鐜囬珮锛岃瘝姹囪〃绱у噾
+- 璺ㄨ瑷€閫傚簲鎬ц緝濂?
+### 10.3 鍒嗚瘝鍣ㄥ疄鐜拌瑙?
+```python
+"""
+MiniMind鍒嗚瘝鍣ㄥ疄鐜?
+鍒嗚瘝鍣ㄩ€氬父鍖呭惈浠ヤ笅缁勪欢锛?1. 璇嶆眹琛紙vocab锛夛細token鍒癐D鐨勬槧灏?2. 鍚堝苟瑙勫垯锛坢erges锛夛細BPE鍚堝苟鎿嶄綔
+3. 鐗规畩token锛?|im_start|>, <|im_end|>, <pad>绛?"""
+
+# 鍒嗚瘝鍣ㄤ娇鐢ㄧず渚?from transformers import AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained('./model/minimind_tokenizer')
+
+# 鍗曟潯鏂囨湰鍒嗚瘝
+text = "浣犲ソ锛屼笘鐣岋紒"
+tokens = tokenizer.tokenize(text)
+# tokens: ['浣?, '濂?, '锛?, '涓栫晫', '锛?]
+
+# 杞崲涓篒D
+ids = tokenizer.encode(text)
+# ids: [1024, 2048, 512, 3456, 1025]
+
+# 瑙ｇ爜鍥炴枃鏈?decoded = tokenizer.decode(ids)
+# decoded: "浣犲ソ锛屼笘鐣岋紒"
+
+# 鎵归噺澶勭悊
+batch_texts = ["浣犲ソ", "涓栫晫"]
+batch_ids = tokenizer(batch_texts, padding=True, truncation=True, return_tensors='pt')
+```
+
+### 10.4 ChatML鏍煎紡
+
+MiniMind浣跨敤ChatML鏍煎紡澶勭悊瀵硅瘽锛?
+```
+鏍煎紡瑙勮寖:
+<|im_start|>system
+绯荤粺娑堟伅<|im_end|>
+<|im_start|>user
+鐢ㄦ埛娑堟伅<|im_end|>
+<|im_start|>assistant
+鍔╂墜鍥炲<|im_end|>
+
+绀轰緥:
+<|im_start|>user
+浠婂ぉ澶╂皵濡備綍锛?|im_end|>
+<|im_start|>assistant
+浠婂ぉ澶╂皵鏅存湕锛屾俯搴?0-25搴︺€?|im_end|>
+```
+
+涓轰粈涔堜娇鐢ㄧ壒娈妕oken锛?- 鏄庣‘鏍囪瘑瑙掕壊杈圭晫
+- 渚夸簬妯″瀷瀛︿範瀵硅瘽缁撴瀯
+- 鏀寔澶氳疆瀵硅瘽
+- 閬垮厤娉ㄥ叆鏀诲嚮
+
+---
+
+## 11. 浼樺寲鍣ㄤ笌瀛︿範鐜囪皟搴?
+### 11.1 AdamW浼樺寲鍣ㄨ瑙?
+AdamW锛圓dam with Weight Decay锛夋槸璁粌澶фā鍨嬬殑鏍囬厤浼樺寲鍣ㄣ€?
+```python
+"""
+AdamW绠楁硶璇﹁В
+
+AdamW鏄疉dam鐨勫彉浣擄紝鍖哄埆鍦ㄤ簬鏉冮噸琛板噺鐨勬柟寮忋€?
+Adam鐨勬潈閲嶈“鍑?
+    胃 = 胃 - 伪 * (grad / (鈭歷 + 蔚)) - 伪 * 位 * 胃
+
+AdamW鐨勬潈閲嶈“鍑?
+    胃 = 胃 - 伪 * (grad / (鈭歷 + 蔚)) - 伪 * 位 * 胃
+                                鈫?                    杩欓噷AdamW鐨勮“鍑忔槸鐙珛鐨?
+鏁板鍏紡:
+    m_t = 尾鈧?* m_{t-1} + (1 - 尾鈧? * g_t        # 姊害鐨勪竴闃剁煩浼拌锛堝姩閲忥級
+    v_t = 尾鈧?* v_{t-1} + (1 - 尾鈧? * g_t虏      # 姊害鐨勪竴闃剁煩浼拌锛堟柟宸級
+    m_hat = m_t / (1 - 尾鈧乛t)                    # 鍋忓樊鏍℃
+    v_hat = v_t / (1 - 尾鈧俕t)                    # 鍋忓樊鏍℃
+    胃 = 胃 - 伪 * m_hat / (鈭歷_hat + 蔚) - 伪 * 位 * 胃  # 鍙傛暟鏇存柊
+
+MiniMind閰嶇疆:
+    lr = 5e-4          # 瀛︿範鐜?    尾鈧?= 0.9           # 鍔ㄩ噺
+    尾鈧?= 0.95          # 鏂瑰樊琛板噺
+    weight_decay = 0.1 # 鏉冮噸琛板噺
+"""
+```
+
+AdamW vs SGD锛?- AdamW鏀舵暃鏇村揩
+- SGD娉涘寲鎬ц兘鍙兘鏇村ソ
+- 灏忔ā鍨嬭缁冨父鐢ˋdamW
+- 澶фā鍨嬪父鐢ˋdamW + 姊害瑁佸壀
+
+### 11.2 瀛︿範鐜囪皟搴︾瓥鐣?
+```python
+"""
+MiniMind浣跨敤鐨勫涔犵巼璋冨害锛氫綑寮﹂€€鐏?
+鍏紡锛?    lr(t) = lr_min + 0.5 * (lr_max - lr_min) * (1 + cos(蟺 * t / T))
+
+鍏朵腑锛?    lr(t): 鏃堕棿t鐨勫涔犵巼
+    lr_min: 鏈€灏忓涔犵巼锛堥€氬父涓簂r_max鐨?/10锛?    lr_max: 鏈€澶у涔犵巼
+    t: 褰撳墠姝ユ暟
+    T: 鎬绘鏁?
+璋冨害鏇茬嚎锛?    lr
+    ^
+    |鈥锯€锯€锯€锯€锯€锯€锯€锯€锯€?    |           鈥锯€锯€锯€锯€锯€?    |                 鈥锯€锯€?    |                     鈥?    |                       鈥锯€?    |                            鈥锯€锯€?    +---------------------------> t
+"""
+
+def get_cosine_lr(current_step, total_steps, lr_max, lr_min=None):
+    """
+    璁＄畻浣欏鸡閫€鐏涔犵巼
+    
+    鍙傛暟:
+        current_step: 褰撳墠姝ユ暟
+        total_steps: 鎬绘鏁?        lr_max: 鏈€澶у涔犵巼
+        lr_min: 鏈€灏忓涔犵巼锛岄粯璁や负lr_max/10
+    """
+    if lr_min is None:
+        lr_min = lr_max / 10
+    
+    progress = current_step / total_steps
+    return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
+
+# 瀛︿範鐜囬鐑紙Warmup锛?def get_warmup_cosine_lr(current_step, warmup_steps, total_steps, lr_max):
+    """
+    甯﹂鐑殑浣欏鸡閫€鐏涔犵巼
+    
+    鍓峸armup_steps姝ョ嚎鎬у鍔犲涔犵巼
+    涔嬪悗浣跨敤浣欏鸡閫€鐏?    """
+    if current_step < warmup_steps:
+        # 绾挎€ч鐑?        return lr_max * current_step / warmup_steps
+    else:
+        # 浣欏鸡閫€鐏?        progress = (current_step - warmup_steps) / (total_steps - warmup_steps)
+        return lr_max * 0.5 * (1 + math.cos(math.pi * progress))
+```
+
+### 11.3 姊害瑁佸壀涓庢搴︾疮绉?
+```python
+"""
+姊害瑁佸壀锛圙radient Clipping锛?
+鐩殑锛氶槻姝㈡搴︾垎鐐?
+鍏紡锛?    if ||g|| > threshold:
+        g = g * threshold / ||g||
+
+MiniMind閰嶇疆锛?    grad_clip = 1.0  # 瑁佸壀闃堝€?"""
+
+# PyTorch瀹炵幇
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+"""
+姊害绱Н锛圙radient Accumulation锛?
+鐩殑锛氬湪鏄惧瓨鏈夐檺鐨勬儏鍐典笅妯℃嫙澶atch璁粌
+
+鍘熺悊锛?    姝ｅ父: batch_size=32, 鐩存帴鏇存柊
+    绱Н: batch_size=8, 绱Н4娆″悗鏇存柊
+    
+    effective_batch_size = batch_size * accumulation_steps
+"""
+
+# 姊害绱Н绀轰緥
+accumulation_steps = 4
+batch_size = 8
+effective_batch_size = batch_size * accumulation_steps  # 32
+
+for step, batch in enumerate(dataloader):
+    # 鍓嶅悜浼犳挱
+    loss = model(batch)
+    loss = loss / accumulation_steps  # 缂╂斁鎹熷け
+    loss.backward()  # 鍙嶅悜浼犳挱锛岀疮绉搴?    
+    if (step + 1) % accumulation_steps == 0:
+        # 绱Н浜?涓猙atch鐨勬搴﹀悗鏇存柊
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+```
+
+---
+
+## 12. 娣峰悎绮惧害璁粌
+
+### 12.1 涓轰粈涔堥渶瑕佹贩鍚堢簿搴︼紵
+
+```
+绮惧害绫诲瀷瀵规瘮锛?
+float32 (鍗曠簿搴?:
+    - 32浣嶆诞鐐规暟
+    - 绮惧害鏈€楂橈紝鏄惧瓨鍗犵敤澶?    - 璁粌鍜屾帹鐞嗛兘鍙敤
+
+float16 (鍗婄簿搴?:
+    - 16浣嶆诞鐐规暟
+    - 绮惧害杈冧綆锛屾樉瀛樺崰鐢ㄥ皬
+    - 鍙兘鍑虹幇鏁板€兼孩鍑?
+bfloat16 (BF16):
+    - 16浣嶆诞鐐规暟
+    - 涓巉loat32鐩稿悓鐨勬寚鏁拌寖鍥?    - 绮惧害浠嬩簬float32鍜宖loat16涔嬮棿
+    - 澶фā鍨嬭缁冩帹鑽愪娇鐢?
+鏄惧瓨鍗犵敤瀵规瘮锛堜互26M鍙傛暟涓轰緥锛夛細
+    float32: 26M * 4 bytes = 104 MB
+    float16: 26M * 2 bytes = 52 MB
+    bf16:    26M * 2 bytes = 52 MB
+    
+    姊害锛堜笌鏉冮噸鍚屽昂瀵革級:
+    浼樺寲鍣ㄧ姸鎬侊紙AdamW闇€瑕?鍊嶆潈閲嶅ぇ灏忥級:
+    
+    鎬昏:
+    float32: 104 + 104 + 208 = 416 MB
+    bf16:    52 + 52 + 104 = 208 MB (鍑忓皯50%)
+```
+
+### 12.2 PyTorch娣峰悎绮惧害瀹炵幇
+
+```python
+"""
+PyTorch娣峰悎绮惧害璁粌绀轰緥
+"""
+
+from torch.cuda.amp import autocast, GradScaler
+
+# 鍒涘缓姊害缂╂斁鍣?scaler = GradScaler()
+
+model = model.to('cuda')
+model.train()
+
+for batch in dataloader:
+    input_ids = batch['input_ids'].to('cuda')
+    labels = batch['labels'].to('cuda')
+    
+    optimizer.zero_grad()
+    
+    # 鍓嶅悜浼犳挱 - 鑷姩浣跨敤鍗婄簿搴?    with autocast(dtype=torch.bfloat16):
+        outputs = model(input_ids)
+        loss = F.cross_entropy(outputs.logits.view(-1, outputs.logits.size(-1)), labels)
+    
+    # 鍙嶅悜浼犳挱 - 鎹熷け闇€瑕佺缉鏀?    scaler.scale(loss).backward()
+    
+    # 姊害瑁佸壀锛堥渶瑕佸厛unscale锛?    scaler.unscale_(optimizer)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    
+    # 鍙傛暟鏇存柊 - 鑷姩澶勭悊缂╂斁
+    scaler.step(optimizer)
+    scaler.update()
+```
+
+### 12.3 Flash Attention
+
+```python
+"""
+Flash Attention璇﹁В
+
+鏍囧噯娉ㄦ剰鍔涚殑闂锛?- 闇€瑕丱(n虏)鐨勬樉瀛樺瓨鍌ㄦ敞鎰忓姏鍒嗘暟鐭╅樀
+- 澶ч噺HBM锛堥珮甯﹀鍐呭瓨锛夎闂?- 璁粌闀垮簭鍒楁椂鏄惧瓨鐖嗙偢
+
+Flash Attention鐨勮В鍐虫柟妗堬細
+- 鍒嗗潡璁＄畻锛岄伩鍏嶅瓨鍌ㄥ畬鏁存敞鎰忓姏鐭╅樀
+- IO鎰熺煡璁捐锛屽噺灏慔BM璁块棶
+- 鏄惧瓨浠嶰(n虏)闄嶅埌O(n)
+
+鍏紡锛?    浣跨敤鍒嗗潡褰掍竴鍖栵細
+    softmax(X) = normalize(exp(X - max(X)))
+    
+    鍒嗗潡璁＄畻鏃堕渶瑕侊細
+    1. 鎸夊潡璁＄畻灞€閮╯oftmax
+    2. 姝ｇ‘澶勭悊鏁板€肩ǔ瀹氭€?    3. 鍚堝苟寰楀埌鍏ㄥ眬缁撴灉
+
+PyTorch浣跨敤锛?    F.scaled_dot_product_attention(
+        q, k, v,
+        attn_mask=None,
+        dropout_p=0.0,
+        is_causal=True  # 鑷姩鐢熸垚causal mask
+    )
+"""
+
+# MiniMind涓殑Flash Attention閰嶇疆
+config = LMConfig(flash_attn=True)  # 榛樿鍚敤
+
+# 鏉′欢鍒ゆ柇
+if config.flash_attn and hasattr(F, 'scaled_dot_product_attention'):
+    # 浣跨敤Flash Attention
+    output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
+else:
+    # 鍥為€€鍒版爣鍑嗗疄鐜?    output = standard_attention(xq, xk, xv)
+```
+
+---
+
+## 13. 鍒嗗竷寮忚缁?
+### 13.1 DDP锛圖istributed Data Parallel锛?
+```python
+"""
+DDP鍒嗗竷寮忔暟鎹苟琛岃缁?
+宸ヤ綔鍘熺悊锛?1. 姣忎釜杩涚▼鏈夊畬鏁寸殑妯″瀷鍓湰
+2. 鏁版嵁鍦ㄤ笉鍚岃繘绋嬮棿鍒嗗壊
+3. 姣忎釜杩涚▼鐙珛鍓嶅悜浼犳挱鍜屽弽鍚戜紶鎾?4. 姊害閫氳繃AllReduce鍚屾
+5. 鎵€鏈夎繘绋嬩互鐩稿悓鐨勫弬鏁版洿鏂?
+浼樺娍锛?- 绾挎€у姞閫熸瘮锛堟帴杩戠悊鎯冲€硷級
+- 閫氫俊寮€閿€灏?- 瀹归敊鎬уソ
+"""
+
+# 鍒濆鍖?import torch.distributed as dist
+
+dist.init_process_group(backend='nccl')  # NCCL鐢ㄤ簬GPU閫氫俊
+local_rank = int(os.environ['LOCAL_RANK'])
+torch.cuda.set_device(local_rank)
+
+# 鍖呰妯″瀷
+model = model.to(local_rank)
+model = DDP(model, device_ids=[local_rank])
+
+# 鏁版嵁鍔犺浇
+train_sampler = DistributedSampler(dataset)
+dataloader = DataLoader(dataset, sampler=train_sampler)
+
+# 璁粌寰幆
+for epoch in range(num_epochs):
+    train_sampler.set_epoch(epoch)  # 鎵撲贡鏁版嵁
+    for batch in dataloader:
+        # 鏁版嵁绉诲埌褰撳墠GPU
+        batch = batch.to(local_rank)
+        
+        outputs = model(batch)
+        loss = outputs.loss / gradient_accumulation_steps
+        loss.backward()
+        
+        # 浼樺寲鍣ㄦ洿鏂?        optimizer.step()
+        optimizer.zero_grad()
+```
+
+### 13.2 DeepSpeed ZeRO浼樺寲
+
+```python
+"""
+DeepSpeed ZeRO锛圸ero Redundancy Optimizer锛?
+ZeRO鏈変笁涓樁娈碉細
+
+ZeRO-1:
+    - 浼樺寲鍣ㄧ姸鎬佸垎鐗?    - 鍑忓皯绾?鍊嶆樉瀛?
+ZeRO-2:
+    - 浼樺寲鍣ㄧ姸鎬?+ 姊害鍒嗙墖
+    - 鍑忓皯绾?鍊嶆樉瀛?
+ZeRO-3:
+    - 浼樺寲鍣ㄧ姸鎬?+ 姊害 + 鍙傛暟鍒嗙墖
+    - 鍑忓皯绾鍊嶆樉瀛橈紙N=GPU鏁伴噺锛?
+閰嶇疆绀轰緥锛?{
+    "train_batch_size": 32,
+    "gradient_accumulation_steps": 4,
+    "fp16": {"enabled": True},
+    "zero_optimization": {
+        "stage": 2,
+        "offload_optimizer": {"device": "cpu"}
+    }
+}
+"""
+
+# 浣跨敤DeepSpeed鍚姩
+# deepspeed --num_gpus=4 train.py
+```
+
+---
+
+## 14. 鎺ㄧ悊浼樺寲
+
+### 14.1 KV缂撳瓨鏈哄埗
+
+```python
+"""
+KV缂撳瓨锛圞ey-Value Cache锛?
+鎺ㄧ悊鏃剁殑鐥涚偣锛?- 鐢熸垚绗琋涓猼oken鏃讹紝闇€瑕侀噸鏂拌绠楀墠N-1涓猼oken鐨勬敞鎰忓姏
+- 鏃堕棿澶嶆潅搴(n虏)锛宯涓哄簭鍒楅暱搴?- 澶ч噺閲嶅璁＄畻
+
+KV缂撳瓨鐨勮В鍐虫柟妗堬細
+- 棣栨鍓嶅悜浼犳挱锛氳绠楀苟缂撳瓨鎵€鏈塊鍜孷
+- 鍚庣画鍓嶅悜浼犳挱锛氬彧璁＄畻鏂皌oken鐨凨鍜孷锛屾嫾鎺ュ巻鍙茬紦瀛?
+瀹炵幇锛?    # 棣栨鎺ㄧ悊
+    outputs = model(input_ids)  # input_ids: [1, 10]
+    past_kv = outputs.past_key_values
+    
+    # 澧為噺鎺ㄧ悊
+    outputs = model(
+        input_ids[:, -1:],      # 鍙緭鍏ユ柊token
+        past_key_values=past_kv  # 浼犲叆缂撳瓨
+    )
+    
+    # 缂撳瓨浼氳嚜鍔ㄦ洿鏂帮細cat([past_k, new_k], dim=1)
+"""
+
+# MiniMind鐢熸垚鍑芥暟涓殑KV缂撳瓨浣跨敤
+def generate(self, input_ids, max_new_tokens=100, ...):
+    past_key_values = None
+    
+    for _ in range(max_new_tokens):
+        outputs = self.forward(
+            input_ids if past_key_values is None else input_ids[:, -1:],
+            past_key_values=past_key_values,
+            use_cache=True
+        )
+        
+        past_key_values = outputs.past_key_values
+        logits = outputs.logits[:, -1, :]
+        
+        # ... 閲囨牱涓嬩竴涓猼oken
+        next_token = ...
+        
+        input_ids = torch.cat([input_ids, next_token], dim=-1)
+    
+    return input_ids
+```
+
+### 14.2 閲囨牱绛栫暐
+
+```python
+"""
+鏂囨湰鐢熸垚鐨勯噰鏍风瓥鐣?
+1. Greedy Search锛堣椽蹇冩悳绱級
+   - 鎬绘槸閫夋嫨姒傜巼鏈€楂樼殑token
+   - 缂虹偣锛氬鏄撻櫡鍏ラ噸澶嶅惊鐜?   - 鐢ㄩ€旓細纭畾鎬т换鍔?
+2. Top-K Sampling
+   - 浠庢鐜囨渶楂樼殑K涓猼oken涓殢鏈洪€夋嫨
+   - 寮曞叆闅忔満鎬э紝澧炲姞澶氭牱鎬?   - K鐨勯€夋嫨寰堝叧閿細澶皬闄愬埗澶氭牱锛屽お澶у彲鑳介€夊埌浣庤川閲弔oken
+
+3. Nucleus Sampling (Top-P)
+   - 浠庣疮绉鐜囪揪鍒癙鐨勬渶灏弔oken闆嗗悎涓噰鏍?   - 鑷€傚簲鍦拌皟鏁村€欓€塼oken鏁伴噺
+   - 閫氬父姣擳op-K鏇寸ǔ瀹?
+4. Temperature Sampling
+   - 鎺у埗姒傜巼鍒嗗竷鐨勫钩婊戝害
+   - T>1锛氬垎甯冩洿骞冲潶锛屽鍔犲鏍锋€?   - T<1锛氬垎甯冩洿灏栭攼锛屽鍔犵‘瀹氭€?   - T=1锛氬師濮嬪垎甯?"""
+
+def sample_with_temperature(logits, temperature=1.0):
+    """搴旂敤娓╁害缂╂斁"""
+    if temperature != 1.0:
+        logits = logits / temperature
+    return logits
+
+def top_k_sample(probs, k=50):
+    """Top-K閲囨牱"""
+    top_k_probs, top_k_indices = torch.topk(probs, k)
+    # 浠巘op-k涓寜姒傜巼閲囨牱
+    sampled_idx = torch.multinomial(top_k_probs, 1)
+    return top_k_indices[sampled_idx]
+
+def nucleus_sample(probs, p=0.9):
+    """Nucleus (Top-P) 閲囨牱"""
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+    
+    # 鎵惧埌绱Н姒傜巼瓒呰繃P鐨則oken
+    nucleus_mask = cumulative_probs <= p
+    # 纭繚鑷冲皯鍖呭惈涓€涓猼oken
+    nucleus_mask[..., 1:] = nucleus_mask[..., :-1].clone()
+    nucleus_mask[..., 0] = True
+    
+    # 杩囨护姒傜巼
+    nucleus_probs = torch.where(nucleus_mask, sorted_probs, 0)
+    nucleus_probs = nucleus_probs / nucleus_probs.sum()
+    
+    # 閲囨牱
+    sampled_idx = torch.multinomial(nucleus_probs, 1)
+    return sorted_indices[sampled_idx]
+```
+
+---
+
+## 15. 甯歌闂涓庤В鍐虫柟妗?
+### 15.1 鏄惧瓨闂
+
+```
+闂1锛欳UDA out of memory
+鍘熷洜锛氭樉瀛樹笉瓒?瑙ｅ喅鏂规锛?    - 鍑忓皬batch_size
+    - 鍚敤姊害绱Н
+    - 浣跨敤娣峰悎绮惧害璁粌
+    - 鍚敤Flash Attention
+    - 鍑忓皯max_seq_len
+
+闂2锛氭搴︾垎鐐?鍘熷洜锛氬涔犵巼杩囬珮鎴栨搴︿笉绋冲畾
+瑙ｅ喅鏂规锛?    - 闄嶄綆瀛︿範鐜?    - 鍚敤姊害瑁佸壀
+    - 浣跨敤瀛︿範鐜囬鐑?    - 妫€鏌ユ暟鎹綊涓€鍖?
+闂3锛氭樉瀛樻硠婕?鍘熷洜锛氭湭姝ｇ‘閲婃斁涓棿鍙橀噺
+瑙ｅ喅鏂规锛?    - 鍙婃椂del涓嶉渶瑕佺殑鍙橀噺
+    - 浣跨敤torch.cuda.empty_cache()
+    - 妫€鏌ユā鍨嬫槸鍚︽湁澶氫綑鐨勭紦瀛?```
+
+### 15.2 璁粌涓嶇ǔ瀹?
+```
+闂锛歭oss鍙樻垚NaN
+鍘熷洜锛?    - 娣峰悎绮惧害涓嬫暟鍊兼孩鍑?    - 瀛︿範鐜囪繃楂?    - 鏁版嵁瀛樺湪寮傚父鍊?    - 姊害鐖嗙偢
+
+瑙ｅ喅鏂规锛?    - 鍒囨崲鍒癰float16
+    - 闄嶄綆瀛︿範鐜?    - 妫€鏌ユ暟鎹竻娲?    - 鍚敤姊害瑁佸壀
+    - 娣诲姞瀛︿範鐜囬鐑?```
+
+### 15.3 妯″瀷涓嶆敹鏁?
+```
+闂锛歭oss涓嶄笅闄嶆垨闇囪崱
+鍘熷洜锛?    - 瀛︿範鐜囦笉褰?    - 鏁版嵁鏍囨敞闂
+    - 妯″瀷瀹归噺涓嶈冻
+    - 瀛︿範鐜囪皟搴﹂棶棰?
+瑙ｅ喅鏂规锛?    - 璋冩暣瀛︿範鐜囷紙灏濊瘯1e-4鍒?e-5鑼冨洿锛?    - 妫€鏌ユ暟鎹川閲?    - 澧炲姞妯″瀷瀹归噺
+    - 璋冩暣瀛︿範鐜囪皟搴?    - 澧炲姞璁粌杞暟
+```
+
+---
+
+## 16. 瀹炶返缁冧範棰?
+### 缁冧範1锛氫慨鏀规ā鍨嬮厤缃?
+```python
+"""
+缁冧範锛氬垱寤轰竴涓洿澶ц妯＄殑MiniMind妯″瀷
+
+瑕佹眰锛?- 鍙傛暟閲忕害100M
+- 浣跨敤GQA
+- 鍚敤MoE
+
+鎻愮ず锛?- 鍙傝€僉MConfig鐨勯粯璁ゅ弬鏁?- 璋冩暣dim鍜宯_layers
+- 璁＄畻鍙傛暟閲忛獙璇?"""
+
+# 浣犵殑浠ｇ爜锛?config = LMConfig(
+    dim=...,      # 璋冩暣闅愯棌缁村害
+    n_layers=..., # 璋冩暣灞傛暟
+    vocab_size=6400,
+    use_moe=...,  # 鏄惁鍚敤MoE
+)
+
+# 楠岃瘉鍙傛暟閲?model = MiniMindLM(config)
+total_params = sum(p.numel() for p in model.parameters())
+print(f"鍙傛暟閲? {total_params / 1e6:.2f}M")
+```
+
+### 缁冧範2锛氬疄鐜拌嚜瀹氫箟閲囨牱
+
+```python
+"""
+缁冧範锛氬疄鐜颁竴涓甫閲嶅鎯╃綒鐨勯噰鏍峰嚱鏁?
+瑕佹眰锛?- 鍦ㄧ敓鎴愭椂鎯╃綒宸查€夋嫨杩囩殑token
+- 鎯╃綒绯绘暟鍙皟
+- 淇濇寔閲囨牱澶氭牱鎬?
+鍏紡锛?    logits[token] = logits[token] / (1 + repeat_penalty * count[token])
+"""
+
+def sample_with_repetition_penalty(
+    logits,
+    previous_tokens,
+    penalty=1.2
+):
+    """
+    甯﹂噸澶嶆儵缃氱殑閲囨牱
+    
+    鍙傛暟:
+        logits: 妯″瀷杈撳嚭鐨刲ogits
+        previous_tokens: 涔嬪墠鐢熸垚鐨則oken搴忓垪
+        penalty: 鎯╃綒绯绘暟锛?1澧炲姞鎯╃綒锛?1鍑忓皯鎯╃綒
+    """
+    # 缁熻token鍑虹幇娆℃暟
+    token_counts = torch.bincount(previous_tokens, minlength=logits.size(-1))
+    
+    # 搴旂敤鎯╃綒锛氬凡鍑虹幇鐨則oken姒傜巼闄嶄綆
+    penalties = 1.0 + (token_counts > 0).float() * (penalty - 1.0)
+    logits = logits / penalties
+    
+    return logits
+```
+
+### 缁冧範3锛氬垎鏋愭敞鎰忓姏妯″紡
+
+```python
+"""
+缁冧範锛氬彲瑙嗗寲妯″瀷鐨勬敞鎰忓姏鍒嗗竷
+
+瑕佹眰锛?- 鎻愬彇鏌愪竴灞傜殑娉ㄦ剰鍔涙潈閲?- 鍙鍖栦笉鍚屼綅缃箣闂寸殑娉ㄦ剰鍔涘垎甯?- 鍒嗘瀽妯″瀷鍏虫敞鐨勪綅缃?
+鎻愮ず锛?- 鍦╝ttention璁＄畻鏃朵繚瀛樻敞鎰忓姏鍒嗘暟
+- 浣跨敤matplotlib鍙鍖?"""
+
+import matplotlib.pyplot as plt
+
+def visualize_attention(attention_weights, title="Attention Pattern"):
+    """
+    鍙鍖栨敞鎰忓姏鏉冮噸
+    
+    attention_weights: (seq_len, seq_len) 鐨勬敞鎰忓姏鐭╅樀
+    """
+    plt.figure(figsize=(10, 8))
+    plt.imshow(attention_weights.cpu().numpy(), cmap='viridis')
+    plt.colorbar()
+    plt.title(title)
+    plt.xlabel("Key Position")
+    plt.ylabel("Query Position")
+    plt.show()
+```
+
+---
+
+## 鎬荤粨
+
+閫氳繃杩欎唤璇﹀敖鐨勬暀绋嬶紝浣犲凡缁忎簡瑙ｄ簡MiniMind椤圭洰鐨勬瘡涓€涓牳蹇冪粍浠讹細
+
+1. **閰嶇疆绯荤粺**锛氱悊瑙ｄ簡鎵€鏈夎秴鍙傛暟鐨勫惈涔夊拰浣滅敤
+2. **RMSNorm**锛氭帉鎻′簡鐜颁唬LLM鐨勫綊涓€鍖栨柟娉?3. **RoPE**锛氱悊瑙ｄ簡鏃嬭浆浣嶇疆缂栫爜鐨勬暟瀛﹀師鐞?4. **GQA**锛氬浼氫簡鍒嗙粍鏌ヨ娉ㄦ剰鍔涚殑瀹炵幇
+5. **SwiGLU**锛氫簡瑙ｄ簡闂ㄦ帶婵€娲诲嚱鏁扮殑浼樺娍
+6. **MoE**锛氭帉鎻′簡娣峰悎涓撳绯荤粺鐨勮璁?7. **璁粌娴佺▼**锛氫粠棰勮缁冨埌DPO鐨勫畬鏁存祦绋?8. **Tokenizer**锛氱悊瑙ｄ簡鍒嗚瘝鍣ㄧ殑鍘熺悊鍜屽疄鐜?9. **浼樺寲鍣?*锛氭繁鍏ョ悊瑙ｄ簡AdamW鍜屽涔犵巼璋冨害
+10. **娣峰悎绮惧害**锛氭帉鎻′簡bf16璁粌鍜孎lash Attention
+11. **鍒嗗竷寮忚缁?*锛氱悊瑙ｄ簡DDP鍜孌eepSpeed
+12. **鎺ㄧ悊浼樺寲**锛氬浼氫簡KV缂撳瓨鍜岄噰鏍风瓥鐣?
+MiniMind鏄竴涓粷浣崇殑瀛︿範椤圭洰锛屽畠鐢ㄦ渶绠€娲佺殑浠ｇ爜灞曠ず浜嗙幇浠ｅぇ璇█妯″瀷鐨勬墍鏈夋牳蹇冩妧鏈€傚缓璁綘锛?
+1. **鍔ㄦ墜瀹炶返**锛氶€愯闃呰浠ｇ爜锛岀悊瑙ｆ瘡涓嚱鏁扮殑浣滅敤
+2. **淇敼瀹為獙**锛氳皟鏁村弬鏁帮紝瑙傚療妯″瀷琛屼负鐨勫彉鍖?3. **鎵╁睍寮€鍙?*锛氬皾璇曞湪鑷繁鐨勬暟鎹笂璁粌锛屾墿灞曟ā鍨嬪姛鑳?4. **娣卞叆鐮旂┒**锛氶槄璇荤浉鍏宠鏂囷紝鐞嗚В璁捐鑳屽悗鐨勭悊璁?
+## 杩涗竴姝ュ涔犺祫婧?
+1. **Transformer璁烘枃**锛?Attention Is All You Need"
+2. **LLaMA璁烘枃**锛?LLaMA: Open and Efficient Foundation Language Models"
+3. **RoPE璁烘枃**锛?RoFormer: Enhanced Transformer with Rotary Position Embedding"
+4. **Flash Attention璁烘枃**锛?FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+5. **LoRA璁烘枃**锛?LoRA: Low-Rank Adaptation of Large Language Models"
+6. **DPO璁烘枃**锛?Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
+
+绁濅綘瀛︿範鎰夊揩锛屽湪AI鐨勯亾璺笂涓嶆柇鎺㈢储锛?

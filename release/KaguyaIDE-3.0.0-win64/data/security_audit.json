@@ -1,0 +1,719 @@
+[
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-12 15:53:41",
+    "ip": "127.0.0.1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-12 15:55:30",
+    "ip": "127.0.0.1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-12 16:35:25",
+    "ip": "127.0.0.1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-12 16:35:25",
+    "ip": "127.0.0.1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-12 16:35:54",
+    "ip": "127.0.0.1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-12 16:35:54",
+    "ip": "127.0.0.1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 13:43:46",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "2ec25077b2c4fbeafc7076ca45682fc32f6899d8727f8590cfd9fcd13dbd3e88"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 14:27:59",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "70d218c5ca839aa775fb95523ae9a4035f0de8dd0dc255c52d7683136f0d07e2"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 15:39:58",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "2d05a09088b5a0bbd376d6cb46d7fdb856ba02c2e4080bb9d8c027adde80fe7d"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 16:53:02",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "d6fe3bb3c4b2845194e3370f5059b733617395ae0f90e20150bb20e89468215d"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 18:19:21",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "d13d7f58a3f3e6e7e5c66cc67920a8318067fe492ec49fff930d40816b84bf5b"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 18:34:19",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "8ce42ab8f6b46cf1d24b27086db0b76c885daab2421128878831740b378610cc"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 19:35:23",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "667264f30240f59de19b63c0f065c9b010436566507bae773140b3959e17a356"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 19:36:09",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "67f63fcd2355dc541e4695d7f85113a9e7b51ee54a6a7f4fee3b0f45bef9acd6"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 19:36:28",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "046e2c8409860c1d73b4de0499e397882e4a15758da0189b81add694cf280770"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 19:36:38",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "3433c40546fe3c45afd5e9069ea417951b4af32a0f3dd48b556a394562fbb1fe"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 19:36:42",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "d47e93741d64e6d694797515e24e50a9265d8118cd21c22b7dbf7d3539e0eb78"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 19:36:44",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "9543e427cb02e1a5be58a6a525dbec59a5ed478fc01f43d7f8266209815dadcc"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 20:24:16",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "e35b560f26ceb00aa299eac789e4ae445fc425af9d7d897ffc26fd085f96f90f"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 20:24:17",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "1c86707f9bc3a8a14f0b2fd57642e84f15cd5d300d751a99737bbdfe1b73b0eb"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 20:24:18",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "d0aca49cc82c82d4946219ff910c5101bebf8efe29a737038f790a7ee0455271"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 20:24:19",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "f80398b07540144249b03f793e5656e2067ca774a0c9bf040a42c605d8bb2601"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 20:24:21",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "9d6825f5fd32e081e8472ec1faea896f4bdde76a9791dc9df519ec741f5b6c7f"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 20:24:28",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "7649cf08ab6c6342cf554a6f2edadc05c31e6ac80506af753be9104b5daf6f9e"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 21:18:53",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "154741e85f843339f9cca38fc92e1932c28a8bffa64ec6742fd02b8fc179f6de"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 21:20:05",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "cf62a439c8723abf7cf7bfecd365f9ef8c63c4aadc06813dec550fb712d5d235"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 21:20:06",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "39785993419e9b0272d9757451a0e5e2b1b561df5d80de7bbb7ffbe32a64d71a"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 21:20:09",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "41573f70181e661a25d1cbb8b1bc960d9aabd9b58e6a82af3d9ea29430eba656"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 21:20:13",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "f7072c016e16fa8ef0a51ebd3f99b83b528b283a8835446d258f67e1a4181f24"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 21:20:22",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "32e867fd5f2c5331b3de0374e8d44d45684590e878ac8b3f01701fe6d4fc2591"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 23:26:57",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "24304bb8ebe216c4de510ea5be82e19d661362a8a72e8c23e382b7f92bb8fac8"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 23:27:19",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "044ebffeb7955fdec02c56002d1f848d05d4862f0e220ae55939539204230a66"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 23:27:25",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "e22d2b31d99e626e1250a190c0e93ebde7a85515caa3eaf73208e12a84ba7e3e"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-13 23:27:51",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "a74c980f7224f2d7d810be14e11ad3ffec8018e78ad54c2304ddecb4d1237ae3"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 00:40:24",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "f27006e15def71c5e361889e634b0020128d08a103bfd3f2dda9891686f4f4b7"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 01:18:33",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "1e100c7fb10db1e4783cd3fc2830808261de877353ad8343eba5d682c3298be8"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 12:20:30",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "f5ff42845117de6247a805b25f698c69ed3483677ac5aef503768078c8fb1af8"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 12:33:23",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "d8da6f1deac7a57e23f57eb2e15fd28746ffc8360074f89cd8ead5c59e84159e"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 15:33:17",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "e6d92edf7af3f0e95d90cc0da7a910af924848a9362acf3553795721673b6555"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 15:34:41",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "91ebc879cfa210bfd1b6b4e0070ff6e287910551cfe727f48ac6ba12417de634"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 16:04:54",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "ad44c59091219f12f46d1deb2e6d136adc7e517d74ee27047822f08ee03b899a"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 16:26:41",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "40a1f7a29bda55628a18b4df137c54abb9575b98fae398efc268aad5730b6e30"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 16:26:42",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "0a4052d7c2028cf95ec6a9df4278bc4ef9f44ed97abbe02477b13250f139d2ca"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 16:39:07",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "05f73b9f687eab68a0509fadf2d2ce71a862ee93da5e025fe03184fa780ff505"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 18:07:31",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "e0f1057e3d47a972a59d2c95556bd265570720d5e34524b58a0f761eb31f5454"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 18:09:27",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "81589da1076968c298f4f3faa3ca9e38cb6bba80695b7972879ac434710ebd6c"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 19:50:38",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "03b815c2ac2edae6af34a04964644f6af9d1db12cbc4cf5056b416146d9f255d"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 19:51:47",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "34bad8f6a9218ce89e81f992ac67a45e1ed952cc0f3e3cc5d02094b26a2bec96"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 21:43:11",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "de64fd6d5926c668b4b027ebf237ecafe167984b3657961da52f5909a623502b"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 21:53:57",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "07b931ac2722fdb48d65a6ed0c220e94a60ec2240e127b779053c2ae1b4629a1"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 21:54:04",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "ef4f83765c189608ddb87f14ab8f28c9ffeb39249338a170aeeb08b7c5fcadd7"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 22:35:48",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "0861cb95b8db9a4ec435d3bdeff467ac80c0b522bff8c7c9822a884a2f04da4e"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 22:36:34",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "16c6ba4ee522d307fa3763d4fbc5b2ff7dbb7071d65914f699e11c782c5c20ed"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 22:36:36",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "00d097089d02625cee59b4c9995e8eece58f44fefb549a8634c554fedc286124"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 22:36:39",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "9ef21add3f4ed2e6d375b7b3e0852211bd0dd5bb37622038cc7d26cf06c1b70f"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 23:09:10",
+    "ip": "127.0.0.1",
+    "user_agent": "python-requests/2.32.5",
+    "hash": "de1977e5144af9e9fb768c269260a7f0483778c6ae2e2f202cd73b3849955019"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 23:09:34",
+    "ip": "127.0.0.1",
+    "user_agent": "python-requests/2.32.5",
+    "hash": "316cf6aefd72de7ce8cbd671b5aac62226a8ae3fa6127f5756cfc4881a8f9ae7"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 23:13:56",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "b327043b04600af096e958f7a05bd00eb57ed57910338259bff114656b4a05e0"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-14 23:14:17",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Sa",
+    "hash": "5f1863c68e96fa95a9c2131121a43b73091e67c2a72381783619d2dfae470059"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 13:28:49",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "17c5493ce8f52d995bd00e586e305342b9767aacee3823a7a1dff366e446ac2f"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 14:41:34",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "fbe96386d7c13bf620ecb51759dbcb0744cd0b845d375a96c0802037f212e860"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 14:57:20",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "e7068e19551076e004033ac3110f4aadc2bf702b5c5a87990dd445219423a87b"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 14:58:02",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "cc49d0edd18e44b0f04dcd4931fa4ea5a993489daf44603aa7bdf7a06fa00bda"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 14:58:41",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "6729e13412a03dfe6930d56078905602b2a5f6f3b4c1abc129079a5c61482590"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 14:58:44",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "aeeaf86bae0d6af02d55a918c2aa7cd6b12f491c1afd886f01fa5d160c2cc036"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 14:58:45",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "82bf36141d9fbb7089420aa568b6e988640deae5b876b1c663d20272a9d83666"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 16:14:49",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TraeCN/1.107.1 Chro",
+    "hash": "c4d629137156766278a7d4c07624433a443e771eaa23aafd80e5bbf4224d675f"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:40:10",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "ae5d66a92e5286474c8d0f388a32bb777e7870d3b901f03c2bdbabec17b4f46f"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:51:40",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "049b8f2c718366f22c784cdad5d82f44750f69f5884c558b3195f6a9f9b2723c"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:51:52",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "bcc6ddc139845bee95e3f89eff4052a6662d6f20421e0d179ec9a9ef9f1a8398"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:51:53",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "269d07834de3a0fd24f008e8c73665206e56a12631382f75395d16545247a715"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:51:57",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "12df03389a0d1b1b0b4d480ed4edc7cf9cff118ba7c8ff9a4334fef39f13cc00"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:52:03",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "834797e3b9b18a1b98de85416865f9e227090e02adbe053cafedd93c5c168992"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:52:06",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "45376297048cfa1108722e485fc47cf5d88a1b4b40ab544cafff86d0a54d51d7"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 17:52:44",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "ef6bd70cedceb13e72959164896b4d0985d71fb5b6d1e7733a034d564b8204dc"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 18:54:25",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "3577bdbc7611d4aba55f2b7ab64d68dbcb288db2647ece28bc5b8ffbe814ebf6"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 18:55:06",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "6ee7b0d1fa68a0a45d68e994446bcb3c987d8cba3f7d03826ef218fd0ba3c291"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 18:55:19",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "33afb9c42ad98729ee74514f6b7a47f29927c05ac6c7c98850213a85f1f7a471"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 18:55:21",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "439a8c2d104c72c1f55b8029a2fc24efbf4c092f4100684dc17b67ad798f5d61"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 18:55:29",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "1dd21fe6605f13e09e1bd4e5248889b64f9fa98cb7c5f2fe84ad3dcd1b62bcff"
+  },
+  {
+    "type": "csrf_failed",
+    "detail": "IP 127.0.0.1 CSRF验证失败",
+    "severity": "warning",
+    "timestamp": "2026-04-15 18:55:35",
+    "ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Sa",
+    "hash": "79122ab6cfbcc074a6d3ee5b66d86826ef7e51bca521c8bc8bce4ac4ef89a13f"
+  }
+]

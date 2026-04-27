@@ -1,0 +1,2293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniMind CS336 交互式学习平台</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --bg-card: #1c2128;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-primary: #58a6ff;
+            --accent-secondary: #1f6feb;
+            --accent-success: #3fb950;
+            --accent-warning: #d29922;
+            --accent-error: #f85149;
+            --accent-purple: #a371f7;
+            --accent-cyan: #39c5cf;
+            --gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-4: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --shadow-glow: 0 0 20px rgba(88, 166, 255, 0.3);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --transition-fast: 0.15s ease;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(88, 166, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(163, 113, 247, 0.08) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .app-container {
+            position: relative;
+            z-index: 1;
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 16px;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            margin-bottom: 16px;
+        }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--gradient-1);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        .logo-text {
+            font-size: 18px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .header-stats { display: flex; gap: 16px; }
+        .stat-item {
+            text-align: center;
+            padding: 6px 14px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+        }
+        .stat-value { font-size: 18px; font-weight: 700; color: var(--accent-success); }
+        .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+        .main-content { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+        .sidebar { display: flex; flex-direction: column; gap: 12px; }
+        .sidebar-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .sidebar-header {
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .category-filter {
+            padding: 8px 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .filter-btn {
+            padding: 4px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        .filter-btn:hover, .filter-btn.active {
+            background: var(--accent-secondary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+        .exercise-list {
+            list-style: none;
+            max-height: calc(100vh - 320px);
+            overflow-y: auto;
+        }
+        .exercise-list::-webkit-scrollbar { width: 5px; }
+        .exercise-list::-webkit-scrollbar-track { background: var(--bg-tertiary); }
+        .exercise-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .exercise-item {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+        }
+        .exercise-item::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            background: transparent;
+            transition: all var(--transition-fast);
+        }
+        .exercise-item:hover { background: var(--bg-tertiary); }
+        .exercise-item.active { background: rgba(88, 166, 255, 0.1); }
+        .exercise-item.active::before { background: var(--accent-primary); }
+        .exercise-item.completed::before { background: var(--accent-success); }
+        .exercise-item.failed::before { background: var(--accent-error); }
+        .exercise-number {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .exercise-item.completed .exercise-number { background: var(--accent-success); color: white; }
+        .exercise-item.failed .exercise-number { background: var(--accent-error); color: white; }
+        .exercise-info { flex: 1; min-width: 0; }
+        .exercise-title { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .exercise-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+        .exercise-type-badge {
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: var(--bg-card);
+            color: var(--text-muted);
+        }
+        .exercise-type-badge.concept { background: rgba(163, 113, 247, 0.2); color: var(--accent-purple); }
+        .exercise-type-badge.code { background: rgba(88, 166, 255, 0.2); color: var(--accent-primary); }
+        .exercise-type-badge.quiz { background: rgba(63, 185, 80, 0.2); color: var(--accent-success); }
+        .exercise-type-badge.visual { background: rgba(57, 197, 207, 0.2); color: var(--accent-cyan); }
+        .editor-section { display: flex; flex-direction: column; gap: 12px; }
+        
+        /* 讲解面板样式 */
+        .editor-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .explanation-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .explanation-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .explanation-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .explanation-content {
+            padding: 16px;
+            overflow-y: auto;
+            flex: 1;
+            max-height: 400px;
+        }
+        .explanation-content::-webkit-scrollbar { width: 5px; }
+        .explanation-content::-webkit-scrollbar-track { background: var(--bg-tertiary); }
+        .explanation-content::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        
+        .code-block {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            margin: 8px 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            overflow-x: auto;
+        }
+        .code-block .keyword { color: var(--accent-purple); }
+        .code-block .function { color: var(--accent-primary); }
+        .code-block .string { color: var(--accent-success); }
+        .code-block .comment { color: var(--text-muted); }
+        .code-block .number { color: var(--accent-warning); }
+        
+        .explanation-section {
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .explanation-section:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent-primary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .section-content {
+            font-size: 12px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+        .section-content ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        .section-content li {
+            margin: 4px 0;
+        }
+        .highlight-box {
+            background: rgba(88, 166, 255, 0.1);
+            border-left: 3px solid var(--accent-primary);
+            padding: 10px 12px;
+            margin: 8px 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 11px;
+        }
+        .warning-box {
+            background: rgba(210, 153, 34, 0.1);
+            border-left: 3px solid var(--accent-warning);
+            padding: 10px 12px;
+            margin: 8px 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 11px;
+        }
+        .success-box {
+            background: rgba(63, 185, 80, 0.1);
+            border-left: 3px solid var(--accent-success);
+            padding: 10px 12px;
+            margin: 8px 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 11px;
+        }
+        .line-explanation {
+            display: flex;
+            gap: 8px;
+            margin: 6px 0;
+            padding: 8px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+        }
+        .line-num {
+            min-width: 24px;
+            height: 20px;
+            background: var(--accent-secondary);
+            color: white;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .line-text {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+        
+        .editor-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .editor-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .toolbar-left { display: flex; align-items: center; gap: 12px; }
+        .file-tab {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+        }
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            background: var(--bg-card);
+            border-radius: 20px;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .status-dot.ready { background: var(--accent-success); }
+        .status-dot.loading { background: var(--accent-warning); animation: pulse 1s infinite; }
+        .status-dot.running { background: var(--accent-cyan); animation: pulse 0.5s infinite; }
+        .status-dot.error { background: var(--accent-error); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .toolbar-buttons { display: flex; gap: 6px; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 12px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            font-family: inherit;
+        }
+        .btn-primary { background: var(--gradient-1); color: white; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-glow); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { background: var(--bg-tertiary); border-color: var(--accent-primary); }
+        .editor-container { display: flex; background: var(--bg-primary); flex: 1; min-height: 280px; }
+        .line-numbers {
+            padding: 12px 10px;
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            text-align: right;
+            user-select: none;
+            border-right: 1px solid var(--border-color);
+            min-width: 45px;
+        }
+        .code-editor {
+            flex: 1;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            background: transparent;
+            color: var(--text-primary);
+            border: none;
+            resize: none;
+            outline: none;
+            tab-size: 4;
+            min-height: 280px;
+        }
+        .template-bar {
+            display: flex;
+            gap: 5px;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+        .template-btn {
+            padding: 4px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            font-family: inherit;
+        }
+        .template-btn:hover { background: var(--accent-secondary); border-color: var(--accent-primary); color: white; }
+        .editor-footer {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 12px;
+            background: var(--accent-secondary);
+            font-size: 10px;
+            color: white;
+        }
+        .output-section { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .output-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .output-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+        .output-time { font-size: 10px; color: var(--text-muted); padding: 2px 6px; background: var(--bg-card); border-radius: var(--radius-sm); }
+        .input-area {
+            width: 100%;
+            min-height: 60px;
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: none;
+            resize: vertical;
+            outline: none;
+        }
+        .output-area {
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            min-height: 60px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-secondary);
+        }
+        .output-area.success { color: var(--accent-success); }
+        .output-area.error { color: var(--accent-error); }
+        .shortcuts-bar {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            padding: 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .shortcut-item { display: flex; align-items: center; gap: 4px; }
+        kbd {
+            padding: 2px 5px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 9px;
+        }
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.2s ease;
+        }
+        .modal-overlay.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            width: 95%;
+            max-width: 900px;
+            max-height: 85vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .modal-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .modal-close {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+        }
+        .modal-close:hover { background: var(--bg-card); color: var(--text-primary); }
+        .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 14px 20px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+        }
+        .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .compare-panel {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .compare-header { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--bg-tertiary); font-size: 11px; font-weight: 500; }
+        .compare-code {
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            white-space: pre;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .score-card { text-align: center; padding: 20px; background: var(--bg-primary); border-radius: var(--radius-md); margin-bottom: 16px; }
+        .score-value { font-size: 42px; font-weight: 700; margin-bottom: 6px; }
+        .score-value.perfect { color: var(--accent-success); }
+        .score-value.good { color: var(--accent-primary); }
+        .score-value.poor { color: var(--accent-error); }
+        .score-label { font-size: 12px; color: var(--text-secondary); }
+        .test-list { display: flex; flex-direction: column; gap: 6px; }
+        .test-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            font-size: 12px;
+        }
+        .test-item.pass { border-left: 3px solid var(--accent-success); }
+        .test-item.fail { border-left: 3px solid var(--accent-error); }
+        .guide-step {
+            padding: 16px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            margin-bottom: 10px;
+            border-left: 3px solid var(--accent-primary);
+        }
+        .guide-step-title { font-size: 13px; font-weight: 600; color: var(--accent-primary); margin-bottom: 6px; }
+        .guide-step-content { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            transition: opacity 0.5s ease;
+        }
+        .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 16px; font-size: 13px; color: var(--text-secondary); }
+        .progress-bar {
+            width: 180px;
+            height: 3px;
+            background: var(--bg-tertiary);
+            border-radius: 2px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--gradient-1);
+            border-radius: 2px;
+            animation: progress 2s ease-in-out infinite;
+        }
+        @keyframes progress { 0% { width: 0%; margin-left: 0; } 50% { width: 70%; margin-left: 15%; } 100% { width: 0%; margin-left: 100%; } }
+        
+        .toggle-btn {
+            padding: 4px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        .toggle-btn.active {
+            background: var(--accent-secondary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+        
+        @media (max-width: 1200px) {
+            .editor-wrapper { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 1024px) {
+            .main-content { grid-template-columns: 1fr; }
+            .output-section { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在初始化学习平台...</div>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+    </div>
+
+    <div class="app-container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">🧠</div>
+                <div>
+                    <div class="logo-text">MiniMind CS336 学习平台</div>
+                    <div class="logo-subtitle">Stanford CS336: Language Modeling from Scratch</div>
+                </div>
+            </div>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="completedCount">0</div>
+                    <div class="stat-label">已完成</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="totalCount">50</div>
+                    <div class="stat-label">总练习</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="sidebar-card">
+                    <div class="sidebar-header">
+                        <span>📚</span>
+                        <span>练习列表</span>
+                    </div>
+                    <div class="category-filter" id="categoryFilter"></div>
+                    <ul class="exercise-list" id="exerciseList"></ul>
+                </div>
+                <div class="sidebar-card">
+                    <div class="sidebar-header"><span>📊</span><span>学习进度</span></div>
+                    <div style="padding: 12px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="font-size: 11px; color: var(--text-secondary);">完成进度</span>
+                            <span style="font-size: 11px; color: var(--accent-success);" id="progressPercent">0%</span>
+                        </div>
+                        <div style="height: 5px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+                            <div id="progressBar" style="height: 100%; background: var(--gradient-4); border-radius: 3px; width: 0%; transition: width 0.5s ease;"></div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="editor-section">
+                <div class="editor-wrapper">
+                    <!-- 讲解面板 -->
+                    <div class="explanation-panel" id="explanationPanel">
+                        <div class="explanation-header">
+                            <div class="explanation-title">
+                                <span>📖</span>
+                                <span>代码讲解</span>
+                            </div>
+                            <div style="display: flex; gap: 4px;">
+                                <button class="toggle-btn active" onclick="toggleExplanationView('overview')">概览</button>
+                                <button class="toggle-btn" onclick="toggleExplanationView('linebyline')">逐行</button>
+                            </div>
+                        </div>
+                        <div class="explanation-content" id="explanationContent">
+                            <p style="color: var(--text-muted); text-align: center; padding: 40px 20px;">
+                                选择一个练习开始学习<br>
+                                这里会显示详细的代码讲解
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <!-- 代码编辑器 -->
+                    <div class="editor-card" id="editorCard">
+                        <div class="editor-toolbar">
+                            <div class="toolbar-left">
+                                <div class="file-tab"><span>🐍</span><span>main.py</span></div>
+                                <div class="status-badge">
+                                    <span class="status-dot" id="statusDot"></span>
+                                    <span id="statusText">初始化中...</span>
+                                </div>
+                            </div>
+                            <div class="toolbar-buttons">
+                                <button class="btn btn-secondary" onclick="resetCode()" title="重置">🔄</button>
+                                <button class="btn btn-secondary" onclick="showHint()" title="提示">💡</button>
+                                <button class="btn btn-secondary" onclick="showReference()" title="参考">📋</button>
+                                <button class="btn btn-primary" id="runBtn" onclick="runCode()">▶ 运行</button>
+                            </div>
+                        </div>
+                        <div class="editor-container">
+                            <div class="line-numbers" id="lineNumbers">1</div>
+                            <textarea class="code-editor" id="codeEditor" placeholder="# 在此输入 Python 代码"></textarea>
+                        </div>
+                        <div class="template-bar">
+                            <span style="color: var(--text-muted); font-size: 10px;">快速插入:</span>
+                            <button class="template-btn" onclick="insertTemplate('class')">class</button>
+                            <button class="template-btn" onclick="insertTemplate('def')">def</button>
+                            <button class="template-btn" onclick="insertTemplate('for')">for</button>
+                            <button class="template-btn" onclick="insertTemplate('if')">if</button>
+                            <button class="template-btn" onclick="insertTemplate('import')">import</button>
+                        </div>
+                        <div class="editor-footer">
+                            <span id="cursorPosition">行 1, 列 1</span>
+                            <span>Python 3.11 | UTF-8</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="output-section">
+                    <div class="output-card">
+                        <div class="output-header">
+                            <div class="output-title"><span>📥</span><span>程序输入</span></div>
+                        </div>
+                        <textarea class="input-area" id="inputBox" placeholder="每行一个输入值"></textarea>
+                    </div>
+                    <div class="output-card">
+                        <div class="output-header">
+                            <div class="output-title"><span>📤</span><span>运行输出</span></div>
+                            <span class="output-time" id="runTime">-</span>
+                        </div>
+                        <div class="output-area" id="outputBox">点击"运行"执行代码...</div>
+                    </div>
+                </div>
+
+                <div class="shortcuts-bar">
+                    <div class="shortcut-item"><kbd>Ctrl+Enter</kbd> 运行</div>
+                    <div class="shortcut-item"><kbd>Ctrl+D</kbd> 检测</div>
+                    <div class="shortcut-item"><kbd>Ctrl+H</kbd> 提示</div>
+                    <div class="shortcut-item"><kbd>Esc</kbd> 关闭</div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="refModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title"><span>📋</span> 参考答案</div>
+                <button class="modal-close" onclick="closeModal('refModal')">&times;</button>
+            </div>
+            <div class="modal-body"><pre class="compare-code" id="refCode"></pre></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('refModal')">关闭</button>
+                <button class="btn btn-primary" onclick="copyReference(); closeModal('refModal');">复制到编辑器</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="hintModal">
+        <div class="modal" style="max-width: 550px;">
+            <div class="modal-header">
+                <div class="modal-title"><span>💡</span> 代码提示</div>
+                <button class="modal-close" onclick="closeModal('hintModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="hintContent"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('hintModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+const exercises = [
+    // ==================== Python基础 ====================
+    { id: 'py_hello', title: 'Hello World', category: 'Python基础', difficulty: 1, type: 'code',
+        template: `# 你的第一个Python程序
+# print()函数用于输出文本到控制台
+print("Hello, MiniMind!")`,
+        reference: `print("Hello, MiniMind!")`,
+        tests: [{ type: 'output_contains', value: 'Hello', desc: '输出包含Hello' }],
+        hints: ['print()函数用于输出文本', '字符串需要用引号包裹'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '掌握Python最基本的输出操作，理解print()函数的使用方法。'
+                },
+                {
+                    title: '📝 核心概念',
+                    content: `
+<ul>
+<li><strong>print()</strong> - Python内置的输出函数，将内容显示在屏幕上</li>
+<li><strong>字符串</strong> - 用引号包裹的文本，如 "Hello" 或 'Hello'</li>
+<li><strong>注释</strong> - 以 # 开头，用于解释代码，不会被执行</li>
+</ul>`
+                },
+                {
+                    title: '💡 实现思路',
+                    content: `
+<ol>
+<li>使用 print() 函数</li>
+<li>在括号内放入要输出的字符串</li>
+<li>字符串用双引号或单引号包裹</li>
+</ol>`
+                }
+            ],
+            lineByLine: [
+                { line: 1, text: '注释行，解释代码功能，Python会忽略#后面的内容' },
+                { line: 2, text: '另一个注释，说明print函数的作用' },
+                { line: 3, text: '调用print函数，输出字符串 "Hello, MiniMind!" 到控制台' }
+            ],
+            keyPoints: [
+                'print()是Python最常用的函数之一',
+                '字符串可以用双引号"或单引号\'包裹',
+                '注释让代码更易读，是良好编程习惯'
+            ],
+            commonMistakes: [
+                '忘记引号：print(Hello) ❌',
+                '中文引号：print("Hello") ❌',
+                '括号不匹配：print "Hello" ❌'
+            ]
+        }
+    },
+    { id: 'py_variables', title: '变量与数据类型', category: 'Python基础', difficulty: 1, type: 'code',
+        template: `# 变量定义与数据类型
+# Python是动态类型语言，不需要声明类型
+
+# 整数 (int)
+age = 25
+
+# 浮点数 (float)
+height = 1.75
+
+# 字符串 (str)
+name = "MiniMind"
+
+# 布尔值 (bool)
+is_student = True
+
+# 列表 (list)
+scores = [90, 85, 92, 88]
+
+# 字典 (dict)
+person = {"name": name, "age": age}
+
+# 打印变量类型
+print(f"age的类型: {type(age).__name__}")
+print(f"height的类型: {type(height).__name__}")
+print(f"scores: {scores}")`,
+        reference: `age = 25
+height = 1.75
+name = "MiniMind"
+is_student = True
+scores = [90, 85, 92, 88]
+person = {"name": name, "age": age}
+
+print(f"age的类型: {type(age).__name__}")
+print(f"height的类型: {type(height).__name__}")
+print(f"scores: {scores}")`,
+        tests: [{ type: 'has_dict', desc: '使用了字典' }],
+        hints: ['type()函数返回变量类型', 'f-string用于格式化输出'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解Python中的变量定义和基本数据类型。'
+                },
+                {
+                    title: '📝 核心数据类型',
+                    content: `
+<div class="code-block">
+<span class="keyword">int</span>    - 整数，如 25, -10, 0
+<span class="keyword">float</span>  - 浮点数，如 1.75, 3.14
+<span class="keyword">str</span>    - 字符串，如 "Hello"
+<span class="keyword">bool</span>   - 布尔值，True 或 False
+<span class="keyword">list</span>   - 列表，如 [1, 2, 3]
+<span class="keyword">dict</span>   - 字典，如 {"key": "value"}
+</div>`
+                },
+                {
+                    title: '💡 动态类型',
+                    content: `Python是动态类型语言，变量不需要预先声明类型，类型在运行时自动确定。`
+                }
+            ],
+            lineByLine: [
+                { line: 4, text: '定义整数变量age，值为25' },
+                { line: 7, text: '定义浮点数变量height，值为1.75' },
+                { line: 10, text: '定义字符串变量name，值为"MiniMind"' },
+                { line: 13, text: '定义布尔值变量is_student，值为True' },
+                { line: 16, text: '定义列表scores，包含4个整数元素' },
+                { line: 19, text: '定义字典person，包含name和age两个键值对' },
+                { line: 22, text: '使用f-string格式化输出，type()获取变量类型' }
+            ],
+            keyPoints: [
+                '变量名要有意义，遵循命名规范',
+                'type()函数可以查看变量类型',
+                'f-string是Python 3.6+的格式化语法'
+            ]
+        }
+    },
+    { id: 'py_list', title: '列表操作', category: 'Python基础', difficulty: 1, type: 'code',
+        template: `# 列表操作练习
+numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# TODO: 完成以下操作
+# 1. 计算总和
+total = sum(numbers)
+
+# 2. 找出最大值
+maximum = max(numbers)
+
+# 3. 过滤偶数
+evens = [n for n in numbers if n % 2 == 0]
+
+# 4. 列表推导式：平方所有数
+squares = [n ** 2 for n in numbers]
+
+print(f"总和: {total}")
+print(f"最大值: {maximum}")
+print(f"偶数: {evens}")
+print(f"平方: {squares}")`,
+        reference: `numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+total = sum(numbers)
+maximum = max(numbers)
+evens = [n for n in numbers if n % 2 == 0]
+squares = [n ** 2 for n in numbers]
+
+print(f"总和: {total}")
+print(f"最大值: {maximum}")
+print(f"偶数: {evens}")
+print(f"平方: {squares}")`,
+        tests: [{ type: 'has_sum', desc: '使用了sum或循环' }],
+        hints: ['sum()求和', 'max()找最大值', '列表推导式: [x for x in list if condition]'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '掌握列表的常用操作和列表推导式语法。'
+                },
+                {
+                    title: '📝 常用列表函数',
+                    content: `
+<div class="code-block">
+<span class="function">sum</span>(list)     - 求和
+<span class="function">max</span>(list)     - 最大值
+<span class="function">min</span>(list)     - 最小值
+<span class="function">len</span>(list)     - 长度
+<span class="function">sorted</span>(list) - 排序
+</div>`
+                },
+                {
+                    title: '💡 列表推导式',
+                    content: `
+<div class="highlight-box">
+<strong>语法：</strong>[表达式 for 变量 in 列表 if 条件]
+<br><br>
+<strong>示例：</strong>
+[x**2 for x in range(10)]           # 平方
+[x for x in list if x > 0]          # 过滤
+[x*2 if x > 0 else x for x in list] # 条件表达式
+</div>`
+                }
+            ],
+            lineByLine: [
+                { line: 2, text: '创建包含1-10的列表' },
+                { line: 5, text: 'sum()函数计算列表所有元素的和' },
+                { line: 8, text: 'max()函数找出列表中的最大值' },
+                { line: 11, text: '列表推导式过滤偶数：n % 2 == 0 判断是否为偶数' },
+                { line: 14, text: '列表推导式计算平方：n ** 2 是n的平方' }
+            ],
+            keyPoints: [
+                '列表推导式是Python的特色语法',
+                '比传统循环更简洁高效',
+                '可以结合if条件进行过滤'
+            ]
+        }
+    },
+    { id: 'py_func', title: '函数定义', category: 'Python基础', difficulty: 2, type: 'code',
+        template: `# 函数定义与参数
+def greet(name, greeting="你好"):
+    """问候函数
+    
+    Args:
+        name: 名字
+        greeting: 问候语，默认"你好"
+    
+    Returns:
+        问候字符串
+    """
+    return f"{greeting}, {name}!"
+
+def calculate(a, b, operation="add"):
+    """计算函数，支持多种操作"""
+    operations = {
+        "add": a + b,
+        "subtract": a - b,
+        "multiply": a * b,
+        "divide": a / b if b != 0 else None
+    }
+    return operations.get(operation)
+
+# 测试
+print(greet("MiniMind"))
+print(greet("World", "Hello"))
+print(calculate(10, 5))
+print(calculate(10, 5, "multiply"))`,
+        reference: `def greet(name, greeting="你好"):
+    return f"{greeting}, {name}!"
+
+def calculate(a, b, operation="add"):
+    operations = {
+        "add": a + b,
+        "subtract": a - b,
+        "multiply": a * b,
+        "divide": a / b if b != 0 else None
+    }
+    return operations.get(operation)
+
+print(greet("MiniMind"))
+print(greet("World", "Hello"))
+print(calculate(10, 5))
+print(calculate(10, 5, "multiply"))`,
+        tests: [{ type: 'has_function', value: 'greet', desc: '定义了greet函数' }],
+        hints: ['默认参数: def func(a, b=1)', '字典映射多种操作'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '掌握Python函数的定义、参数和返回值。'
+                },
+                {
+                    title: '📝 函数定义语法',
+                    content: `
+<div class="code-block">
+<span class="keyword">def</span> <span class="function">函数名</span>(参数):
+    <span class="comment">"""文档字符串"""</span>
+    函数体
+    <span class="keyword">return</span> 返回值
+</div>`
+                },
+                {
+                    title: '💡 参数类型',
+                    content: `
+<ul>
+<li><strong>位置参数</strong> - 必须提供，按顺序传递</li>
+<li><strong>默认参数</strong> - 有默认值，可省略</li>
+<li><strong>*args</strong> - 可变位置参数</li>
+<li><strong>**kwargs</strong> - 可变关键字参数</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 1, text: '使用def关键字定义函数，greeting="你好"是默认参数' },
+                { line: 2, text: '文档字符串，说明函数的功能和参数' },
+                { line: 12, text: 'return语句返回结果，f-string格式化字符串' },
+                { line: 15, text: '定义计算函数，使用字典映射不同操作' },
+                { line: 17, text: '字典的值可以是表达式，三元运算符处理除零' },
+                { line: 23, text: 'dict.get(key)安全获取值，不存在返回None' }
+            ],
+            keyPoints: [
+                '函数是代码复用的基本单位',
+                '默认参数让函数更灵活',
+                '文档字符串是良好的编程习惯'
+            ]
+        }
+    },
+
+    // ==================== Transformer组件 ====================
+    { id: 'linear', title: 'Linear线性层', category: 'Transformer组件', difficulty: 3, type: 'code',
+        template: `# CS336: 实现Linear层
+import numpy as np
+
+class Linear:
+    """线性变换层: y = Wx (无偏置)
+    
+    这是神经网络最基本的层，执行仿射变换。
+    在Transformer中广泛使用于FFN和投影层。
+    """
+    
+    def __init__(self, in_features, out_features):
+        """初始化线性层
+        
+        使用Xavier初始化，保持输入输出的方差一致
+        有助于深层网络的训练稳定性
+        
+        Args:
+            in_features: 输入特征维度
+            out_features: 输出特征维度
+        """
+        self.in_features = in_features
+        self.out_features = out_features
+        
+        # Xavier初始化
+        std = np.sqrt(2.0 / (in_features + out_features))
+        self.weight = np.random.randn(out_features, in_features) * std
+    
+    def forward(self, x):
+        """前向传播: y = x @ W.T
+        
+        Args:
+            x: 输入张量 (batch, in_features)
+        Returns:
+            输出张量 (batch, out_features)
+        """
+        return np.dot(x, self.weight.T)
+    
+    def parameters(self):
+        """返回参数字典"""
+        return {"weight": self.weight}
+
+# 测试
+linear = Linear(10, 5)
+x = np.random.randn(2, 10)
+out = linear.forward(x)
+print(f"输入形状: {x.shape}, 输出形状: {out.shape}")`,
+        reference: `import numpy as np
+
+class Linear:
+    def __init__(self, in_features, out_features):
+        self.in_features = in_features
+        self.out_features = out_features
+        std = np.sqrt(2.0 / (in_features + out_features))
+        self.weight = np.random.randn(out_features, in_features) * std
+    
+    def forward(self, x):
+        return np.dot(x, self.weight.T)
+    
+    def parameters(self):
+        return {"weight": self.weight}
+
+linear = Linear(10, 5)
+x = np.random.randn(2, 10)
+out = linear.forward(x)
+print(f"输入形状: {x.shape}, 输出形状: {out.shape}")`,
+        tests: [{ type: 'has_class', value: 'Linear', desc: '定义了Linear类' }],
+        hints: ['Xavier初始化: std = sqrt(2/(in+out))', 'forward: x @ W.T'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解并实现神经网络中最基础的线性变换层。'
+                },
+                {
+                    title: '📐 数学原理',
+                    content: `
+<div class="code-block">
+y = Wx + b
+
+其中:
+- x: 输入向量 (in_features,)
+- W: 权重矩阵 (out_features, in_features)
+- b: 偏置向量 (out_features,)
+- y: 输出向量 (out_features,)
+</div>`
+                },
+                {
+                    title: '💡 Xavier初始化',
+                    content: `
+<div class="highlight-box">
+<strong>为什么需要好的初始化？</strong>
+<br>如果权重太大 → 激活值爆炸 → 梯度爆炸
+<br>如果权重太小 → 激活值消失 → 梯度消失
+<br><br>
+<strong>Xavier初始化</strong>保持输入输出的方差一致:
+<br>std = sqrt(2 / (fan_in + fan_out))
+</div>`
+                },
+                {
+                    title: '🔧 在Transformer中的应用',
+                    content: `
+<ul>
+<li><strong>QKV投影</strong> - 将输入投影到Query, Key, Value空间</li>
+<li><strong>输出投影</strong> - 注意力输出投影</li>
+<li><strong>FFN</strong> - 前馈网络的两层线性变换</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 3, text: '定义Linear类，封装线性变换的参数和计算' },
+                { line: 17, text: '保存输入输出维度，便于后续使用' },
+                { line: 20, text: 'Xavier初始化：标准差 = sqrt(2/(输入维度+输出维度))' },
+                { line: 21, text: '权重形状为(out_features, in_features)，便于矩阵乘法' },
+                { line: 28, text: '前向传播：输出 = 输入 @ 权重转置' },
+                { line: 29, text: 'np.dot是矩阵乘法，.T是转置操作' }
+            ],
+            keyPoints: [
+                '线性层是神经网络的基础构建块',
+                '权重初始化影响训练稳定性',
+                '矩阵乘法是核心计算操作'
+            ]
+        }
+    },
+    { id: 'softmax_impl', title: 'Softmax实现', category: 'Transformer组件', difficulty: 2, type: 'code',
+        template: `# CS336: 实现数值稳定的Softmax
+import numpy as np
+
+def softmax(x, axis=-1):
+    """数值稳定的softmax实现
+    
+    Softmax将向量转换为概率分布:
+    - 所有元素为正
+    - 所有元素之和为1
+    
+    关键技巧: 减去最大值防止指数溢出
+    
+    Args:
+        x: 输入数组
+        axis: 计算softmax的轴
+    """
+    # 减去最大值，防止exp溢出
+    x_max = np.max(x, axis=axis, keepdims=True)
+    x_shifted = x - x_max
+    
+    # 计算指数
+    exp_x = np.exp(x_shifted)
+    
+    # 归一化
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+def log_softmax(x, axis=-1):
+    """数值稳定的log_softmax
+    
+    用于计算交叉熵损失，避免log(0)
+    
+    log_softmax(x) = x - max(x) - log(sum(exp(x - max(x))))
+    """
+    x_max = np.max(x, axis=axis, keepdims=True)
+    x_shifted = x - x_max
+    log_sum_exp = np.log(np.sum(np.exp(x_shifted), axis=axis, keepdims=True))
+    return x_shifted - log_sum_exp
+
+# 测试
+x = np.array([[1.0, 2.0, 3.0], [1000.0, 1001.0, 1002.0]])
+print("Softmax输出:")
+print(softmax(x))
+print("\\nLog-Softmax输出:")
+print(log_softmax(x))`,
+        reference: `import numpy as np
+
+def softmax(x, axis=-1):
+    x_max = np.max(x, axis=axis, keepdims=True)
+    x_shifted = x - x_max
+    exp_x = np.exp(x_shifted)
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+def log_softmax(x, axis=-1):
+    x_max = np.max(x, axis=axis, keepdims=True)
+    x_shifted = x - x_max
+    log_sum_exp = np.log(np.sum(np.exp(x_shifted), axis=axis, keepdims=True))
+    return x_shifted - log_sum_exp
+
+x = np.array([[1.0, 2.0, 3.0], [1000.0, 1001.0, 1002.0]])
+print("Softmax输出:")
+print(softmax(x))
+print("\\nLog-Softmax输出:")
+print(log_softmax(x))`,
+        tests: [{ type: 'has_function', value: 'softmax', desc: '定义了softmax函数' }],
+        hints: ['减去最大值防止溢出', 'log_softmax = x - max(x) - log(sum(exp(x - max(x))))'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解Softmax函数并实现数值稳定的版本。'
+                },
+                {
+                    title: '📐 数学公式',
+                    content: `
+<div class="code-block">
+softmax(x_i) = exp(x_i) / Σ exp(x_j)
+
+性质:
+- 所有输出在 (0, 1) 之间
+- 所有输出之和为 1
+- 最大值位置不变
+</div>`
+                },
+                {
+                    title: '⚠️ 数值稳定性问题',
+                    content: `
+<div class="warning-box">
+<strong>问题：</strong>当x很大时，exp(x)会溢出
+<br>exp(1000) ≈ 10^434，超出float64范围
+<br><br>
+<strong>解决方案：</strong>减去最大值
+<br>softmax(x) = softmax(x - max(x))
+<br>因为分子分母同乘exp(-max(x))
+</div>`
+                },
+                {
+                    title: '💡 为什么需要Log-Softmax',
+                    content: `
+<ul>
+<li>计算交叉熵时需要log概率</li>
+<li>直接对softmax结果取log可能得到log(0)=-inf</li>
+<li>log_softmax数值更稳定</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 20, text: '找到最大值，keepdims=True保持维度便于广播' },
+                { line: 21, text: '减去最大值，这是数值稳定的关键' },
+                { line: 24, text: '计算指数，此时最大值为0，exp(0)=1不会溢出' },
+                { line: 27, text: '归一化：每个元素除以总和' },
+                { line: 36, text: 'log_softmax的数值稳定实现' },
+                { line: 38, text: 'log(sum(exp(...)))是核心计算' }
+            ],
+            keyPoints: [
+                'Softmax将任意向量转为概率分布',
+                '减去最大值是数值稳定的技巧',
+                'Log-Softmax用于损失函数计算'
+            ]
+        }
+    },
+    { id: 'layernorm', title: 'LayerNorm实现', category: 'Transformer组件', difficulty: 3, type: 'code',
+        template: `# CS336: 实现Layer Normalization
+import numpy as np
+
+class LayerNorm:
+    """层归一化
+    
+    对每个样本的所有特征进行归一化
+    与BatchNorm不同，LayerNorm不依赖batch size
+    
+    在Transformer中，LayerNorm用于:
+    1. 稳定训练过程
+    2. 使模型对输入尺度不敏感
+    """
+    
+    def __init__(self, normalized_shape, eps=1e-5):
+        """初始化
+        
+        Args:
+            normalized_shape: 需要归一化的维度大小
+            eps: 防止除零的小常数
+        """
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        
+        # 可学习参数
+        self.gamma = np.ones(normalized_shape)  # 缩放
+        self.beta = np.zeros(normalized_shape)  # 平移
+    
+    def forward(self, x):
+        """前向传播
+        
+        公式: y = (x - mean) / sqrt(var + eps) * gamma + beta
+        
+        Args:
+            x: (batch, ..., normalized_shape)
+        Returns:
+            归一化后的张量
+        """
+        # 计算均值和方差（沿最后一维）
+        mean = np.mean(x, axis=-1, keepdims=True)
+        var = np.var(x, axis=-1, keepdims=True)
+        
+        # 归一化
+        x_norm = (x - mean) / np.sqrt(var + self.eps)
+        
+        # 缩放和平移
+        return self.gamma * x_norm + self.beta
+
+# 测试
+ln = LayerNorm(64)
+x = np.random.randn(2, 10, 64)
+out = ln.forward(x)
+print(f"输入均值: {x.mean():.4f}, 方差: {x.var():.4f}")
+print(f"输出均值: {out.mean():.4f}, 方差: {out.var():.4f}")`,
+        reference: `import numpy as np
+
+class LayerNorm:
+    def __init__(self, normalized_shape, eps=1e-5):
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        self.gamma = np.ones(normalized_shape)
+        self.beta = np.zeros(normalized_shape)
+    
+    def forward(self, x):
+        mean = np.mean(x, axis=-1, keepdims=True)
+        var = np.var(x, axis=-1, keepdims=True)
+        x_norm = (x - mean) / np.sqrt(var + self.eps)
+        return self.gamma * x_norm + self.beta
+
+ln = LayerNorm(64)
+x = np.random.randn(2, 10, 64)
+out = ln.forward(x)
+print(f"输入均值: {x.mean():.4f}, 方差: {x.var():.4f}")
+print(f"输出均值: {out.mean():.4f}, 方差: {out.var():.4f}")`,
+        tests: [{ type: 'has_class', value: 'LayerNorm', desc: '定义了LayerNorm类' }],
+        hints: ['对最后一维归一化', 'gamma * normalized + beta'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解LayerNorm的原理和实现。'
+                },
+                {
+                    title: '📐 LayerNorm vs BatchNorm',
+                    content: `
+<div class="code-block">
+BatchNorm: 对每个特征，跨样本归一化
+LayerNorm: 对每个样本，跨特征归一化
+
+LayerNorm优势:
+- 不依赖batch size
+- 适用于序列数据
+- 训练/推理行为一致
+</div>`
+                },
+                {
+                    title: '💡 为什么Transformer用LayerNorm',
+                    content: `
+<ul>
+<li><strong>序列长度可变</strong> - BatchNorm难以处理</li>
+<li><strong>小batch训练</strong> - BatchNorm统计不准确</li>
+<li><strong>推理一致性</strong> - 无需维护running stats</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 26, text: 'gamma: 缩放参数，初始化为1' },
+                { line: 27, text: 'beta: 平移参数，初始化为0' },
+                { line: 38, text: '计算最后一维的均值' },
+                { line: 39, text: '计算最后一维的方差' },
+                { line: 42, text: '归一化：(x - mean) / sqrt(var + eps)' },
+                { line: 45, text: '应用可学习的缩放和平移' }
+            ],
+            keyPoints: [
+                'LayerNorm对每个样本独立归一化',
+                'gamma和beta是可学习参数',
+                'eps防止除零错误'
+            ]
+        }
+    },
+    { id: 'attention_impl', title: '自注意力实现', category: 'Transformer组件', difficulty: 4, type: 'code',
+        template: `# CS336: 实现缩放点积自注意力
+import numpy as np
+
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    """缩放点积注意力
+    
+    这是Transformer的核心计算
+    
+    公式: Attention(Q,K,V) = softmax(QK^T / √d_k) V
+    
+    Args:
+        Q: (batch, seq_len, d_k) 查询矩阵
+        K: (batch, seq_len, d_k) 键矩阵  
+        V: (batch, seq_len, d_v) 值矩阵
+        mask: 可选的掩码矩阵
+    
+    Returns:
+        output: 注意力输出
+        attention_weights: 注意力权重
+    """
+    d_k = Q.shape[-1]
+    
+    # 1. 计算注意力分数: QK^T / sqrt(d_k)
+    scores = np.matmul(Q, K.transpose(0, 2, 1)) / np.sqrt(d_k)
+    
+    # 2. 应用掩码（如果有）
+    if mask is not None:
+        scores = np.where(mask == 0, -1e9, scores)
+    
+    # 3. Softmax归一化
+    exp_scores = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
+    attention_weights = exp_scores / exp_scores.sum(axis=-1, keepdims=True)
+    
+    # 4. 与V相乘得到输出
+    output = np.matmul(attention_weights, V)
+    
+    return output, attention_weights
+
+# 测试
+batch, seq_len, d_k = 2, 5, 8
+Q = np.random.randn(batch, seq_len, d_k)
+K = np.random.randn(batch, seq_len, d_k)
+V = np.random.randn(batch, seq_len, d_k)
+
+output, weights = scaled_dot_product_attention(Q, K, V)
+print(f"输出形状: {output.shape}")
+print(f"权重形状: {weights.shape}")
+print(f"权重和: {weights.sum(axis=-1)}")`,
+        reference: `import numpy as np
+
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    d_k = Q.shape[-1]
+    scores = np.matmul(Q, K.transpose(0, 2, 1)) / np.sqrt(d_k)
+    if mask is not None:
+        scores = np.where(mask == 0, -1e9, scores)
+    exp_scores = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
+    attention_weights = exp_scores / exp_scores.sum(axis=-1, keepdims=True)
+    output = np.matmul(attention_weights, V)
+    return output, attention_weights
+
+batch, seq_len, d_k = 2, 5, 8
+Q = np.random.randn(batch, seq_len, d_k)
+K = np.random.randn(batch, seq_len, d_k)
+V = np.random.randn(batch, seq_len, d_k)
+output, weights = scaled_dot_product_attention(Q, K, V)
+print(f"输出形状: {output.shape}")
+print(f"权重形状: {weights.shape}")
+print(f"权重和: {weights.sum(axis=-1)}")`,
+        tests: [{ type: 'has_function', value: 'scaled_dot_product_attention', desc: '定义了注意力函数' }],
+        hints: ['scores = Q @ K.T / sqrt(d_k)', 'mask位置设为-1e9', 'softmax后与V相乘'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解并实现Transformer的核心：缩放点积注意力。'
+                },
+                {
+                    title: '📐 注意力计算流程',
+                    content: `
+<div class="code-block">
+1. QK^T     → 计算相关性分数
+2. /√d_k    → 缩放防止梯度消失
+3. mask     → 可选，屏蔽某些位置
+4. softmax  → 转为概率分布
+5. @V       → 加权求和
+</div>`
+                },
+                {
+                    title: '💡 为什么除以√d_k',
+                    content: `
+<div class="highlight-box">
+当d_k很大时，点积的结果也会很大。
+这会导致softmax的输出接近one-hot向量，
+梯度会变得非常小，影响训练。
+<br><br>
+除以√d_k可以将点积值保持在合理范围。
+</div>`
+                },
+                {
+                    title: '🔧 掩码的作用',
+                    content: `
+<ul>
+<li><strong>Padding Mask</strong> - 屏蔽填充位置</li>
+<li><strong>Causal Mask</strong> - 防止看到未来信息</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 24, text: '获取维度d_k，用于缩放' },
+                { line: 27, text: '计算QK^T，得到注意力分数矩阵' },
+                { line: 27, text: '除以√d_k进行缩放' },
+                { line: 30, text: '应用掩码：将mask=0的位置设为-1e9' },
+                { line: 34, text: '数值稳定的softmax实现' },
+                { line: 37, text: '注意力权重与V相乘，得到加权输出' }
+            ],
+            keyPoints: [
+                '注意力是Transformer的核心创新',
+                '缩放因子防止梯度消失',
+                '掩码用于处理变长序列和自回归生成'
+            ]
+        }
+    },
+
+    // ==================== 训练优化 ====================
+    { id: 'cross_entropy', title: '交叉熵损失', category: '训练优化', difficulty: 2, type: 'code',
+        template: `# CS336: 实现交叉熵损失
+import numpy as np
+
+def cross_entropy_loss(logits, targets):
+    """交叉熵损失函数
+    
+    用于分类任务，衡量预测分布与真实分布的差异
+    
+    公式: Loss = -log(p_target) = -log(softmax(logits)[target])
+    
+    Args:
+        logits: (batch, vocab_size) 未归一化的预测值
+        targets: (batch,) 目标类别索引
+    
+    Returns:
+        loss: 标量损失值
+    """
+    batch_size = logits.shape[0]
+    
+    # Log-softmax (数值稳定)
+    max_logits = np.max(logits, axis=-1, keepdims=True)
+    log_sum_exp = np.log(np.sum(np.exp(logits - max_logits), axis=-1, keepdims=True))
+    log_probs = logits - max_logits - log_sum_exp
+    
+    # 选择目标类别的log概率
+    target_log_probs = log_probs[np.arange(batch_size), targets]
+    
+    # 返回平均负log概率
+    return -np.mean(target_log_probs)
+
+# 测试
+logits = np.array([[2.0, 1.0, 0.1], [0.1, 2.0, 1.0]])
+targets = np.array([0, 1])
+
+loss = cross_entropy_loss(logits, targets)
+print(f"交叉熵损失: {loss:.4f}")
+
+# 计算困惑度
+perplexity = np.exp(loss)
+print(f"困惑度: {perplexity:.4f}")`,
+        reference: `import numpy as np
+
+def cross_entropy_loss(logits, targets):
+    batch_size = logits.shape[0]
+    max_logits = np.max(logits, axis=-1, keepdims=True)
+    log_sum_exp = np.log(np.sum(np.exp(logits - max_logits), axis=-1, keepdims=True))
+    log_probs = logits - max_logits - log_sum_exp
+    target_log_probs = log_probs[np.arange(batch_size), targets]
+    return -np.mean(target_log_probs)
+
+logits = np.array([[2.0, 1.0, 0.1], [0.1, 2.0, 1.0]])
+targets = np.array([0, 1])
+loss = cross_entropy_loss(logits, targets)
+print(f"交叉熵损失: {loss:.4f}")
+perplexity = np.exp(loss)
+print(f"困惑度: {perplexity:.4f}")`,
+        tests: [{ type: 'has_function', value: 'cross_entropy_loss', desc: '定义了交叉熵损失函数' }],
+        hints: ['log_softmax = logits - max - log(sum(exp))', '取目标位置的log概率'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解交叉熵损失的计算和数值稳定实现。'
+                },
+                {
+                    title: '📐 数学公式',
+                    content: `
+<div class="code-block">
+CrossEntropy = -Σ y_true * log(y_pred)
+
+对于one-hot标签:
+Loss = -log(y_pred[target])
+
+困惑度 = exp(Loss)
+</div>`
+                },
+                {
+                    title: '💡 为什么用交叉熵',
+                    content: `
+<ul>
+<li><strong>概率解释</strong> - 最大化正确类别的概率</li>
+<li><strong>梯度良好</strong> - softmax+交叉熵梯度简洁</li>
+<li><strong>信息论</strong> - 衡量两个分布的差异</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 20, text: '获取batch大小' },
+                { line: 23, text: '数值稳定的log-softmax计算' },
+                { line: 26, text: '使用高级索引选择目标位置的log概率' },
+                { line: 29, text: '返回平均负log概率' }
+            ],
+            keyPoints: [
+                '交叉熵是分类任务的标准损失',
+                '数值稳定性很重要',
+                '困惑度可以直观理解模型质量'
+            ]
+        }
+    },
+    { id: 'lr_schedule', title: '学习率调度', category: '训练优化', difficulty: 3, type: 'code',
+        template: `# CS336: 实现余弦学习率调度
+import math
+
+def cosine_lr_schedule(step, max_steps, warmup_steps, lr_max, lr_min=0):
+    """余弦退火学习率调度
+    
+    阶段1 (warmup): 学习率从0线性增加到lr_max
+    阶段2 (decay): 学习率按余弦曲线从lr_max衰减到lr_min
+    
+    这种调度方式在训练大模型时非常有效
+    
+    Args:
+        step: 当前步数
+        max_steps: 总训练步数
+        warmup_steps: 预热步数
+        lr_max: 最大学习率
+        lr_min: 最小学习率
+    
+    Returns:
+        当前学习率
+    """
+    # Warmup阶段
+    if step < warmup_steps:
+        return lr_max * step / warmup_steps
+    
+    # 余弦衰减阶段
+    progress = (step - warmup_steps) / (max_steps - warmup_steps)
+    return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
+
+# 可视化学习率变化
+max_steps = 10000
+warmup_steps = 500
+lr_max = 1e-3
+
+print("步数\\t学习率")
+for step in [0, 100, 500, 1000, 5000, 10000]:
+    lr = cosine_lr_schedule(step, max_steps, warmup_steps, lr_max)
+    print(f"{step}\\t{lr:.6f}")`,
+        reference: `import math
+
+def cosine_lr_schedule(step, max_steps, warmup_steps, lr_max, lr_min=0):
+    if step < warmup_steps:
+        return lr_max * step / warmup_steps
+    progress = (step - warmup_steps) / (max_steps - warmup_steps)
+    return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
+
+max_steps = 10000
+warmup_steps = 500
+lr_max = 1e-3
+
+print("步数\\t学习率")
+for step in [0, 100, 500, 1000, 5000, 10000]:
+    lr = cosine_lr_schedule(step, max_steps, warmup_steps, lr_max)
+    print(f"{step}\\t{lr:.6f}")`,
+        tests: [{ type: 'has_function', value: 'cosine_lr_schedule', desc: '定义了学习率调度函数' }],
+        hints: ['warmup: 线性增长', '之后: 余弦衰减'],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 学习目标',
+                    content: '理解学习率调度的重要性和余弦退火的实现。'
+                },
+                {
+                    title: '📐 学习率曲线',
+                    content: `
+<div class="code-block">
+Warmup阶段 (0 ~ warmup_steps):
+  lr = lr_max * step / warmup_steps
+  
+衰减阶段 (warmup_steps ~ max_steps):
+  lr = lr_min + 0.5*(lr_max-lr_min)*(1+cos(π*progress))
+</div>`
+                },
+                {
+                    title: '💡 为什么需要Warmup',
+                    content: `
+<div class="highlight-box">
+训练初期，模型参数随机初始化：
+<br>- 大学习率可能导致梯度爆炸
+<br>- 模型可能陷入不好的局部最优
+<br><br>
+Warmup让模型平稳度过初始阶段
+</div>`
+                },
+                {
+                    title: '🔧 为什么用余弦衰减',
+                    content: `
+<ul>
+<li>训练初期：学习率较大，快速探索</li>
+<li>训练中期：平稳下降</li>
+<li>训练后期：学习率小，精细调优</li>
+</ul>`
+                }
+            ],
+            lineByLine: [
+                { line: 28, text: 'Warmup阶段：线性增加学习率' },
+                { line: 32, text: '计算训练进度（0到1）' },
+                { line: 33, text: '余弦衰减：使用cos函数平滑降低学习率' }
+            ],
+            keyPoints: [
+                'Warmup稳定训练初期',
+                '余弦衰减平滑降低学习率',
+                '这是大模型训练的标准配置'
+            ]
+        }
+    },
+
+    // ==================== 自由练习 ====================
+    { id: 'free', title: '自由练习', category: '自由练习', difficulty: 1, type: 'code',
+        template: `# 自由练习区 - 编写任何Python代码
+print("Hello, MiniMind!")`,
+        reference: `print("Hello, MiniMind!")`,
+        tests: [],
+        explanation: {
+            overview: [
+                {
+                    title: '🎯 自由练习区',
+                    content: '在这里你可以自由编写任何Python代码进行实验和学习。'
+                },
+                {
+                    title: '💡 使用建议',
+                    content: `
+<ul>
+<li>尝试修改其他练习中的代码</li>
+<li>测试新的想法和算法</li>
+<li>验证你对概念的理解</li>
+</ul>`
+                }
+            ]
+        }
+    }
+];
+
+        let currentExercise = null;
+        let completedExercises = new Set();
+        let failedExercises = new Set();
+        let pyodideInstance = null;
+        let pyodideLoading = false;
+        let currentCategory = 'all';
+        let currentExplanationView = 'overview';
+
+        async function initPyodide() {
+            if (pyodideInstance) return pyodideInstance;
+            if (pyodideLoading) {
+                while (pyodideLoading) await new Promise(r => setTimeout(r, 100));
+                return pyodideInstance;
+            }
+            pyodideLoading = true;
+            
+            try {
+                if (typeof loadPyodide === 'undefined') {
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js';
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                }
+                
+                pyodideInstance = await loadPyodide({ 
+                    indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/"
+                });
+                await pyodideInstance.loadPackage(['numpy']);
+                
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                updateStatus('ready', 'Python 就绪');
+                document.getElementById('outputBox').textContent = '✓ Python 环境已就绪';
+                document.getElementById('outputBox').className = 'output-area success';
+                return pyodideInstance;
+            } catch (e) {
+                console.error('Pyodide加载失败:', e);
+                document.getElementById('loadingOverlay').classList.add('hidden');
+                updateStatus('ready', '模拟模式');
+                document.getElementById('outputBox').innerHTML = '⚠ Pyodide加载失败，已切换到模拟模式';
+                return null;
+            } finally {
+                pyodideLoading = false;
+            }
+        }
+
+        function init() {
+            renderCategoryFilter();
+            renderExerciseList();
+            setupEditor();
+            setupKeyboardShortcuts();
+            loadProgress();
+            if (exercises.length > 0) selectExercise(exercises[0].id);
+            initPyodide();
+        }
+
+        function renderCategoryFilter() {
+            const categories = [...new Set(exercises.map(e => e.category))];
+            const filter = document.getElementById('categoryFilter');
+            filter.innerHTML = `<button class="filter-btn active" onclick="filterCategory('all')">全部</button>` +
+                categories.map(c => `<button class="filter-btn" onclick="filterCategory('${c}')">${c}</button>`).join('');
+        }
+
+        function filterCategory(cat) {
+            currentCategory = cat;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent === (cat === 'all' ? '全部' : cat));
+            });
+            renderExerciseList();
+        }
+
+        function renderExerciseList() {
+            const filtered = currentCategory === 'all' ? exercises : exercises.filter(e => e.category === currentCategory);
+            document.getElementById('totalCount').textContent = exercises.length;
+            
+            const list = document.getElementById('exerciseList');
+            list.innerHTML = filtered.map((ex) => {
+                let statusClass = '';
+                if (completedExercises.has(ex.id)) statusClass = 'completed';
+                else if (failedExercises.has(ex.id)) statusClass = 'failed';
+                const globalIdx = exercises.findIndex(e => e.id === ex.id) + 1;
+                const typeBadge = ex.type ? `<span class="exercise-type-badge ${ex.type}">${getTypeLabel(ex.type)}</span>` : '';
+                return `<li class="exercise-item ${statusClass}" data-id="${ex.id}" onclick="selectExercise('${ex.id}')">
+                    <div class="exercise-number">${globalIdx}</div>
+                    <div class="exercise-info">
+                        <div class="exercise-title">${ex.title}</div>
+                        <div class="exercise-meta">${ex.category} ${'★'.repeat(ex.difficulty || 1)} ${typeBadge}</div>
+                    </div>
+                </li>`;
+            }).join('');
+            updateProgress();
+        }
+
+        function getTypeLabel(type) {
+            const labels = { concept: '概念', code: '代码', quiz: '测验', visual: '可视化' };
+            return labels[type] || type;
+        }
+
+        function selectExercise(id) {
+            const ex = exercises.find(e => e.id === id);
+            if (!ex) return;
+            currentExercise = ex;
+            
+            document.querySelectorAll('.exercise-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.id === id) item.classList.add('active');
+            });
+            
+            document.getElementById('codeEditor').value = ex.template;
+            document.getElementById('outputBox').textContent = '点击"运行"执行代码...';
+            document.getElementById('outputBox').className = 'output-area';
+            document.getElementById('runTime').textContent = '-';
+            updateLineNumbers();
+            updateStatus('ready', '就绪');
+            
+            // 渲染讲解
+            renderExplanation(ex);
+        }
+
+        function renderExplanation(ex) {
+            const content = document.getElementById('explanationContent');
+            
+            if (!ex.explanation) {
+                content.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px 20px;">此练习暂无详细讲解</p>';
+                return;
+            }
+            
+            if (currentExplanationView === 'overview') {
+                renderOverviewExplanation(ex.explanation);
+            } else {
+                renderLineByLineExplanation(ex.explanation);
+            }
+        }
+
+        function renderOverviewExplanation(exp) {
+            const content = document.getElementById('explanationContent');
+            let html = '';
+            
+            if (exp.overview) {
+                exp.overview.forEach(section => {
+                    html += `
+                        <div class="explanation-section">
+                            <div class="section-title">${section.title}</div>
+                            <div class="section-content">${section.content}</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            if (exp.keyPoints) {
+                html += `
+                    <div class="explanation-section">
+                        <div class="section-title">🔑 关键要点</div>
+                        <div class="section-content">
+                            <ul>
+                                ${exp.keyPoints.map(p => `<li>${p}</li>`).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (exp.commonMistakes) {
+                html += `
+                    <div class="explanation-section">
+                        <div class="section-title">⚠️ 常见错误</div>
+                        <div class="section-content">
+                            <ul>
+                                ${exp.commonMistakes.map(m => `<li>${m}</li>`).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = html;
+        }
+
+        function renderLineByLineExplanation(exp) {
+            const content = document.getElementById('explanationContent');
+            
+            if (!exp.lineByLine) {
+                content.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px 20px;">此练习暂无逐行讲解</p>';
+                return;
+            }
+            
+            let html = `
+                <div class="explanation-section">
+                    <div class="section-title">📝 逐行代码讲解</div>
+            `;
+            
+            exp.lineByLine.forEach(item => {
+                html += `
+                    <div class="line-explanation">
+                        <div class="line-num">${item.line}</div>
+                        <div class="line-text">${item.text}</div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            content.innerHTML = html;
+        }
+
+        function toggleExplanationView(view) {
+            currentExplanationView = view;
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent.includes(view === 'overview' ? '概览' : '逐行'));
+            });
+            if (currentExercise) {
+                renderExplanation(currentExercise);
+            }
+        }
+
+        function updateStatus(status, text) {
+            document.getElementById('statusDot').className = 'status-dot ' + status;
+            document.getElementById('statusText').textContent = text;
+        }
+
+        function updateProgress() {
+            const total = exercises.length;
+            const completed = completedExercises.size;
+            const percent = Math.round((completed / total) * 100);
+            document.getElementById('completedCount').textContent = completed;
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressBar').style.width = percent + '%';
+        }
+
+        function setupEditor() {
+            const editor = document.getElementById('codeEditor');
+            const lineNumbers = document.getElementById('lineNumbers');
+            
+            function updateLineNumbers() {
+                const lines = editor.value.split('\n').length;
+                lineNumbers.innerHTML = Array.from({length: lines}, (_, i) => i + 1).join('<br>');
+            }
+            
+            editor.addEventListener('input', updateLineNumbers);
+            editor.addEventListener('scroll', () => lineNumbers.scrollTop = editor.scrollTop);
+            editor.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const start = editor.selectionStart;
+                    editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(editor.selectionEnd);
+                    editor.selectionStart = editor.selectionEnd = start + 4;
+                    updateLineNumbers();
+                }
+            });
+            updateLineNumbers();
+        }
+
+        const templates = {
+            class: `class ClassName:
+    def __init__(self):
+        pass`,
+            def: `def function_name(param):
+    pass`,
+            for: `for i in range(10):
+    print(i)`,
+            if: `if condition:
+    pass`,
+            import: `import numpy as np`
+        };
+
+        function insertTemplate(type) {
+            const editor = document.getElementById('codeEditor');
+            const template = templates[type];
+            if (template) {
+                const start = editor.selectionStart;
+                editor.value = editor.value.substring(0, start) + template + editor.value.substring(start);
+                editor.selectionStart = editor.selectionEnd = start + template.length;
+                editor.focus();
+                updateLineNumbers();
+            }
+        }
+
+        async function runCode() {
+            const code = document.getElementById('codeEditor').value;
+            const inputs = document.getElementById('inputBox').value;
+            if (!code.trim()) { alert('请输入代码！'); return; }
+            
+            const runBtn = document.getElementById('runBtn');
+            const outputBox = document.getElementById('outputBox');
+            runBtn.disabled = true;
+            outputBox.textContent = '正在执行...';
+            outputBox.className = 'output-area';
+            updateStatus('running', '运行中');
+            
+            const startTime = performance.now();
+            try {
+                const result = await executeCode(code, inputs);
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                document.getElementById('runTime').textContent = elapsed + 's';
+                if (result.success) {
+                    outputBox.textContent = result.output || '(执行成功)';
+                    outputBox.className = 'output-area success';
+                    updateStatus('ready', '运行成功');
+                } else {
+                    outputBox.textContent = result.error || '执行失败';
+                    outputBox.className = 'output-area error';
+                    updateStatus('error', '运行失败');
+                }
+            } catch (e) {
+                outputBox.textContent = '错误: ' + e.message;
+                outputBox.className = 'output-area error';
+                updateStatus('error', '执行出错');
+            } finally {
+                runBtn.disabled = false;
+            }
+        }
+
+        async function executeCode(code, inputs) {
+            let fullCode = code;
+            if (inputs && inputs.trim()) {
+                const inputLines = inputs.trim().split('\n').map(l => JSON.stringify(l)).join(', ');
+                fullCode = `_inputs = [${inputLines}]\n_idx = 0\ndef input(p=""): global _idx; print(p,end=""); v = _inputs[_idx] if _idx < len(_inputs) else ""; _idx += 1; return v\n` + code;
+            }
+            
+            try {
+                const pyodide = await initPyodide();
+                
+                if (!pyodide) {
+                    return { success: true, output: '[模拟模式 - Pyodide未加载]' };
+                }
+                
+                pyodide.runPython(`import sys; from io import StringIO; _sys_stdout = sys.stdout; _sys_stderr = sys.stderr; sys.stdout = StringIO(); sys.stderr = StringIO()`);
+                try {
+                    pyodide.runPython(fullCode);
+                    const output = pyodide.runPython('sys.stdout.getvalue()');
+                    const error = pyodide.runPython('sys.stderr.getvalue()');
+                    pyodide.runPython('sys.stdout = _sys_stdout; sys.stderr = _sys_stderr');
+                    if (error && !output) return { success: false, error };
+                    return { success: true, output: output || '(执行成功)' };
+                } catch (e) {
+                    pyodide.runPython('sys.stdout = _sys_stdout; sys.stderr = _sys_stderr');
+                    return { success: false, error: e.message };
+                }
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }
+
+        function showHint() {
+            if (!currentExercise) { alert('请先选择练习！'); return; }
+            const hints = currentExercise.hints || [];
+            if (hints.length === 0) {
+                document.getElementById('hintContent').innerHTML = '<p style="text-align: center; color: var(--text-muted);">此练习没有额外提示</p>';
+            } else {
+                document.getElementById('hintContent').innerHTML = hints.map((h, i) => 
+                    `<div style="background: var(--bg-primary); padding: 12px; border-radius: var(--radius-md); margin-bottom: 8px;">
+                        <strong style="color: var(--accent-primary);">提示 ${i+1}:</strong> ${h}
+                    </div>`
+                ).join('');
+            }
+            document.getElementById('hintModal').classList.add('active');
+        }
+
+        function showReference() {
+            if (currentExercise) {
+                document.getElementById('refCode').textContent = currentExercise.reference;
+                document.getElementById('refModal').classList.add('active');
+            }
+        }
+
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+        function copyReference() {
+            if (currentExercise) {
+                document.getElementById('codeEditor').value = currentExercise.reference;
+                updateLineNumbers();
+            }
+        }
+
+        function resetCode() {
+            if (currentExercise) {
+                document.getElementById('codeEditor').value = currentExercise.template;
+                document.getElementById('outputBox').textContent = '点击"运行"执行代码...';
+                document.getElementById('outputBox').className = 'output-area';
+                updateLineNumbers();
+                updateStatus('ready', '就绪');
+            }
+        }
+
+        function saveProgress() {
+            localStorage.setItem('minimind_cs336_progress', JSON.stringify({
+                completed: [...completedExercises],
+                failed: [...failedExercises]
+            }));
+        }
+
+        function loadProgress() {
+            const saved = localStorage.getItem('minimind_cs336_progress');
+            if (saved) {
+                const data = JSON.parse(saved);
+                completedExercises = new Set(data.completed || []);
+                failedExercises = new Set(data.failed || []);
+                renderExerciseList();
+            }
+        }
+
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key === 'Enter') { e.preventDefault(); runCode(); }
+                    else if (e.key === 'h') { e.preventDefault(); showHint(); }
+                }
+                if (e.key === 'Escape') {
+                    ['refModal', 'hintModal'].forEach(closeModal);
+                }
+            });
+        }
+
+        function updateLineNumbers() {
+            const editor = document.getElementById('codeEditor');
+            const lineNumbers = document.getElementById('lineNumbers');
+            const lines = editor.value.split('\n').length;
+            lineNumbers.innerHTML = Array.from({length: lines}, (_, i) => i + 1).join('<br>');
+        }
+
+        init();
+    </script>
+</body>
+</html>
