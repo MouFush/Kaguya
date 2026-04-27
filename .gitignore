@@ -1,161 +1,138 @@
-# Python
+# ============================================================
+# KaguyaIDE - Git Ignore
+# Only core Chat + IDE project files are tracked.
+# ============================================================
+
+# --- Ignore everything by default ---
+*
+
+# --- Explicitly allow core project files ---
+!.gitignore
+!README.md
+!MANIFEST.in
+
+# Main Flask Chat+IDE application
+!qwen3_web.py
+
+# LLM integration
+!ollama_adapter.py
+
+# Core library
+!kaguya_core/
+!kaguya_core/**
+!kaguya_core/claw_code_ref/**
+!kaguya_core/claw_code_ref/__init__.py
+!kaguya_core/claw_code_ref/*.py
+
+# FastAPI Chat backend
+!kaguya_fastapi/
+!kaguya_fastapi/**
+!kaguya_fastapi/Dockerfile
+!kaguya_fastapi/docker-compose.yml
+!kaguya_fastapi/requirements.txt
+
+# Desktop IDE - Electron shell
+!kaguya-desktop/
+!kaguya-desktop/electron/
+!kaguya-desktop/electron/main.js
+!kaguya-desktop/electron/preload.js
+!kaguya-desktop/electron/package.json
+
+# Desktop IDE - Python backend sources
+!kaguya-desktop/src/
+!kaguya-desktop/src/*.py
+
+# Desktop IDE - Assets (icons)
+!kaguya-desktop/assets/
+!kaguya-desktop/assets/*.ico
+!kaguya-desktop/assets/*.png
+!kaguya-desktop/assets/*.icns
+!kaguya-desktop/assets/*.plist
+!kaguya-desktop/assets/*.desktop
+!kaguya-desktop/assets/version_info.txt
+
+# Desktop IDE - Build & Launch
+!kaguya-desktop/KaguyaIDE.spec
+!kaguya-desktop/build.py
+!kaguya-desktop/start.py
+!kaguya-desktop/start.bat
+!kaguya-desktop/requirements-desktop.txt
+
+# Frontend static files
+!static/
+!static/css/
+!static/css/*.css
+!static/js/
+!static/js/*.js
+
+# Project Images
+!assets/
+!assets/*.png
+!assets/*.jpg
+
+# Project config (not secrets)
+!data/
+!data/project_config.json
+
+# Root-level Kaguya core modules (imported by qwen3_web.py)
+!kaguya_accounts.py
+!kaguya_acp.py
+!kaguya_agents.py
+!kaguya_bootstrap.py
+!kaguya_compaction.py
+!kaguya_feature_flags.py
+!kaguya_file_analyzer.py
+!kaguya_file_history.py
+!kaguya_file_operations.py
+!kaguya_frontend.py
+!kaguya_hooks.py
+!kaguya_memory.py
+!kaguya_optimization_suite.py
+!kaguya_permissions.py
+!kaguya_project_instructions.py
+!kaguya_security_framework.py
+!kaguya_security_framework_v2.py
+!kaguya_skills.py
+!kaguya_terminal.py
+!kaguya_thinking.py
+!kaguya_tool_executor.py
+!kaguya_tool_system.py
+!kaguya_enhanced_features.py
+!kaguya_enhanced_features_v2.py
+!kaguya_enhanced_features_v3.py
+!kaguya_enhanced_v2_integration.py
+
+# Core security/auth modules
+!encryption_system.py
+!monitoring_system.py
+!rate_limiter.py
+!rbac_system.py
+!secure_sandbox.py
+!audit_system.py
+!content_safety_filter.py
+
+# Agent framework
+!agent_framework.py
+!autonomous_agent.py
+!code_agent.py
+!code_executor.py
+!safe_code_executor.py
+!workflow_engine.py
+
+# Memory & knowledge
+!agentic_workflow_engine.py
+!agentic_workflow_engine_advanced.py
+!knowledge_graph.py
+!knowledge_graph_system.py
+!memory_integration.py
+
+# LLM adapters
+!llm_adapter.py
+!llm_client.py
+!openai_api.py
+!unified_api_adapter.py
+
+# --- Re-exclude build artifacts inside allowed directories ---
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-kaguya_env/
-kaguya_py311/
-venv/
-ENV/
-env/
-.venv/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-
-# Build outputs
-dist-electron-build/
-dist-electron-final/
-dist-electron-final-v2/
-dist-electron-v2/
-dist-standalone/
-release-new/
-*.zip
-*.exe
-*.msi
-*.dmg
-*.AppImage
-*.deb
-*.rpm
-
-# PyInstaller
-*.spec.bak
-*.manifest
-
-# Electron builder
-builder-debug.yml
-builder-effective-config.yaml
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-memory_store/
-memory_system/
-security_data/
-test_audit_logs/
-
-# Secrets and sensitive data
-.env
-.env.local
-.env.*.local
-.secret_key
-.jwt_secret_key
-*.pem
-*.key
-
-# Logs
-logs/
-*.log
-
-# Cache
-.cache/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Package managers
-pnpm-store/
-
-# Third-party projects
-LLaMA-Factory/
-ai-card-explorer/
-financial_rag/
-snake_game/
-
-# IDE workspaces
-ide_workspaces/
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-temp.txt
-
-# OS files
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Ngrok
-ngrok.exe
-
-# Test outputs
-test_report.json
-test_report/
-coverage/
-
-# Data files (user-specific)
-data/.secret_key
-data/.jwt_secret_key
-ide_accounts.json
-
-# Backup files
-*.backup
-*_backup/
-*_old/
-
-# Debug files
-debug*.html
-debug*.py
-_*diag*.py
-_*check*.py
-_*test*.py
-_*debug*.py
-
-# Generated files
-generated_*.html
-generated_*.png
-
-# Problematic submodules
-cc-switch/
-
-# Large model files (>100MB)
-checkpoints/
-*.pt
-*.pth
-*.bin
-*.safetensors
-*.onnx
-*.h5
-*.pkl
-*.pickle
+*.pyc
+*.pyo

@@ -1,2 +1,0 @@
-{"timestamp": "2026-04-18T15:24:34.133705", "session_id": "20260418_152322", "action": "permission_check", "tool": "list_env", "details": {"result": "allow", "reason": "no permission required"}, "allowed": true, "device_id": ""}
-{"timestamp": "2026-04-18T15:24:40.831460", "session_id": "20260418_152322", "action": "permission_check", "tool": "write_file", "details": {"result": "allow", "reason": "always_allow rule"}, "allowed": true, "device_id": ""}

@@ -1,2 +1,0 @@
-{"timestamp": "2026-04-17T02:46:15.895413", "session_id": "20260417_024509", "action": "sandbox_dir_added", "tool": "config", "details": {"path": "c:\\\\Users"}, "allowed": true, "device_id": ""}
-{"timestamp": "2026-04-17T02:47:34.241121", "session_id": "20260417_024509", "action": "rule_added", "tool": "read_file", "details": {"behavior": "allow"}, "allowed": true, "device_id": ""}

@@ -1,1 +1,0 @@
-{"timestamp": "2026-04-18T17:13:37.198439", "session_id": "20260418_171312", "action": "permission_check", "tool": "write_file", "details": {"result": "allow", "reason": "always_allow rule"}, "allowed": true, "device_id": ""}

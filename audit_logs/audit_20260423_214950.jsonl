@@ -1,1 +1,0 @@
-{"timestamp": "2026-04-23T21:51:20.021442", "session_id": "20260423_214950", "action": "terminal_exec", "tool": "execute_command", "details": {"command": "echo test_verify", "working_dir": "c:\\Users\\林智涵\\.conda\\ide_workspaces\\9f86d081884c7d65"}, "allowed": true, "device_id": "test"}
