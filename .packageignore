@@ -1,9 +1,6 @@
-# Runtime data and caches must not be shipped as source.
-__pycache__/
-.pytest_cache/
-*.py[cod]
-smoke-*.log
-
+resources/python-app/__pycache__/
+resources/python-app/.pytest_cache/
+resources/python-app/smoke-*.log
 resources/python-app/ide_accounts.json
 resources/python-app/ide_workspaces/
 resources/python-app/audit_logs/
@@ -21,5 +18,3 @@ resources/python-app/memory_system/
 resources/python-app/memory_store/
 resources/python-app/multimodal/
 resources/python-app/finetune/
-
-# Keep packaged desktop archive in this release-package repository.
