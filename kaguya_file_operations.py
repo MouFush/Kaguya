@@ -11,12 +11,29 @@ import fnmatch
 import hashlib
 import os
 import shutil
+import sys
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
+
+
+def _default_runtime_root():
+    configured = os.environ.get("KAGUYA_RUNTIME_DIR") or os.environ.get("KAGUYA_USER_DATA_DIR")
+    if configured:
+        return os.path.realpath(os.path.abspath(configured))
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "KaguyaIDE", "python-app")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "KaguyaIDE", "python-app")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "kaguyaide", "python-app")
+
+
+KAGUYA_RUNTIME_DIR = _default_runtime_root()
 
 
 @dataclass
@@ -158,7 +175,7 @@ class FileHistory:
         self._sequence = 0
         self._lock = threading.Lock()
         self._backup_dir = backup_dir or os.path.join(
-            os.path.dirname(__file__), ".kaguya_file_history"
+            KAGUYA_RUNTIME_DIR, ".kaguya_file_history"
         )
         os.makedirs(self._backup_dir, exist_ok=True)
 

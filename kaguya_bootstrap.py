@@ -28,6 +28,20 @@ except ImportError:
     HAS_FLASK = False
 
 KAGUYA_DIR = os.path.dirname(os.path.abspath(__file__))
+def _default_runtime_root():
+    configured = os.environ.get("KAGUYA_RUNTIME_DIR") or os.environ.get("KAGUYA_USER_DATA_DIR")
+    if configured:
+        return os.path.realpath(os.path.abspath(configured))
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "KaguyaIDE", "python-app")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "KaguyaIDE", "python-app")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "kaguyaide", "python-app")
+
+
+KAGUYA_RUNTIME_DIR = _default_runtime_root()
 sys.path.insert(0, KAGUYA_DIR)
 
 
@@ -146,7 +160,7 @@ class KaguyaBootstrap:
         skills_mod = self._safe_import("kaguya_skills")
         if skills_mod:
             try:
-                skill_dir = os.path.join(KAGUYA_DIR, ".kaguya", "skills")
+                skill_dir = os.path.join(KAGUYA_RUNTIME_DIR, ".kaguya", "skills")
                 self._skill_loader, self._skill_tool = skills_mod.create_skill_system(
                     config_dir=skill_dir
                 )
@@ -158,7 +172,7 @@ class KaguyaBootstrap:
         acc_mod = self._safe_import("kaguya_accounts")
         if acc_mod:
             try:
-                acc_dir = os.path.join(KAGUYA_DIR, ".kaguya", "accounts")
+                acc_dir = os.path.join(KAGUYA_RUNTIME_DIR, ".kaguya", "accounts")
                 secret = os.environ.get("KAGUYA_SECRET_KEY", None)
                 self._account_manager = acc_mod.create_account_manager(
                     data_dir=acc_dir, secret_key=secret
@@ -714,24 +728,21 @@ def _register_permission_routes(app):
     @app.route('/permissions/check', methods=['POST'])
     def permissions_check():
         if not bootstrap._permission_manager:
-            return jsonify({"error": "Permission system not initialized"}), 503
-        data = request.get_json() or {}
-        tool_name = data.get("tool_name", "")
+            return jsonify({"success": False, "error": "Permission system not initialized"}), 503
+        data = request.get_json(silent=True) or {}
+        tool_name = (data.get("tool_name") or "").strip()
+        if not tool_name:
+            return jsonify({"success": False, "error": "tool_name is required"}), 400
         tool_input = data.get("tool_input", {})
-        session_id = data.get("session_id", "")
-        from kaguya_permissions import AutoApprovalClassifier, PermissionMode
-        classifier = AutoApprovalClassifier()
-        mode = bootstrap._permission_manager.get_session_mode(session_id)
-        trust_rules = [type('Rule', (), asdict(r))() for r in bootstrap._permission_manager.get_trust_rules()]
-        auto_approved, reason = classifier.classify(tool_name, tool_input, mode, trust_rules)
-        risk_level = classifier.get_risk_level(tool_name, tool_input)
-        return jsonify({
-            "tool_name": tool_name,
-            "risk_level": risk_level.value,
-            "mode": mode.value,
-            "auto_approved": auto_approved,
-            "reason": reason,
-        })
+        if not isinstance(tool_input, dict):
+            return jsonify({"success": False, "error": "tool_input must be an object"}), 400
+        session_id = (data.get("session_id") or "default").strip() or "default"
+        try:
+            result = bootstrap._permission_manager.check_permission(session_id, tool_name, tool_input)
+            return jsonify(result)
+        except Exception as e:
+            bootstrap._init_errors.append(f"Permission check failed: {e}")
+            return jsonify({"success": False, "error": "Permission check failed", "detail": str(e)}), 503
 
 
 def inject_frontend_modules(html_template_str):

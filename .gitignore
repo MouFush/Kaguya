@@ -10,6 +10,17 @@
 !.gitignore
 !README.md
 !MANIFEST.in
+!AUDIT_NOTES.md
+!IPC_CONTRACT.md
+
+# Docs and tests
+!docs/
+!docs/**
+!tests/
+!tests/**
+!scripts/
+!scripts/
+!scripts/*.py
 
 # Main Flask Chat+IDE application
 !qwen3_web.py
@@ -37,10 +48,18 @@
 !kaguya-desktop/electron/main.js
 !kaguya-desktop/electron/preload.js
 !kaguya-desktop/electron/package.json
+!kaguya-desktop/electron/tests/
+!kaguya-desktop/electron/tests/*.js
 
 # Desktop IDE - Python backend sources
 !kaguya-desktop/src/
 !kaguya-desktop/src/*.py
+!kaguya-desktop/src/assets/
+!kaguya-desktop/src/assets/*.png
+!kaguya-desktop/src/tests/
+!kaguya-desktop/src/tests/**
+!kaguya-desktop/src/scripts/
+!kaguya-desktop/src/scripts/*.py
 
 # Desktop IDE - Assets (icons)
 !kaguya-desktop/assets/
@@ -97,6 +116,10 @@
 !kaguya_thinking.py
 !kaguya_tool_executor.py
 !kaguya_tool_system.py
+!kaguya_api_permissions.py
+!kaguya_terminal_service.py
+!kaguya_workspace_security.py
+!start_server.py
 !kaguya_enhanced_features.py
 !kaguya_enhanced_features_v2.py
 !kaguya_enhanced_features_v3.py
@@ -136,3 +159,20 @@
 __pycache__/
 *.pyc
 *.pyo
+smoke-*.log
+ide_accounts.json
+ide_workspaces/
+audit_logs/
+uploads/
+code_executions/
+rag_data/
+audio_cache/
+security_data/
+.kaguya/
+.kaguya_file_history/
+external_api/
+project_center/
+memory_system/
+memory_store/
+multimodal/
+finetune/

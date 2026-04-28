@@ -16,6 +16,7 @@
 import json
 import os
 import re
+import sys
 import time
 import uuid
 import hashlib
@@ -28,6 +29,22 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from enum import Enum
 from datetime import datetime, timedelta
 from collections import OrderedDict
+
+
+def _default_runtime_root():
+    configured = os.environ.get("KAGUYA_RUNTIME_DIR") or os.environ.get("KAGUYA_USER_DATA_DIR")
+    if configured:
+        return os.path.realpath(os.path.abspath(configured))
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "KaguyaIDE", "python-app")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "KaguyaIDE", "python-app")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "kaguyaide", "python-app")
+
+
+KAGUYA_RUNTIME_DIR = _default_runtime_root()
 
 
 class AuthEventType(Enum):
@@ -240,8 +257,8 @@ class PasswordManager:
 
 
 class JWTManager:
-    _JWT_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', '.jwt_secret_key')
-    _REVOKED_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'security_data', 'revoked_tokens.db')
+    _JWT_KEY_FILE = os.path.join(KAGUYA_RUNTIME_DIR, 'data', '.jwt_secret_key')
+    _REVOKED_DB = os.path.join(KAGUYA_RUNTIME_DIR, 'security_data', 'revoked_tokens.db')
 
     def __init__(self, secret_key: str = None, expiry_hours: int = 24,
                  refresh_expiry_days: int = 7):

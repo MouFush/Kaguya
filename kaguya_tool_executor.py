@@ -28,6 +28,16 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from collections import OrderedDict
 
+try:
+    from kaguya_api_permissions import permission_service
+except Exception:
+    permission_service = None
+
+try:
+    from kaguya_terminal_service import execute_command as execute_terminal_command
+except Exception:
+    execute_terminal_command = None
+
 
 class TaskPriority(Enum):
     CRITICAL = 0
@@ -540,19 +550,27 @@ class StreamingToolExecutor:
         return f"Edited: {path}"
 
     def _builtin_bash(self, args: Dict, timeout: float) -> str:
-        import subprocess
         cmd = args.get("command", "")
         cwd = args.get("working_dir", os.getcwd())
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True,
-            timeout=timeout, cwd=cwd,
+        if execute_terminal_command is None:
+            raise RuntimeError("Terminal execution service is unavailable")
+        result = execute_terminal_command(
+            command=cmd,
+            working_dir=cwd,
+            workspace_path=cwd,
+            user_info={"workspace": cwd, "imported_paths": []},
+            timeout=timeout,
+            shell=False,
+            session_id=args.get("session_id", ""),
         )
-        output = result.stdout
-        if result.stderr:
-            output += f"\nSTDERR:\n{result.stderr}"
-        if result.returncode != 0:
-            raise RuntimeError(f"Exit code {result.returncode}: {output}")
-        return output
+        output = result.get("stdout", "")
+        if result.get("stderr"):
+            output += f"\nSTDERR:\n{result.get('stderr')}"
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or result.get("reason") or output or "Command denied")
+        if result.get("exit_code", 0) != 0:
+            raise RuntimeError(f"Exit code {result.get('exit_code')}: {output}")
+        return output or "(no output)"
 
     def _builtin_glob(self, args: Dict) -> str:
         import glob as g
@@ -573,7 +591,19 @@ class StreamingToolExecutor:
 
     def _check_permissions(self, task: ToolTask) -> bool:
         if not self._permission_manager:
-            return True
+            if permission_service is None:
+                return not task.is_destructive
+            try:
+                action = "execute_command" if task.tool_name in ("Bash", "bash", "Terminal", "terminal") else None
+                if task.tool_name in ("Write", "file_write", "Edit", "file_edit"):
+                    action = "write_file"
+                if not action:
+                    return not task.is_destructive
+                payload = dict(task.tool_input or {})
+                result = permission_service.check(action, payload, session_id=task.session_id)
+                return result.allowed
+            except Exception:
+                return False
         try:
             decision = self._permission_manager.request_permission(
                 session_id=task.session_id,
@@ -583,7 +613,7 @@ class StreamingToolExecutor:
             )
             return decision in ("allow", "allow_always")
         except Exception:
-            return True
+            return False
 
     def _run_pre_hooks(self, task: ToolTask) -> HookResult:
         ctx = HookContext(

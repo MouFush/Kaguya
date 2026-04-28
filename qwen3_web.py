@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Qwen3.5-4B Web前端 (专业增强版 - Ollama)
 功能: 代码执行器、工具调用、知识库、插件系统、LoRA、网络搜索
@@ -27,27 +27,21 @@ from datetime import datetime
 from collections import defaultdict
 import threading
 
-try:
-    import torch
-    if torch.cuda.is_available():
-        print(f"[OK] CUDA GPU available: {torch.cuda.get_device_name(0)}")
-        print(f"     GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-    else:
-        print("[WARN] CUDA GPU not available, will use CPU inference")
-except ImportError:
-    torch = None
-    print("[WARN] PyTorch not installed")
-except Exception as e:
-    torch = None
-    print(f"[WARN] PyTorch load failed: {e}")
-from flask import Flask, render_template_string, request, jsonify, send_file, Response, stream_with_context, make_response, session, g
+torch = None
+from flask import Flask, render_template_string, request, jsonify, send_file, Response, stream_with_context, make_response, session, g, redirect
 from ollama_adapter import get_ollama_adapter, OllamaConfig
+from kaguya_workspace_security import (
+    WorkspaceAuthorizationError,
+    add_imported_root,
+    authorize_path,
+    authorize_project_root,
+    is_path_inside,
+)
+from kaguya_api_permissions import permission_service
+from kaguya_terminal_service import execute_command as execute_terminal_command
 
-try:
-    from peft import PeftModel, LoraConfig, get_peft_model, TaskType
-    PEFT_AVAILABLE = True
-except ImportError:
-    PEFT_AVAILABLE = False
+PeftModel = LoraConfig = get_peft_model = TaskType = None
+PEFT_AVAILABLE = False
 
 OLLAMA_MODEL = "qwen3.5:4b"
 model = None
@@ -59,31 +53,48 @@ visitor_stats = defaultdict(int)
 log_lock = threading.Lock()
 data_lock = threading.Lock()
 token_stats = {'total_input': 0, 'total_output': 0, 'sessions': 0}
+_agent_abort_events = {}
 
-PROMPTS_DIR = os.path.join(os.path.dirname(__file__), 'prompts')
-UPLOADS_DIR = os.path.join(os.path.dirname(__file__), 'uploads')
-AUDIO_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'audio_cache')
-LORA_DIR = os.path.join(os.path.dirname(__file__), 'lora_adapters')
-KNOWLEDGE_DIR = os.path.join(os.path.dirname(__file__), 'knowledge_base')
-CODE_EXEC_DIR = os.path.join(os.path.dirname(__file__), 'code_executions')
-RAG_DIR = os.path.join(os.path.dirname(__file__), 'rag_data')
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _default_runtime_root():
+    configured = os.environ.get("KAGUYA_RUNTIME_DIR") or os.environ.get("KAGUYA_USER_DATA_DIR")
+    if configured:
+        return os.path.realpath(os.path.abspath(configured))
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
+        return os.path.join(base, "KaguyaIDE", "python-app")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Application Support"), "KaguyaIDE", "python-app")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "kaguyaide", "python-app")
+
+RUNTIME_DIR = _default_runtime_root()
+
+PROMPTS_DIR = os.path.join(APP_DIR, 'prompts')
+UPLOADS_DIR = os.path.join(RUNTIME_DIR, 'uploads')
+AUDIO_CACHE_DIR = os.path.join(RUNTIME_DIR, 'audio_cache')
+LORA_DIR = os.path.join(APP_DIR, 'lora_adapters')
+KNOWLEDGE_DIR = os.path.join(APP_DIR, 'knowledge_base')
+CODE_EXEC_DIR = os.path.join(RUNTIME_DIR, 'code_executions')
+RAG_DIR = os.path.join(RUNTIME_DIR, 'rag_data')
 RAG_INDEX_FILE = os.path.join(RAG_DIR, 'rag_index.json')
-MCP_DIR = os.path.join(os.path.dirname(__file__), 'mcp_plugins')
+MCP_DIR = os.path.join(APP_DIR, 'mcp_plugins')
 MCP_CONFIG_FILE = os.path.join(MCP_DIR, 'mcp_config.json')
-WORKFLOW_DIR = os.path.join(os.path.dirname(__file__), 'workflows')
+WORKFLOW_DIR = os.path.join(APP_DIR, 'workflows')
 WORKFLOW_INDEX_FILE = os.path.join(WORKFLOW_DIR, 'workflows_index.json')
-MEMORY_DIR = os.path.join(os.path.dirname(__file__), 'memory_system')
+MEMORY_DIR = os.path.join(RUNTIME_DIR, 'memory_system')
 MEMORY_DB_FILE = os.path.join(MEMORY_DIR, 'memory.db')
 MEMORY_INDEX_FILE = os.path.join(MEMORY_DIR, 'memory_index.json')
-MULTIMODAL_DIR = os.path.join(os.path.dirname(__file__), 'multimodal')
+MULTIMODAL_DIR = os.path.join(RUNTIME_DIR, 'multimodal')
 IMAGE_CACHE_DIR = os.path.join(MULTIMODAL_DIR, 'image_cache')
-FINETUNE_DIR = os.path.join(os.path.dirname(__file__), 'finetune')
+FINETUNE_DIR = os.path.join(RUNTIME_DIR, 'finetune')
 DATASETS_DIR = os.path.join(FINETUNE_DIR, 'datasets')
 TRAINING_DIR = os.path.join(FINETUNE_DIR, 'training')
 EXPORTS_DIR = os.path.join(FINETUNE_DIR, 'exports')
 FINETUNE_CONFIG_FILE = os.path.join(FINETUNE_DIR, 'finetune_config.json')
-DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
-PROJECT_CENTER_DIR = os.path.join(os.path.dirname(__file__), 'project_center')
+DATA_DIR = os.path.join(RUNTIME_DIR, 'data')
+PROJECT_CENTER_DIR = os.path.join(RUNTIME_DIR, 'project_center')
 ARTIFACTS_FILE = os.path.join(PROJECT_CENTER_DIR, 'artifacts.json')
 PROJECT_TASKS_FILE = os.path.join(PROJECT_CENTER_DIR, 'tasks.json')
 PLAYBOOKS_FILE = os.path.join(PROJECT_CENTER_DIR, 'playbooks.json')
@@ -95,10 +106,10 @@ AB_EXPERIMENTS_FILE = os.path.join(PROJECT_CENTER_DIR, 'ab_experiments.json')
 INTEGRATIONS_FILE = os.path.join(PROJECT_CENTER_DIR, 'integrations.json')
 PROJECT_MILESTONES_FILE = os.path.join(PROJECT_CENTER_DIR, 'milestones.json')
 PROJECT_RISKS_FILE = os.path.join(PROJECT_CENTER_DIR, 'risks.json')
-EXTERNAL_API_DIR = os.path.join(os.path.dirname(__file__), 'external_api')
+EXTERNAL_API_DIR = os.path.join(RUNTIME_DIR, 'external_api')
 EXTERNAL_API_CONFIG_FILE = os.path.join(EXTERNAL_API_DIR, 'provider_config.json')
 
-for d in [PROMPTS_DIR, UPLOADS_DIR, AUDIO_CACHE_DIR, LORA_DIR, KNOWLEDGE_DIR, CODE_EXEC_DIR, RAG_DIR, MCP_DIR, WORKFLOW_DIR, MEMORY_DIR, MULTIMODAL_DIR, IMAGE_CACHE_DIR, FINETUNE_DIR, DATASETS_DIR, TRAINING_DIR, EXPORTS_DIR, PROJECT_CENTER_DIR, EXTERNAL_API_DIR]:
+for d in [RUNTIME_DIR, PROMPTS_DIR, UPLOADS_DIR, AUDIO_CACHE_DIR, LORA_DIR, KNOWLEDGE_DIR, CODE_EXEC_DIR, RAG_DIR, MCP_DIR, WORKFLOW_DIR, MEMORY_DIR, MULTIMODAL_DIR, IMAGE_CACHE_DIR, FINETUNE_DIR, DATASETS_DIR, TRAINING_DIR, EXPORTS_DIR, DATA_DIR, PROJECT_CENTER_DIR, EXTERNAL_API_DIR]:
     os.makedirs(d, exist_ok=True)
 
 rag_documents = []
@@ -1433,8 +1444,10 @@ def default_external_api_config():
             "openai": {"api_url": "https://api.openai.com/v1", "api_key": "", "model": "gpt-4o"},
             "claude": {"api_url": "https://api.anthropic.com", "api_key": "", "model": "claude-3-7-sonnet-20250219"},
             "gemini": {"api_url": "https://generativelanguage.googleapis.com/v1beta", "api_key": "", "model": "gemini-2.0-flash"},
-            "moonshot": {"api_url": "https://api.moonshot.cn/v1", "api_key": "", "model": "moonshot-v1-8k"},
+            "kimi": {"api_url": "https://api.moonshot.ai/v1", "api_key": "", "model": "kimi-k2.6"},
+            "moonshot": {"api_url": "https://api.moonshot.ai/v1", "api_key": "", "model": "moonshot-v1-8k"},
             "qwen": {"api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "", "model": "qwen-plus"},
+            "minimax": {"api_url": "https://api.minimaxi.com/v1", "api_key": "", "model": "MiniMax-M2.7"},
             "zhipu": {"api_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "", "model": "glm-4-flash"},
             "mistral": {"api_url": "https://api.mistral.ai/v1", "api_key": "", "model": "mistral-large-latest"},
             "groq": {"api_url": "https://api.groq.com/openai/v1", "api_key": "", "model": "llama-3.3-70b-versatile"},
@@ -1443,6 +1456,35 @@ def default_external_api_config():
     }
 
 external_api_config = {}
+
+def normalize_external_api_payload(data):
+    if not isinstance(data, dict):
+        data = {}
+    provider = (data.get("provider") or data.get("active_provider") or "deepseek").strip().lower()
+    api_key = (data.get("api_key") or data.get("apiKey") or "").strip()
+    api_url = (data.get("api_url") or data.get("apiUrl") or "").strip()
+    model = (data.get("model") or "").strip()
+    enabled_value = data.get("enabled")
+    enabled = bool(api_key) if enabled_value is None else bool(enabled_value and api_key)
+    defaults = default_external_api_config().get("providers", {})
+    base = defaults.get(provider, {})
+    return {
+        "provider": provider,
+        "api_key": api_key,
+        "api_url": api_url or base.get("api_url", ""),
+        "model": model or base.get("model", ""),
+        "enabled": enabled,
+    }
+
+def _external_api_for_frontend(config):
+    cfg = normalize_external_api_payload(config)
+    return {
+        "enabled": cfg["enabled"],
+        "provider": cfg["provider"],
+        "apiKey": cfg["api_key"],
+        "apiUrl": cfg["api_url"],
+        "model": cfg["model"],
+    }
 
 def _get_user_external_api(device_id):
     user_info = _get_user_workspace(device_id)
@@ -3861,13 +3903,13 @@ class ToolRegistry:
             return f"Error updating todos: {e}"
 
     def _enter_plan_mode(self):
-        if hasattr(tool_registry, '_plan_active'):
-            tool_registry._plan_active = True
+        global _agent_plan_mode
+        _agent_plan_mode = True
         return "Entered plan mode. You can now think through the approach without making any file changes. Use exit_plan_mode when ready to execute."
 
     def _exit_plan_mode(self):
-        if hasattr(tool_registry, '_plan_active'):
-            tool_registry._plan_active = False
+        global _agent_plan_mode
+        _agent_plan_mode = False
         return "Exited plan mode. You can now use all tools including write_file, edit_file, and execute_command."
 
     def _web_fetch(self, url, format="text"):
@@ -4015,10 +4057,9 @@ class ToolRegistry:
         return "\n".join(lines)
 
     def _brief(self, focus="general"):
-        global _agent_tasks
-        plan_active = getattr(tool_registry, '_plan_active', False)
+        global _agent_tasks, _agent_plan_mode
         parts = [f"Session Brief (focus: {focus})"]
-        parts.append(f"Plan mode: {'active' if plan_active else 'inactive'}")
+        parts.append(f"Plan mode: {'active' if _agent_plan_mode else 'inactive'}")
         parts.append(f"Tasks tracked: {len(_agent_tasks)}")
         if _agent_tasks:
             for tid, task in _agent_tasks.items():
@@ -4060,7 +4101,6 @@ class ToolRegistry:
 
 _agent_plan_mode = False
 _agent_tasks = {}
-_agent_abort_events = {}  # run_id -> threading.Event() for abort signaling
 
 tool_registry = ToolRegistry()
 
@@ -4115,7 +4155,7 @@ pending_permission_requests = {}
 class AuditLogger:
     _instance = None
     def __init__(self, log_dir=None):
-        self.log_dir = log_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'audit_logs')
+        self.log_dir = log_dir or os.path.join(RUNTIME_DIR, 'audit_logs')
         os.makedirs(self.log_dir, exist_ok=True)
         self.session_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.log_path = os.path.join(self.log_dir, f'audit_{self.session_id}.jsonl')
@@ -5222,7 +5262,24 @@ class QueryLoop:
         self.tool_registry = tool_registry
         self.permission_checker = permission_checker
 
-    def run(self, user_message, history=None, working_dir=None, max_turns=8):
+    def _is_aborted(self, abort_event):
+        return bool(abort_event and abort_event.is_set())
+
+    def _abort_event_json(self, run_id):
+        return json.dumps({"type": "aborted", "run_id": run_id, "message": "Agent run aborted by user", "done": True})
+
+    def _wait_permission(self, preq, timeout, abort_event):
+        deadline = time.time() + timeout if timeout else None
+        while True:
+            if self._is_aborted(abort_event):
+                return False, True
+            remaining = None if deadline is None else max(0, deadline - time.time())
+            if remaining == 0:
+                return False, False
+            if preq.wait(timeout=0.25 if remaining is None else min(0.25, remaining)):
+                return True, False
+
+    def run(self, user_message, history=None, working_dir=None, max_turns=8, abort_event=None, run_id=None):
         messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
         if working_dir:
             messages[0]["content"] += f"\n\n## Working Directory\n{working_dir}"
@@ -5232,9 +5289,9 @@ class QueryLoop:
                 messages.append({"role": "assistant", "content": h.get("assistant", "")})
         messages.append({"role": "user", "content": user_message})
         state = QueryState(messages=messages, max_turns=max_turns)
-        return self._query_loop(state)
+        return self._query_loop(state, abort_event=abort_event, run_id=run_id)
 
-    def run_with_external_api(self, user_message, history=None, working_dir=None, external_api=None, max_turns=10):
+    def run_with_external_api(self, user_message, history=None, working_dir=None, external_api=None, max_turns=10, abort_event=None, run_id=None):
         messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
         if working_dir:
             messages[0]["content"] += f"\n\n## Working Directory\n{working_dir}"
@@ -5244,11 +5301,12 @@ class QueryLoop:
                 messages.append({"role": "assistant", "content": h.get("assistant", "")})
         messages.append({"role": "user", "content": user_message})
         state = QueryState(messages=messages, max_turns=max_turns)
-        return self._query_loop_external(state, external_api)
+        return self._query_loop_external(state, external_api, abort_event=abort_event, run_id=run_id)
 
-    def _query_loop_external(self, state, external_api):
+    def _query_loop_external(self, state, external_api, abort_event=None, run_id=None):
         import urllib.request
-        provider = external_api.get('provider', 'deepseek')
+        external_api = _external_api_for_frontend(external_api)
+        provider = (external_api.get('provider', 'deepseek') or 'deepseek').strip().lower()
         api_url = external_api.get('apiUrl', 'https://api.deepseek.com').rstrip('/')
         api_key = external_api.get('apiKey', '')
         model_name = external_api.get('model', 'deepseek-chat')
@@ -5258,6 +5316,9 @@ class QueryLoop:
         _planning_count = 0
         _max_planning_calls = 3
         while True:
+            if self._is_aborted(abort_event):
+                yield self._abort_event_json(run_id)
+                return
             state.messages = _snip_compact(state.messages)
             state.messages = _micro_compact(state.messages)
             state.messages = _auto_compact(state.messages)
@@ -5279,6 +5340,9 @@ class QueryLoop:
                     _last_read_time = _time.time()
                     try:
                         while True:
+                            if self._is_aborted(abort_event):
+                                yield self._abort_event_json(run_id)
+                                return
                             if _time.time() - _last_read_time > 60:
                                 response_text += "\n[Read timeout: no data for 60s]"
                                 break
@@ -5316,24 +5380,25 @@ class QueryLoop:
                     chat = model.start_chat(history=[{"role":"user" if m["role"]=="user" else "model","parts":[m["content"]]} for m in clean_msgs])
                     result = chat.send_message(ollama_msgs[-1]["content"] if ollama_msgs else "hi", stream=True)
                     for chunk in result:
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
                         text = chunk.text
                         if text:
                             response_text += text
                             yield json.dumps({"type": "thinking", "content": text, "iteration": state.turn_count, "done": False})
                 else:
-                    base = api_url
-                    if '/chat/completions' not in base:
-                        if '/v1/' in base:
-                            base = base.rsplit('/v1/',1)[0] + '/v1/chat/completions'
-                        elif '/v4/' in base:
-                            base = base.rsplit('/v4/',1)[0] + '/v4/chat/completions'
-                        else:
-                            base = base + '/chat/completions'
-                    req_data = json.dumps({
-                        "model": model_name, "messages": ollama_msgs,
-                        "temperature": 0.3, "max_tokens": 4096, "stream": True,
-                        "tools": self.tool_registry.get_tool_schemas()
-                    }).encode()
+                    base = build_chat_completions_endpoint(provider, api_url)
+                    req_payload = build_openai_chat_payload(
+                        provider,
+                        model_name,
+                        ollama_msgs,
+                        stream=True,
+                        temperature=0.3,
+                        max_tokens=4096,
+                        tools=self.tool_registry.get_tool_schemas(),
+                    )
+                    req_data = json.dumps(req_payload).encode()
                     auth = f"Bearer {api_key}"
                     req = urllib.request.Request(base, data=req_data, headers={"Content-Type": "application/json", "Authorization": auth})
                     resp = urllib.request.urlopen(req, timeout=30)
@@ -5341,6 +5406,9 @@ class QueryLoop:
                     _last_read_time = _time.time()
                     try:
                         while True:
+                            if self._is_aborted(abort_event):
+                                yield self._abort_event_json(run_id)
+                                return
                             if _time.time() - _last_read_time > 60:
                                 response_text += "\n[Read timeout: no data for 60s]"
                                 break
@@ -5425,8 +5493,11 @@ class QueryLoop:
                 if not clean_response:
                     clean_response = "[Used tool: " + ", ".join(tc["name"] for tc in tool_calls) + "]"
                 for tc in tool_calls:
+                    if self._is_aborted(abort_event):
+                        yield self._abort_event_json(run_id)
+                        return
                     tool_def = self.tool_registry.tools.get(tc["name"], {})
-                    if getattr(self.tool_registry, '_plan_active', False) and tc["name"] in ("write_file","edit_file","execute_command","compile"):
+                    if _agent_plan_mode and tc["name"] in ("write_file","edit_file","execute_command","compile"):
                         yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":False,"permission":"deny","done":False})
                         result_text="Blocked: Cannot use write_file/edit_file/execute_command/compile in plan mode."
                         yield json.dumps({"type":"tool_result","tool":tc["name"],"input":tc.get("input",{}),"output":result_text,"iteration":state.turn_count,"done":False})
@@ -5439,7 +5510,11 @@ class QueryLoop:
                         preq=PermissionRequest(tc["name"],tc.get("input",{}),perm.get("reason",""))
                         pending_permission_requests[preq.request_id]=preq
                         yield json.dumps({"type":"permission_request","request_id":preq.request_id,"tool":tc["name"],"input":tc["input"],"reason":perm.get("reason",""),"iteration":state.turn_count,"dangerous":is_dangerous,"done":False})
-                        resolved=preq.wait(timeout=60)
+                        resolved, aborted = self._wait_permission(preq, 60, abort_event)
+                        if aborted:
+                            pending_permission_requests.pop(preq.request_id,None)
+                            yield self._abort_event_json(run_id)
+                            return
                         if not resolved:
                             result_text = f"Permission request timeout or error: {tc['name']}. Please try again."
                             audit_logger.log("permission_denied", tc["name"], {"reason": "timeout_or_error"}, False)
@@ -5458,7 +5533,15 @@ class QueryLoop:
                             if preq.always:
                                 self.permission_checker.add_rule(tc["name"],"allow")
                             audit_logger.log("permission_granted",tc["name"],{"reason":"user_approved","always":preq.always},True)
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id,None)
+                                yield self._abort_event_json(run_id)
+                                return
                             result=self.tool_registry.execute(tc["name"],tc["input"])
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id,None)
+                                yield self._abort_event_json(run_id)
+                                return
                             result_text=result.get("result",result.get("error","Unknown error"))
                             if "error" in result:self.permission_checker.denial_tracker.record_denial()
                             else:self.permission_checker.denial_tracker.record_approval()
@@ -5478,7 +5561,13 @@ class QueryLoop:
                         self.permission_checker.denial_tracker.record_denial()
                     else:
                         yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":is_dangerous,"permission":"allow","done":False})
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
                         result=self.tool_registry.execute(tc["name"],tc["input"])
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
                         result_text=result.get("result",result.get("error","Unknown error"))
                         if not isinstance(result_text, str):
                             result_text = json.dumps(result_text, ensure_ascii=False)
@@ -5515,12 +5604,15 @@ class QueryLoop:
                 return
             state.transition=ContinueReason.NEXT_TURN
 
-    def _query_loop(self, state):
+    def _query_loop(self, state, abort_event=None, run_id=None):
         model = load_model()
         _planning_tools = ('todo_write','enter_plan_mode','exit_plan_mode','task_create','task_update','task_list','brief')
         _planning_count = 0
         _max_planning_calls = 3
         while True:
+            if self._is_aborted(abort_event):
+                yield self._abort_event_json(run_id)
+                return
             state.messages = _snip_compact(state.messages)
             state.messages = _micro_compact(state.messages)
             state.messages = _auto_compact(state.messages)
@@ -5548,6 +5640,10 @@ class QueryLoop:
                 _start_time = __import__('time').time()
                 _last_heartbeat = _start_time
                 while not _stream_done[0]:
+                    if self._is_aborted(abort_event):
+                        _stream_cancel[0] = True
+                        yield self._abort_event_json(run_id)
+                        return
                     _elapsed = __import__('time').time() - _start_time
                     if _elapsed > _model_timeout:
                         _stream_cancel[0] = True
@@ -5561,6 +5657,9 @@ class QueryLoop:
                 if _stream_error[0]:
                     raise _stream_error[0]
                 for ct, cc in _stream_result:
+                    if self._is_aborted(abort_event):
+                        yield self._abort_event_json(run_id)
+                        return
                     if ct == 'content' and cc:
                         response_text += cc
                         yield json.dumps({"type": "thinking", "content": cc, "iteration": state.turn_count, "done": False})
@@ -5588,8 +5687,11 @@ class QueryLoop:
                     state.turn_count += 1
                     continue
                 for tc in tool_calls:
+                    if self._is_aborted(abort_event):
+                        yield self._abort_event_json(run_id)
+                        return
                     tool_def = self.tool_registry.tools.get(tc["name"], {})
-                    if getattr(self.tool_registry, '_plan_active', False) and tc["name"] in ("write_file", "edit_file", "execute_command", "compile"):
+                    if _agent_plan_mode and tc["name"] in ("write_file", "edit_file", "execute_command", "compile"):
                         yield json.dumps({
                             "type": "tool_use",
                             "tool": tc["name"],
@@ -5617,7 +5719,11 @@ class QueryLoop:
                         preq = PermissionRequest(tc["name"], tc.get("input", {}), perm.get("reason", ""))
                         pending_permission_requests[preq.request_id] = preq
                         yield json.dumps({"type": "permission_request", "request_id": preq.request_id, "tool": tc["name"], "input": tc["input"], "reason": perm.get("reason", ""), "iteration": state.turn_count, "dangerous": is_dangerous, "done": False})
-                        resolved = preq.wait(timeout=60)
+                        resolved, aborted = self._wait_permission(preq, 60, abort_event)
+                        if aborted:
+                            pending_permission_requests.pop(preq.request_id, None)
+                            yield self._abort_event_json(run_id)
+                            return
                         if not resolved:
                             # 如果wait返回False(理论上不会发生,因为timeout=None),则拒绝执行
                             result_text = f"Permission request timeout or error: {tc['name']}. Please try again."
@@ -5636,7 +5742,15 @@ class QueryLoop:
                             if preq.always:
                                 self.permission_checker.add_rule(tc["name"], "allow")
                             audit_logger.log("permission_granted", tc["name"], {"reason": "user_approved", "always": preq.always}, True)
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id, None)
+                                yield self._abort_event_json(run_id)
+                                return
                             result = self.tool_registry.execute(tc["name"], tc["input"])
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id, None)
+                                yield self._abort_event_json(run_id)
+                                return
                             result_text = result.get("result", result.get("error", "Unknown error"))
                             if not isinstance(result_text, str):
                                 result_text = json.dumps(result_text, ensure_ascii=False)
@@ -5661,7 +5775,13 @@ class QueryLoop:
                         self.permission_checker.denial_tracker.record_denial()
                     else:
                         yield json.dumps({"type": "tool_use", "tool": tc["name"], "input": tc["input"], "iteration": state.turn_count, "dangerous": is_dangerous, "permission": "allow", "done": False})
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
                         result = self.tool_registry.execute(tc["name"], tc["input"])
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
                         result_text = result.get("result", result.get("error", "Unknown error"))
                         if not isinstance(result_text, str):
                             result_text = json.dumps(result_text, ensure_ascii=False)
@@ -6412,6 +6532,12 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 <script>
 const isElectron = typeof window !== 'undefined' && typeof window.kaguyaDesktop !== 'undefined';
 const isDesktopMode = isElectron || (typeof window !== 'undefined' && window.location && window.location.search && window.location.search.includes('desktop=1'));
+function canUseDesktopDialog(kind){
+    if(!isElectron || !window.kaguyaDesktop || !window.kaguyaDesktop.dialog) return false;
+    const dialog = window.kaguyaDesktop.dialog;
+    if(kind === 'folder') return typeof dialog.openFolder === 'function';
+    return typeof dialog.openFile === 'function';
+}
 if (isElectron) {
     console.log('[Kaguya] Running in Electron desktop mode');
     console.log('[Kaguya] Platform:', window.kaguyaDesktop.platform);
@@ -6492,6 +6618,8 @@ function applyLang(){
   renderTasks();
 }
 let currentMode='chat';let openTabs=[];let activeTab=null;let agentHistory=[];let isAgentRunning=false;
+let currentAgentRunId=null;
+let currentAgentAbortController=null;
 let electronTerminalSession=null;
 let ideTasks=JSON.parse(localStorage.getItem('kaguya_ide_tasks')||'[]');
 let activeTaskId=localStorage.getItem('kaguya_ide_active_task')||'main';
@@ -6539,7 +6667,7 @@ function toggleTaskStatus(id){const task=ideTasks.find(function(t2){return t2.id
 function renderTasks(){renderConvList();}
 async function openProjectDir(){
   let projectPath;
-  if(isElectron){
+  if(canUseDesktopDialog('folder')){
     try{
       const result = await window.kaguyaDesktop.dialog.openFolder({title: t('openProject')});
       if(result.canceled || !result.filePaths || !result.filePaths.length) return;
@@ -6599,7 +6727,7 @@ const SLASH_COMMANDS=[
   {cmd:'/diff',desc:'Show pending file changes'},
 ];
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function getExternalApiConfig(){try{const cfg=JSON.parse(localStorage.getItem('api_providers')||'{}');for(const pv of Object.keys(cfg)){const c=cfg[pv];if(c&&c.enabled&&c.apiKey)return{enabled:true,apiKey:c.apiKey,apiUrl:c.apiUrl||'',model:c.model||'',provider:pv};}}catch(e){}return null;}
+function getExternalApiConfig(){try{const cfg=JSON.parse(localStorage.getItem('api_providers')||'{}');var active=localStorage.getItem('active_api_provider')||'';var keys=active?[active].concat(Object.keys(cfg).filter(function(k){return k!==active;})):Object.keys(cfg);for(const pv of keys){const c=cfg[pv];if(c&&c.enabled&&(c.apiKey||c.hasSavedKey))return{enabled:true,apiKey:c.apiKey||'',hasSavedKey:!!c.hasSavedKey,apiUrl:c.apiUrl||'',model:c.model||'',provider:pv};}}catch(e){}return null;}
 function generateDeviceId(){let stored=localStorage.getItem('kaguya_device_id');if(stored)return stored;const nav=window.navigator;const screen=window.screen;const raw=[nav.userAgent,nav.language,screen.width+'x'+screen.height,screen.colorDepth,new Date().getTimezoneOffset(),nav.hardwareConcurrency||0,nav.platform||''].join('|');let hash=0;for(let i=0;i<raw.length;i++){const c=raw.charCodeAt(i);hash=((hash<<5)-hash)+c;hash|=0;}const id='dev_'+Math.abs(hash).toString(36)+'_'+Date.now().toString(36);localStorage.setItem('kaguya_device_id',id);return id;}
 function updateTokenDisplay(){document.getElementById('statusTokens').textContent=totalTokensIn+'+'+totalTokensOut+' tk';document.getElementById('tokenInfo').textContent=totalTokensIn+'+'+totalTokensOut+' tk';const costStr='$'+totalCost.toFixed(4);document.getElementById('statusCost').textContent=costStr;document.getElementById('costInfo').textContent=costStr;}
 function estimateTokens(text){return Math.ceil(text.length/4);}
@@ -6657,7 +6785,7 @@ async function treeRunFile(path,name){var tp=document.getElementById('bottomPane
 function renderCode(content,lang){const el=document.getElementById('codeContent');let highlighted;try{highlighted=hljs.highlight(content,{language:lang||'plaintext'}).value;}catch(e){highlighted=esc(content);}el.innerHTML='<pre><code class="hljs">'+highlighted+'</code></pre>';}
 function termLog(text,cls=''){const body=document.getElementById('terminalBody');const line=document.createElement('div');line.className='line'+(cls?' '+cls:'');if(cls==='html'){line.innerHTML=text;}else{line.textContent=text;}body.appendChild(line);body.scrollTop=body.scrollHeight;var tab=_terminalTabs.find(function(t){return t.id===_activeTermTab;});if(tab){if(!tab._outputCache)tab._outputCache=[];tab._outputCache.push({text:text,cls:cls});if(tab._outputCache.length>500)tab._outputCache=tab._outputCache.slice(-300);}var outType=cls==='error'?'stderr':cls==='success'?'stdout':cls==='info'?'info':'stdout';outputLog(text,outType);}
 async function selectFiles(){
-  if(isElectron){
+  if(canUseDesktopDialog('file')){
     try{
       const result=await window.kaguyaDesktop.dialog.openFile({title:t('selectFile'),multi:true});
       if(result.canceled||!result.filePaths||!result.filePaths.length){termLog(t('noFilesSelected'),'info');return;}
@@ -6673,7 +6801,7 @@ async function selectFiles(){
   document.getElementById('ideFileInput').click();
 }
 async function selectFolder(){
-  if(isElectron){
+  if(canUseDesktopDialog('folder')){
     try{
       const result=await window.kaguyaDesktop.dialog.openFolder({title:t('selectFolder')});
       if(result.canceled||!result.filePaths||!result.filePaths.length){termLog(t('noFilesSelected'),'info');return;}
@@ -7053,7 +7181,7 @@ async function runTerminalCmd(cmd){
   if(isElectron && electronTerminalSession){
     try{
       window.kaguyaDesktop.terminal.write(electronTerminalSession, cmd + '\n');
-      setTimeout(function(){ setTermRunning(false); }, 500);
+      setTermRunning(false);
       return;
     }catch(e){
       termLog('Error: '+e.message,'error');
@@ -7086,13 +7214,24 @@ async function runTerminalCmd(cmd){
   setTermRunning(false);
 }
 function showPermissionPrompt(toolName,toolInput,requestId,reason,msgEl){return new Promise((resolve)=>{const bar=document.createElement('div');bar.className='permission-bar';bar.style.flexWrap='wrap';bar.style.gap='4px';const inputStr=typeof toolInput==='object'?JSON.stringify(toolInput,null,1):String(toolInput);const shortInput=inputStr.length>200?inputStr.substring(0,200)+'...':inputStr;const reasonHtml=reason?'<div style="width:100%;font-size:9px;color:var(--text-muted);margin-top:2px;">'+t('permReason')+': '+esc(reason)+'</div>':'';const detailHtml='<div style="width:100%;max-height:80px;overflow:auto;font-size:9px;color:var(--text-dim);background:var(--bg-0);padding:4px 6px;border-radius:3px;margin-top:2px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-all;">'+esc(shortInput)+'</div>';bar.innerHTML='<span style="color:var(--warning);">&#x26A0;</span> <span>'+t('permRequest')+': <strong>'+esc(toolName)+'</strong></span>'+'<button class="allow-btn" id="permAllow">'+t('allow')+'</button>'+'<button class="deny-btn" id="permDeny">'+t('deny')+'</button>'+'<label style="font-size:9px;color:var(--text-muted);display:flex;align-items:center;gap:3px;margin-left:4px;"><input type="checkbox" id="permAlways" style="width:10px;height:10px;"> '+t('alwaysAllow')+'</label>'+reasonHtml+detailHtml;msgEl.appendChild(bar);msgEl.scrollTop=msgEl.scrollHeight;var _resolved=false;function _doResolve(result){if(_resolved)return;_resolved=true;bar.remove();if(requestId){fetch('/agent/permission/respond',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:requestId,allowed:result.allowed,always:result.always})}).catch(function(e){console.warn('[Kaguya IDE] Permission respond failed:',e);});}resolve(result);}bar.querySelector('#permAllow').onclick=()=>{const always=bar.querySelector('#permAlways').checked;_doResolve({allowed:true,always:always});};bar.querySelector('#permDeny').onclick=()=>{const always=bar.querySelector('#permAlways').checked;_doResolve({allowed:false,always:always});};setTimeout(function(){_doResolve({allowed:false,always:false});termLog('[Permission auto-denied after 55s timeout]','info');},55000);});}
-function stopAgent(){
-  if(!isAgentRunning)return;
-  if(_agentAbortCtrl){_agentAbortCtrl.abort();_agentAbortCtrl=null;}
-  if(_agentRunId){
-    fetch('/agent/abort',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:_agentRunId})}).catch(function(){});
-    _agentRunId=null;
+async function stopAgent(){
+  const runId=currentAgentRunId;
+  const ctrl=currentAgentAbortController;
+  if(ctrl){try{ctrl.abort();}catch(e){}}
+  if(runId){
+    try{
+      await fetch('/agent/abort',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})});
+    }catch(e){
+      termLog('[Agent abort request failed] '+(e.message||e),'error');
+    }
+  }else if(!isAgentRunning){
+    termLog('[No active agent run]','info');
+    return;
+  }else{
+    termLog('[Agent stop requested before run id was received]','info');
   }
+  currentAgentRunId=null;
+  currentAgentAbortController=null;
   isAgentRunning=false;
   document.getElementById('agentSendBtn').disabled=false;
   document.getElementById('agentStopBtn').style.display='none';
@@ -7122,7 +7261,8 @@ async function sendAgentMsg(){
   let thinkingText='';
   let _lastDataTime=Date.now();
   let _stallWarned=false;
-  var _agentAbortCtrl=new AbortController();
+  currentAgentRunId=null;
+  currentAgentAbortController=new AbortController();
   const _stallCheck=setInterval(function(){
     if(!isAgentRunning){clearInterval(_stallCheck);return;}
     var idle=Date.now()-_lastDataTime;
@@ -7134,14 +7274,12 @@ async function sendAgentMsg(){
     if(idle>180000){
       clearInterval(_stallCheck);
       termLog('❌ Agent超时 (3分钟无响应)，正在终止...','error');
-      _agentAbortCtrl.abort();
-      _setAgentRunning(false);
-      document.getElementById('statusText').textContent=t('ready');
+      stopAgent();
     }
   },10000);
   try{
     const soloMode=currentMode==='solo';
-    const r=await fetch('/agent/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,history:agentHistory.slice(-10),working_dir:undefined,external_api:getExternalApiConfig(),solo_mode:soloMode,device_id:generateDeviceId()}),signal:_agentAbortCtrl.signal});
+    const r=await fetch('/agent/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,history:agentHistory.slice(-10),working_dir:undefined,external_api:getExternalApiConfig(),solo_mode:soloMode,device_id:generateDeviceId()}),signal:currentAgentAbortController.signal});
     if(!r.ok){const errText=await r.text();throw new Error('HTTP '+r.status+': '+errText.substring(0,200));}
     const reader=r.body.getReader();const dec=new TextDecoder();
     let buf='';let fullContent='';
@@ -7167,6 +7305,18 @@ async function sendAgentMsg(){
         if(!l.startsWith('data: '))continue;
         try{
           const d=JSON.parse(l.slice(6));
+          if(d.type==='run_started'){
+            currentAgentRunId=d.run_id||null;
+            continue;
+          }
+          if(d.type==='aborted'){
+            termLog('[Agent stopped by user]','info');
+            _setAgentRunning(false);
+            currentAgentRunId=null;
+            currentAgentAbortController=null;
+            document.getElementById('statusText').textContent=t('ready');
+            continue;
+          }
           if(d.type==='thinking'){
             currentIteration=d.iteration||0;
             document.getElementById('statusText').textContent=t('thinking')+' (turn '+currentIteration+')...';
@@ -7316,6 +7466,8 @@ async function sendAgentMsg(){
             agentHistory.push({user:msg,assistant:fullContent});
             const task=getActiveTask();if(task){task.history=agentHistory.slice(-20);task.status='done';}
             _setAgentRunning(false);
+            currentAgentRunId=null;
+            currentAgentAbortController=null;
             document.getElementById('statusText').textContent=t('ready');
             saveTasks();
             applyConvFolding();
@@ -7325,7 +7477,15 @@ async function sendAgentMsg(){
       }
     }
   }catch(e){
-    const el=document.createElement('div');el.className='msg error';el.textContent='Connection error: '+e.message;msgs.appendChild(el);clearInterval(_stallCheck);_setAgentRunning(false);document.getElementById('statusText').textContent='Error';
+    clearInterval(_stallCheck);
+    if(e.name==='AbortError'){
+      _setAgentRunning(false);
+      currentAgentRunId=null;
+      currentAgentAbortController=null;
+      document.getElementById('statusText').textContent=t('ready');
+      return;
+    }
+    const el=document.createElement('div');el.className='msg error';el.textContent='Connection error: '+e.message;msgs.appendChild(el);_setAgentRunning(false);currentAgentRunId=null;currentAgentAbortController=null;document.getElementById('statusText').textContent='Error';
   }
 }
 function openFileFromAgent(path, content, lineNum){
@@ -7448,7 +7608,7 @@ async function compileCurrentFile(){if(!activeTab){termLog(t('noFileCompile'),'e
 async function checkApiStatus(){
   try{
     const extApi=getExternalApiConfig();
-    if(!extApi||!extApi.enabled||!extApi.apiKey){
+    if(!extApi||!extApi.enabled||(!extApi.apiKey&&!extApi.hasSavedKey)){
       if(isElectron){
         showIdeApiOverlay('External AI API not configured. Please configure an external model (DeepSeek/Qwen/Claude) in the API Center.', true);
         return false;
@@ -7461,7 +7621,7 @@ async function checkApiStatus(){
     const r=await fetch('/agent/api-status',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({external_api:extApi}),
+      body:JSON.stringify({external_api:extApi,device_id:generateDeviceId()}),
       signal:ctrl.signal
     });
     clearTimeout(tid);
@@ -7562,17 +7722,30 @@ async function syncApiConfigFromServer(){
       for(var pv in d.providers){
         var p=d.providers[pv];
         var existingKey=(existing[pv]&&existing[pv].apiKey)||'';
+        var existingEnabled=!!(existing[pv]&&existing[pv].enabled);
         var serverKey=p.api_key||'';
         var isMasked=serverKey&&serverKey.includes('****');
+        var mergedKey=(isMasked||!serverKey)?existingKey:serverKey;
         cfg[pv]={
-          enabled: p._has_key||false,
-          apiKey: (isMasked||!serverKey)?existingKey:serverKey,
+          enabled: !!(p._has_key||(existingEnabled&&existingKey)),
+          apiKey: mergedKey,
+          hasSavedKey: !!p._has_key,
+          maskedApiKey: isMasked?serverKey:'',
           apiUrl: p.api_url||'',
           model: p.model||''
         };
-        if(pv===d.active_provider && p._has_key){cfg[pv].enabled=true;}
+        if(pv===d.active_provider && (p._has_key||mergedKey)){cfg[pv].enabled=true;}
       }
       localStorage.setItem('api_providers', JSON.stringify(cfg));
+      var localActive=localStorage.getItem('active_api_provider');
+      var activeProvider=(localActive&&cfg[localActive]&&cfg[localActive].enabled&&(cfg[localActive].apiKey||cfg[localActive].hasSavedKey))?localActive:d.active_provider;
+      if(!activeProvider||!API_PROVIDERS[activeProvider]||!(cfg[activeProvider]&&cfg[activeProvider].enabled&&(cfg[activeProvider].apiKey||cfg[activeProvider].hasSavedKey))){
+        activeProvider=chooseActiveApiProvider(cfg);
+      }
+      if(activeProvider&&API_PROVIDERS[activeProvider]){
+        _currentApiProvider=activeProvider;
+        localStorage.setItem('active_api_provider',activeProvider);
+      }
       console.log('[Kaguya IDE] API config synced from server (apiKey preserved)');
     }
   }catch(e){
@@ -7633,6 +7806,81 @@ function setupAgentPanelResize(){
     document.body.style.userSelect='';
   }
 }
+const IDE_UPLOAD_BATCH_FILE_LIMIT = 100;
+const IDE_UPLOAD_BATCH_BYTE_LIMIT = 64 * 1024 * 1024;
+function buildUploadBatches(files){
+  const list=Array.from(files||[]);
+  const batches=[];
+  let current=[];
+  let currentBytes=0;
+  list.forEach(function(f){
+    const size=f.size||0;
+    if(current.length && (current.length>=IDE_UPLOAD_BATCH_FILE_LIMIT || currentBytes+size>IDE_UPLOAD_BATCH_BYTE_LIMIT)){
+      batches.push(current);
+      current=[];
+      currentBytes=0;
+    }
+    current.push(f);
+    currentBytes+=size;
+  });
+  if(current.length)batches.push(current);
+  return batches;
+}
+async function uploadDeviceFilesInBatches(files, sourceLabel){
+  const list=Array.from(files||[]);
+  if(!list.length){termLog(t('noFilesSelected'),'error');return;}
+  const batches=buildUploadBatches(list);
+  termLog(t('uploadingFiles')+' '+list.length+' ...','info');
+  if(batches.length>1)termLog('文件数量较多，已自动分批上传: '+batches.length+' 批','info');
+  let importedCount=0;
+  let errorCount=0;
+  let importedBytes=0;
+  const errorSamples=[];
+  for(let i=0;i<batches.length;i++){
+    const batch=batches[i];
+    if(batches.length>1)termLog('上传批次 '+(i+1)+'/'+batches.length+' ('+batch.length+' files)','info');
+    const formData=new FormData();
+    batch.forEach(function(f){
+      const relPath=f.webkitRelativePath||f.name;
+      formData.append('files',f,relPath);
+    });
+    formData.append('device_id',generateDeviceId());
+    formData.append('batch_index',String(i));
+    formData.append('batch_total',String(batches.length));
+    formData.append('source',sourceLabel||'browser');
+    let r;
+    try{
+      r=await fetch('/agent/upload-device-files',{method:'POST',body:formData});
+    }catch(e){
+      throw new Error('网络请求失败，已完成 '+importedCount+'/'+list.length+' 个文件: '+(e.message||e));
+    }
+    const rawText=await r.text();
+    let d=null;
+    try{
+      d=JSON.parse(rawText||'{}');
+    }catch(e){
+      throw new Error('上传接口返回非 JSON (HTTP '+r.status+'): '+rawText.slice(0,160));
+    }
+    if(!r.ok || d.error)throw new Error((d&&d.error)?d.error:('HTTP '+r.status));
+    if(d.imported&&d.imported.length){
+      importedCount+=d.imported.length;
+      d.imported.forEach(function(item){importedBytes+=item.size||0;});
+    }
+    if(d.errors&&d.errors.length){
+      errorCount+=d.errors.length;
+      d.errors.slice(0,10).forEach(function(e){errorSamples.push(e);});
+    }
+  }
+  if(importedCount){
+    termLog(t('uploadSuccess')+': '+importedCount+' files ('+formatFileSize(importedBytes)+')','success');
+    loadFileTree();
+  }
+  if(errorCount){
+    termLog(t('uploadFailed')+': '+errorCount+' files','error');
+    errorSamples.slice(0,20).forEach(function(e){termLog(t('uploadFailed')+': '+(e.name||'file')+' - '+(e.error||'unknown'),'error');});
+  }
+  if(!importedCount)termLog(t('uploadFailed'),'error');
+}
 function setupDragDrop(){
   const editorArea=document.querySelector('.editor-area');
   if(!editorArea)return;
@@ -7642,25 +7890,14 @@ function setupDragDrop(){
     e.preventDefault();e.stopPropagation();editorArea.classList.remove('drag-over');
     const files=e.dataTransfer.files;
     if(!files||!files.length)return;
-    termLog(t('uploadingFiles')+' '+files.length+' (drag & drop)...','info');
-    const formData=new FormData();
-    for(let i=0;i<files.length;i++){
-      const f=files[i];
-      const relPath=f.webkitRelativePath||f.name;
-      formData.append('files',f,relPath);
-    }
-    formData.append('device_id',generateDeviceId());
-    fetch('/agent/upload-device-files',{method:'POST',body:formData}).then(r=>r.json()).then(d=>{
-      if(d.error){termLog(t('uploadFailed')+': '+d.error,'error');return;}
-      if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('uploadSuccess')+': '+i.name+' ('+i.size+' bytes)','success'));loadFileTree();}
-      if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('uploadFailed')+': '+e.name+' - '+e.error,'error'));}
-    }).catch(e=>termLog(t('uploadFailed')+': '+e.message,'error'));
+    uploadDeviceFilesInBatches(files,'drag-drop').catch(function(e){termLog(t('uploadFailed')+': '+(e.message||e),'error');});
   });
 }
 
 async function uploadDeviceFiles(event){
-  if(isElectron){
-    const isFolder = event && event.target && event.target.id === 'ideFolderInput';
+  const isFolder = event && event.target && event.target.id === 'ideFolderInput';
+  const files = event && event.target ? event.target.files : null;
+  if(canUseDesktopDialog(isFolder ? 'folder' : 'file') && (!files || !files.length)){
     try{
       let result;
       if(isFolder){
@@ -7682,29 +7919,15 @@ async function uploadDeviceFiles(event){
     }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
     return;
   }
-  const files=event.target.files;
   if(!files||!files.length){termLog(t('noFilesSelected'),'error');return;}
-  termLog(t('uploadingFiles')+' '+files.length+' ...','info');
-  const formData=new FormData();
-  for(let i=0;i<files.length;i++){
-    const f=files[i];
-    const relPath=f.webkitRelativePath||f.name;
-    formData.append('files',f,relPath);
-  }
-  formData.append('device_id',generateDeviceId());
   try{
-    const r=await fetch('/agent/upload-device-files',{method:'POST',body:formData});
-    const d=await r.json();
-    if(d.error){termLog(t('uploadFailed')+': '+d.error,'error');return;}
-    if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('uploadSuccess')+': '+i.name+' ('+i.size+' bytes)','success'));loadFileTree();}
-    if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('uploadFailed')+': '+e.name+' - '+e.error,'error'));}
-    if(!d.imported||!d.imported.length)termLog(t('uploadFailed'),'error');
+    await uploadDeviceFilesInBatches(files,isFolder?'folder-input':'file-input');
   }catch(e){termLog(t('uploadFailed')+': '+e.message,'error');}
   event.target.value='';
 }
 
 async function importFilesFromHost(){
-  if(isElectron){
+  if(canUseDesktopDialog('file')){
     try{
       const result = await window.kaguyaDesktop.dialog.openFile({title: t('selectFile'), multi: true});
       if(result.canceled || !result.filePaths || !result.filePaths.length){
@@ -8100,7 +8323,7 @@ async function runProjectFromList(projectId,projectPath,startCommand){
   }catch(e){termLog('Failed to start project: '+e.message,'error');}
 }
 async function browseHostDirs(){
-  if(isElectron){
+  if(canUseDesktopDialog('folder')){
     try{
       const result = await window.kaguyaDesktop.dialog.openFolder({title: t('browseDir')});
       if(result.canceled || !result.filePaths || !result.filePaths.length){
@@ -8734,12 +8957,10 @@ memory_system = AgentMemorySystem()
 from PIL import Image
 import io
 
-# 尝试导入多模态相关库
-try:
-    from transformers import CLIPProcessor, CLIPModel
-    CLIP_AVAILABLE = True
-except ImportError:
-    CLIP_AVAILABLE = False
+# CLIP/torch are optional and expensive. Import them only when a vision request needs them.
+CLIPProcessor = None
+CLIPModel = None
+CLIP_AVAILABLE = None
 
 try:
     import pytesseract
@@ -8759,11 +8980,20 @@ class MultimodalSystem:
 
     def _ensure_clip(self):
         """延迟初始化CLIP模型"""
+        global CLIPProcessor, CLIPModel, CLIP_AVAILABLE, torch
         if self._clip_initialized:
-            return True
-        if not CLIP_AVAILABLE:
+            return bool(self.clip_model and self.clip_processor and torch)
+        if CLIP_AVAILABLE is False:
             return False
         try:
+            if torch is None:
+                import torch as _torch
+                torch = _torch
+            if CLIPProcessor is None or CLIPModel is None:
+                from transformers import CLIPProcessor as _CLIPProcessor, CLIPModel as _CLIPModel
+                CLIPProcessor = _CLIPProcessor
+                CLIPModel = _CLIPModel
+            CLIP_AVAILABLE = True
             if self.clip_model is None:
                 self.clip_model = CLIPModel.from_pretrained(
                     "openai/clip-vit-base-patch32",
@@ -8778,6 +9008,7 @@ class MultimodalSystem:
             print("[OK] CLIP model loaded")
             return True
         except Exception as e:
+            CLIP_AVAILABLE = False
             print(f"[WARN] CLIP model load failed: {e}")
             self._clip_initialized = True
             return False
@@ -15803,7 +16034,7 @@ HTML_TEMPLATE = """
         }
         function safeMarkedParse(content) {
             if (typeof marked !== 'undefined') { try { return marked.parse(content || ''); } catch(e) { return content; } }
-            return content.replace(/<\//g, '&lt;').replace(/>/g, '&gt;').replace(/\\n/g, '<br>');
+            return content.replace(/<\\//g, '&lt;').replace(/>/g, '&gt;').replace(/\\n/g, '<br>');
         }
         let chats = JSON.parse(localStorage.getItem('kaguya_chats') || '[]');
         let currentChatId = null, history = [], attachments = [];
@@ -16435,7 +16666,7 @@ HTML_TEMPLATE = """
                     for (var i = 0; i < data.results.length; i++) {
                         var r = data.results[i];
                         var textPreview = r.text.length > 120 ? r.text.slice(0, 120) + '...' : r.text;
-                        textPreview = textPreview.replace(/<\//g, '&lt;').replace(/>/g, '&gt;');
+            textPreview = textPreview.replace(/<\\//g, '&lt;').replace(/>/g, '&gt;');
                         resultsHtml += '<div style="padding:10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:6px;font-size:11px;cursor:pointer;" onclick="useRagResultByIndex(' + i + ')">' +
                             '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
                                 '<span style="color:var(--primary);font-weight:600;">' + r.doc_name + '</span>' +
@@ -22788,13 +23019,6 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             }
             
             const extApi=getActiveApiConfig();
-            if (extApi) {
-                await sendDeepSeekMessage(msg, input);
-                return;
-            } else if (false) {
-                // DeepSeek 已启用但没有 API Key，显示警告并使用本地模型
-                showToast('⚠️ DeepSeek 已启用但未配置 API Key，将使用本地模型');
-            }
             
             const sendBtn = $('sendBtn');
             const stopBtn = $('stopBtn');
@@ -22853,7 +23077,9 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                         rag_rrf: ragSettings.useRrf,
                         rag_metadata_filter: ragSettings.useMetadataFilter,
                         rag_time_weight: ragSettings.useTimeWeight,
-                        rag_iterative: ragSettings.useIterative
+                        rag_iterative: ragSettings.useIterative,
+                        device_id: generateDeviceId(),
+                        external_api: extApi
                     })
                 });
                 
@@ -22992,7 +23218,9 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                         rag_rrf: ragSettings.useRrf,
                         rag_metadata_filter: ragSettings.useMetadataFilter,
                         rag_time_weight: ragSettings.useTimeWeight,
-                        rag_iterative: ragSettings.useIterative
+                        rag_iterative: ragSettings.useIterative,
+                        device_id: generateDeviceId(),
+                        external_api: extApi
                     })
                 });
                 
@@ -23392,14 +23620,17 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 {id:'gpt-4o',label:'GPT-4o (多模态)'},
                 {id:'o4-mini',label:'O4 Mini (快速)'}
             ],docUrl:'https://platform.openai.com'},
-            kimi:{name:'Kimi (月之暗面)',color:'#7c3aed',icon:'&#x1F31C;',url:'https://api.moonshot.cn/v1/chat/completions',models:[
-                {id:'kimi-k2.5',label:'Kimi K2.5 (最新)'},
+            kimi:{name:'Kimi (月之暗面)',color:'#7c3aed',icon:'&#x1F31C;',url:'https://api.moonshot.ai/v1',models:[
+                {id:'kimi-k2.6',label:'Kimi K2.6 (最新)'},
+                {id:'kimi-k2.5',label:'Kimi K2.5'},
                 {id:'moonshot-v1-auto',label:'Moonshot V1 Auto'},
                 {id:'moonshot-v1-128k',label:'Moonshot V1 128K'},
                 {id:'moonshot-v1-32k',label:'Moonshot V1 32K'}
-            ],docUrl:'https://platform.moonshot.cn'},
-            minimax:{name:'MiniMax',color:'#ec4899',icon:'&#x26A1;',url:'https://api.minimax.chat/v1/text/chatcompletion_v2',models:[
-                {id:'MiniMax-Text-01',label:'MiniMax Text 2.7 (最新)'},
+            ],docUrl:'https://platform.kimi.ai'},
+            minimax:{name:'MiniMax',color:'#ec4899',icon:'&#x26A1;',url:'https://api.minimaxi.com/v1',models:[
+                {id:'MiniMax-M2.7',label:'MiniMax M2.7 (最新)'},
+                {id:'MiniMax-M2.7-highspeed',label:'MiniMax M2.7 Highspeed'},
+                {id:'MiniMax-M2.5',label:'MiniMax M2.5'},
                 {id:'abab6.5s-chat',label:'abab 6.5s Chat'},
                 {id:'abab6.5t-chat',label:'abab 6.5t Chat'},
                 {id:'abab5.5s-chat',label:'abab 5.5s Chat'}
@@ -23420,25 +23651,45 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 {id:'qwen3.6-32b',label:'Qwen3.6-32B (轻量)'}
             ],docUrl:'https://dashscope.console.aliyun.com'}
         };
-        let _currentApiProvider='deepseek';
+        let _currentApiProvider=localStorage.getItem('active_api_provider')||'deepseek';
 
         function getApiProviders(){try{return JSON.parse(localStorage.getItem('api_providers')||'{}');}catch(e){return{};}}
+        function chooseActiveApiProvider(cfg){
+          var selected=localStorage.getItem('active_api_provider')||_currentApiProvider||'deepseek';
+          if(API_PROVIDERS[selected]&&cfg[selected]&&cfg[selected].enabled&&(cfg[selected].apiKey||cfg[selected].hasSavedKey))return selected;
+          for(const pv of Object.keys(API_PROVIDERS)){
+            const c=cfg[pv];
+            if(c&&c.enabled&&(c.apiKey||c.hasSavedKey))return pv;
+          }
+          return API_PROVIDERS[selected]?selected:'deepseek';
+        }
         function saveApiProviders(cfg){
           localStorage.setItem('api_providers',JSON.stringify(cfg));
-          var backendCfg={active_provider:'deepseek',providers:{},device_id:generateDeviceId()};
+          var activeProvider=chooseActiveApiProvider(cfg);
+          _currentApiProvider=activeProvider;
+          localStorage.setItem('active_api_provider',activeProvider);
+          var backendCfg={active_provider:activeProvider,providers:{},device_id:generateDeviceId()};
           Object.keys(cfg).forEach(function(k){
             var c=cfg[k];
             backendCfg.providers[k]={api_url:c.apiUrl||'',api_key:c.apiKey||'',model:c.model||''};
-            if(c.enabled)backendCfg.active_provider=k;
           });
           fetch('/external/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(backendCfg)}).catch(function(){});
+          var activeCfg=cfg[activeProvider]||{};
+          if(activeCfg.apiKey){
+            var bindPayload={device_id:generateDeviceId(),provider:activeProvider,apiKey:activeCfg.apiKey,apiUrl:activeCfg.apiUrl||API_PROVIDERS[activeProvider].url,model:activeCfg.model||API_PROVIDERS[activeProvider].models[0].id};
+            fetch('/api/device/bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bindPayload)}).catch(function(){});
+            if(window.kaguyaDesktop&&window.kaguyaDesktop.device&&window.kaguyaDesktop.device.bind){
+              window.kaguyaDesktop.device.bind(bindPayload).catch(function(){});
+            }
+          }
         }
 
         function getActiveApiConfig(){
             const providers=getApiProviders();
-            for(const pv of Object.keys(API_PROVIDERS)){
-                const cfg=providers[pv];
-                if(cfg&&cfg.enabled&&cfg.apiKey)return{provider:pv,enabled:true,apiKey:cfg.apiKey,apiUrl:cfg.apiUrl||API_PROVIDERS[pv].url,model:cfg.model||API_PROVIDERS[pv].models[0].id};
+            const pv=chooseActiveApiProvider(providers);
+            const cfg=providers[pv];
+            if(cfg&&cfg.enabled&&(cfg.apiKey||cfg.hasSavedKey)){
+                return{provider:pv,enabled:true,apiKey:cfg.apiKey||'',hasSavedKey:!!cfg.hasSavedKey,apiUrl:cfg.apiUrl||API_PROVIDERS[pv].url,model:cfg.model||API_PROVIDERS[pv].models[0].id};
             }
             return null;
         }
@@ -23469,6 +23720,10 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 model:(document.getElementById('ap_model').value||'').trim(),
                 enabled:document.getElementById('ap_enabled').checked
             };
+            if(providers[pv].enabled&&providers[pv].apiKey){
+                _currentApiProvider=pv;
+                localStorage.setItem('active_api_provider',pv);
+            }
             saveApiProviders(providers);
             updateApiIndicator();
             showToast(API_PROVIDERS[pv].name+' \u914d\u7f6e\u5df2\u4fdd\u5b58');
@@ -25472,6 +25727,17 @@ def load_model():
             return None
     return model
 
+def model_unavailable_payload():
+    return {
+        "success": False,
+        "error": "No local model available",
+        "reason": "ollama_unavailable",
+        "message": "Ollama service or model is unavailable. Configure an external API provider or start Ollama with the configured model.",
+        "provider": "ollama",
+        "model": OLLAMA_MODEL,
+        "available": False,
+    }
+
 def get_role_system(role_id):
     role = next((r for r in PRESET_ROLES if r['id'] == role_id), PRESET_ROLES[0])
     return role.get('system', '')
@@ -25907,6 +26173,10 @@ def get_lora_system(lora_id):
 
 def generate_stream(message, history, role_id='kaguya', lora_id=None, temperature=0.7, max_tokens=4096, rag_context="", session_id=None, structured_template=None):
     model = load_model()
+    if model is None:
+        payload = model_unavailable_payload()
+        yield json.dumps({"content": payload["message"], "done": True, "error": payload["error"], "reason": payload["reason"]})
+        return
     
     system_prompt = get_role_system(role_id)
     lora_system = get_lora_system(lora_id)
@@ -26005,6 +26275,9 @@ def generate_stream(message, history, role_id='kaguya', lora_id=None, temperatur
 
 def chat(message, history, role_id='kaguya', lora_id=None, temperature=0.7, max_tokens=4096, structured_template=None):
     model = load_model()
+    if model is None:
+        payload = model_unavailable_payload()
+        raise RuntimeError(payload["message"])
     
     system_prompt = get_role_system(role_id)
     lora_system = get_lora_system(lora_id)
@@ -26041,6 +26314,52 @@ def get_provider_runtime(provider=None, device_id=None):
     api_url = (provider_cfg.get("api_url") or "").strip()
     model = (provider_cfg.get("model") or "").strip()
     return provider_id, {"api_key": api_key, "api_url": api_url, "model": model}
+
+def build_chat_completions_endpoint(provider_id, api_url):
+    provider_id = (provider_id or "").strip().lower()
+    base = (api_url or "").strip().rstrip("/")
+    if provider_id in ("kimi", "moonshot") and not base:
+        base = "https://api.moonshot.ai/v1"
+    if provider_id == "minimax" and not base:
+        base = "https://api.minimaxi.com/v1"
+    elif provider_id == "deepseek" and not base:
+        base = "https://api.deepseek.com"
+    if not base:
+        raise ValueError(f"{provider_id} API URL 未配置")
+    if base.endswith("/chat/completions") or base.endswith("/text/chatcompletion_v2"):
+        return base
+    if base.endswith("/v1"):
+        return base + "/chat/completions"
+    if "/v1/" in base:
+        return base.rsplit("/v1/", 1)[0] + "/v1/chat/completions"
+    if provider_id == "minimax":
+        return base + "/v1/chat/completions"
+    return base + "/chat/completions"
+
+def _is_kimi_k2_model(provider_id, model):
+    provider_id = (provider_id or "").strip().lower()
+    model_id = (model or "").strip().lower()
+    return provider_id in ("kimi", "moonshot") and model_id.startswith("kimi-k2")
+
+def build_openai_chat_payload(provider_id, model, messages, stream=False, temperature=None, max_tokens=None, tools=None):
+    payload = {
+        "model": model or ("MiniMax-M2.7" if (provider_id or "").strip().lower() == "minimax" else ""),
+        "messages": messages,
+    }
+    if stream is not None:
+        payload["stream"] = bool(stream)
+    if tools:
+        payload["tools"] = tools
+    if _is_kimi_k2_model(provider_id, model):
+        payload["thinking"] = {"type": "disabled"}
+        if max_tokens:
+            payload["max_completion_tokens"] = max_tokens
+        return payload
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    return payload
 
 def call_external_provider(provider, api_url, api_key, model, prompt, system_prompt=""):
     if not api_key:
@@ -26097,21 +26416,12 @@ def call_external_provider(provider, api_url, api_key, model, prompt, system_pro
             if text:
                 return text
         return "未获取到有效内容"
-    base = (api_url or "").rstrip("/")
-    if provider_id == "deepseek" and not base:
-        base = "https://api.deepseek.com"
-    if not base:
-        raise ValueError(f"{provider} API URL 未配置")
-    endpoint = f"{base}/chat/completions"
+    endpoint = build_chat_completions_endpoint(provider_id, api_url)
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.6
-    }
+    payload = build_openai_chat_payload(provider_id, model, messages, stream=False, temperature=0.6, max_tokens=2048)
     req = urllib.request.Request(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -26311,6 +26621,50 @@ def mask_api_key(key):
     if not key or len(key) < 8:
         return '****' if key else ''
     return key[:4] + '****' + key[-4:]
+
+def _request_device_id(data=None):
+    data = data if isinstance(data, dict) else {}
+    return (
+        data.get("device_id")
+        or request.args.get("device_id", "")
+        or request.headers.get("X-Device-Id", "")
+        or "desktop"
+    )
+
+def _save_single_external_api(device_id, config):
+    cfg = normalize_external_api_payload(config)
+    if not cfg["api_key"]:
+        raise ValueError("api_key required")
+    user_config = _get_user_external_api(device_id)
+    providers = user_config.setdefault("providers", {})
+    provider_cfg = providers.setdefault(cfg["provider"], {})
+    provider_cfg["api_url"] = cfg["api_url"]
+    provider_cfg["api_key"] = cfg["api_key"]
+    provider_cfg["model"] = cfg["model"]
+    user_config["active_provider"] = cfg["provider"]
+    _save_user_external_api(device_id, user_config)
+    return cfg
+
+def _get_active_external_api_summary(device_id):
+    if not device_id:
+        return {
+            "has_config": False,
+            "provider": "",
+            "api_url": "",
+            "model": "",
+            "masked_api_key": "",
+        }
+    user_config = _get_user_external_api(device_id)
+    provider = (user_config.get("active_provider") or "deepseek").strip().lower()
+    provider_cfg = user_config.get("providers", {}).get(provider, {})
+    api_key = (provider_cfg.get("api_key") or "").strip()
+    return {
+        "has_config": bool(api_key),
+        "provider": provider,
+        "api_url": (provider_cfg.get("api_url") or "").strip(),
+        "model": (provider_cfg.get("model") or "").strip(),
+        "masked_api_key": mask_api_key(api_key) if api_key else "",
+    }
 
 SSRF_BLOCKED_HOSTS = ['127.0.0.1', '0.0.0.0', 'localhost', '169.254.169.254', '::1', '0.0.0']
 SSRF_BLOCKED_PREFIXES = ['10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.', 'fc00:', 'fe80:', 'fd']
@@ -26904,6 +27258,35 @@ def ip_whitelist_mode_api():
     return jsonify({"success": True, "mode": new_mode})
 
 PUBLIC_PATHS = ['/auth/login', '/auth/setup', '/auth/logout', '/static/', '/favicon.ico']
+HIGH_RISK_POST_PATHS = {
+    '/agent/file-write',
+    '/agent/write-file',
+    '/agent/revert-file',
+    '/agent/open-project',
+    '/agent/import-files',
+    '/agent/upload-device-files',
+    '/agent/run-project',
+    '/agent/compile',
+    '/agent/terminal/exec',
+}
+
+def _is_loopback_request():
+    host = (request.host or '').split(':', 1)[0].lower()
+    remote = (request.remote_addr or '').lower()
+    return host in ('127.0.0.1', 'localhost', '::1') and remote in ('127.0.0.1', 'localhost', '::1')
+
+def _is_high_risk_path(path):
+    return path in HIGH_RISK_POST_PATHS or path.startswith('/agent/terminal/')
+
+def _csrf_valid():
+    token = session.get('csrf_token', '')
+    csrf_header = request.headers.get('X-CSRF-Token', '')
+    csrf_body = ''
+    try:
+        csrf_body = (request.get_json(silent=True) or {}).get('_csrf_token', '')
+    except Exception:
+        pass
+    return bool(token and (hmac.compare_digest(csrf_header, token) or hmac.compare_digest(csrf_body, token)))
 
 @app.before_request
 def security_before_request():
@@ -26927,6 +27310,13 @@ def security_before_request():
         log_security_event('rate_limit', f'IP {client_ip} 触发速率限制', 'warning')
         return jsonify({'error': '请求过于频繁，请稍后再试'}), 429
     if request.method in ('POST', 'PUT', 'DELETE'):
+        if _is_high_risk_path(request.path) and not _is_loopback_request():
+            if not is_auth_enabled():
+                log_security_event('remote_high_risk_blocked', f'IP {client_ip} blocked path={request.path}', 'critical')
+                return jsonify({'error': 'remote_high_risk_blocked', 'auth_required': True}), 403
+            if not _csrf_valid():
+                log_security_event('csrf_failed', f'IP {client_ip} CSRF验证失败 high-risk path={request.path}', 'warning')
+                return jsonify({'error': 'CSRF验证失败'}), 403
         if request.is_json:
             try:
                 data = request.get_json(silent=True) or {}
@@ -26935,16 +27325,11 @@ def security_before_request():
                     return jsonify({'error': '请求包含不允许的内容'}), 400
             except Exception:
                 pass
-        csrf_exempt = ['/auth/login', '/auth/logout', '/static/', '/api/', '/chat/', '/web/', '/mcp/', '/agent/', '/project/', '/scene', '/lora/', '/tool/', '/code/', '/kb/', '/deepseek/', '/external/', '/security/', '/memory/', '/multimodal/', '/finetune/', '/workflow/', '/rag/', '/privacy/']
+        csrf_exempt = ['/auth/login', '/auth/logout', '/static/', '/api/device/info', '/api/account/saved-config', '/api/account/auto-fill', '/chat/', '/web/', '/mcp/', '/project/', '/scene', '/lora/', '/tool/', '/code/', '/kb/', '/deepseek/', '/external/', '/security/status', '/memory/', '/multimodal/', '/finetune/', '/workflow/', '/rag/', '/privacy/']
         is_csrf_exempt = any(request.path.startswith(p) for p in csrf_exempt)
-        if not is_csrf_exempt and request.content_type and 'json' not in request.content_type:
-            csrf_header = request.headers.get('X-CSRF-Token', '')
-            csrf_body = ''
-            try:
-                csrf_body = (request.get_json(silent=True) or {}).get('_csrf_token', '')
-            except Exception:
-                pass
-            if csrf_header != session.get('csrf_token', '') and csrf_body != session.get('csrf_token', ''):
+        local_high_risk_request = _is_high_risk_path(request.path) and _is_loopback_request()
+        if not is_csrf_exempt and not local_high_risk_request and request.content_type and 'json' not in request.content_type:
+            if not _csrf_valid():
                 log_security_event('csrf_failed', f'IP {client_ip} CSRF验证失败 path={request.path}', 'warning')
                 return jsonify({'error': 'CSRF验证失败'}), 403
     g.csrf_token = session.get('csrf_token', '')
@@ -27012,45 +27397,31 @@ def wallpaper():
 
 @app.route('/header-img')
 def header_img():
-    img_path = os.path.join(os.path.dirname(__file__), 'assets', 'kaguya-header.png')
-    if os.path.exists(img_path):
-        return send_file(img_path)
-    return Response('', status=404)
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-header.png'), 'Kaguya')
 
 @app.route('/hero-img')
 def hero_img():
-    img_path = os.path.join(os.path.dirname(__file__), 'assets', 'kaguya-hero.png')
-    if os.path.exists(img_path):
-        return send_file(img_path)
-    return Response('', status=404)
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-hero.png'), 'Kaguya')
 
 @app.route('/welcome-img')
 def welcome_img():
-    img_path = os.path.join(os.path.dirname(__file__), 'assets', 'kaguya-welcome.png')
-    if os.path.exists(img_path):
-        return send_file(img_path)
-    return Response('', status=404)
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-welcome.png'), 'Kaguya')
 
 @app.route('/deepseek-icon')
 def deepseek_icon():
-    img_path = os.path.join(os.path.dirname(__file__), 'assets', 'deepseek.png')
-    if os.path.exists(img_path):
-        return send_file(img_path)
-    return Response('', status=404)
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'deepseek.png'), 'AI')
 
 @app.route('/sidebar-icon')
 def sidebar_icon():
-    img_path = os.path.join(os.path.dirname(__file__), 'assets', 'sidebar.png')
-    if os.path.exists(img_path):
-        return send_file(img_path)
-    return Response('', status=404)
+    fallback = os.path.join(APP_DIR, 'assets', 'kaguya-header.png')
+    return optional_image_response(fallback, 'K')
 
 @app.route('/favicon.ico')
 def favicon():
-    img_path = os.path.join(os.path.dirname(__file__), 'assets', 'favicon.ico')
+    img_path = os.path.join(APP_DIR, 'assets', 'favicon.ico')
     if os.path.exists(img_path):
         return send_file(img_path)
-    return Response('', status=404)
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-header.png'), 'K')
 
 _cached_index_html = None
 _cached_index_time = 0
@@ -27180,8 +27551,10 @@ def kb_add():
 def deepseek_test():
     try:
         data = request.get_json(silent=True) or {}
-        api_key = data.get('apiKey', '')
-        api_url = data.get('apiUrl', 'https://api.deepseek.com')
+        cfg = normalize_external_api_payload(data)
+        api_key = cfg["api_key"]
+        api_url = cfg["api_url"]
+        provider = cfg["provider"]
         
         if not api_key:
             return jsonify({'success': False, 'error': 'API Key不能为空'})
@@ -27189,7 +27562,7 @@ def deepseek_test():
         import urllib.request
         import json as json_module
         
-        test_url = f"{api_url.rstrip('/')}/chat/completions"
+        test_url = build_chat_completions_endpoint(provider, api_url)
         test_data = {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "Hi"}],
@@ -27225,9 +27598,11 @@ def deepseek_test():
 def deepseek_chat():
     try:
         data = request.get_json(silent=True) or {}
-        api_key = data.get('apiKey', '')
-        api_url = data.get('apiUrl', 'https://api.deepseek.com')
-        model = data.get('model', 'deepseek-chat')
+        cfg = normalize_external_api_payload(data)
+        api_key = cfg["api_key"]
+        api_url = cfg["api_url"]
+        provider = cfg["provider"]
+        model = cfg["model"]
         messages = data.get('messages', [])
         
         if not api_key:
@@ -27236,7 +27611,7 @@ def deepseek_chat():
         import urllib.request
         import json as json_module
         
-        chat_url = f"{api_url.rstrip('/')}/chat/completions"
+        chat_url = build_chat_completions_endpoint(provider, api_url)
         chat_data = {
             "model": model,
             "messages": messages,
@@ -27307,13 +27682,26 @@ def external_config_save():
     if not isinstance(providers, dict):
         return jsonify({"success": False, "error": "providers格式错误"})
     default_cfg = default_external_api_config()
+    existing_config = _get_user_external_api(device_id)
     normalized = {"active_provider": active_provider, "providers": {}}
     for provider, base in default_cfg["providers"].items():
         item = providers.get(provider, {})
+        existing_provider = existing_config.get("providers", {}).get(provider, {})
+        incoming_key = item.get("api_key") or item.get("apiKey") or ""
+        if isinstance(incoming_key, str) and "****" in incoming_key:
+            incoming_key = ""
+        item_cfg = normalize_external_api_payload({
+            "provider": provider,
+            "api_key": incoming_key or existing_provider.get("api_key", ""),
+            "api_url": item.get("api_url") or base.get("api_url"),
+            "apiUrl": item.get("apiUrl"),
+            "model": item.get("model") or base.get("model"),
+            "enabled": bool(incoming_key or existing_provider.get("api_key", "")),
+        })
         normalized["providers"][provider] = {
-            "api_url": (item.get("api_url") or base.get("api_url") or "").strip(),
-            "api_key": (item.get("api_key") or "").strip(),
-            "model": (item.get("model") or base.get("model") or "").strip()
+            "api_url": item_cfg["api_url"],
+            "api_key": item_cfg["api_key"],
+            "model": item_cfg["model"]
         }
     if normalized["active_provider"] not in normalized["providers"]:
         normalized["active_provider"] = "deepseek"
@@ -30048,9 +30436,9 @@ def security_status():
         auth_cfg = load_auth_config()
         ip_wl = load_ip_whitelist()
         status = {
-            "secret_key_configured": bool(os.environ.get('KAGUYA_SECRET_KEY')) or os.path.exists(SECRET_KEY_FILE),
+            "secret_key_configured": bool(os.environ.get('KAGUYA_SECRET_KEY')) or os.path.exists(SECURITY_SECRET_KEY),
             "rate_limit_active": True,
-            "ssrf_protection": bool(os.path.exists(SECRET_KEY_FILE)),
+            "ssrf_protection": True,
             "xss_protection": True,
             "code_sandbox": True,
             "api_key_masking": True,
@@ -30067,7 +30455,10 @@ def security_status():
             "ip_whitelist_mode": ip_wl.get('mode', 'open'),
             "ip_whitelist_count": len(ip_wl.get('whitelist', [])),
             "csrf_protection": True,
-            "csrf_exempt_paths": ['/auth/login', '/auth/logout', '/static/', '/api/', '/chat/', '/web/', '/mcp/', '/agent/', '/project/', '/scene', '/lora/', '/tool/', '/code/', '/kb/', '/deepseek/', '/external/', '/security/', '/memory/', '/multimodal/', '/finetune/', '/workflow/', '/rag/', '/privacy/'],
+            "csrf_exempt_paths": ['/auth/login', '/auth/logout', '/static/', '/api/device/info', '/api/account/saved-config', '/api/account/auto-fill', '/chat/', '/web/', '/mcp/', '/project/', '/scene', '/lora/', '/tool/', '/code/', '/kb/', '/deepseek/', '/external/', '/security/status', '/memory/', '/multimodal/', '/finetune/', '/workflow/', '/rag/', '/privacy/'],
+            "high_risk_post_paths": sorted(HIGH_RISK_POST_PATHS),
+            "remote_high_risk_policy": "auth_or_reject",
+            "loopback_only_relaxation": True,
             "encryption_version": 3,
             "csp_configured": True,
             "csp_frame_ancestors": "none",
@@ -30319,11 +30710,216 @@ def chat_endpoint():
         structured_template = data.get('structured_template')
         temperature = max(0, min(2, float(data.get('temperature', 0.7))))
         max_tokens = max(1, min(32768, int(data.get('max_tokens', 4096))))
-        
+        device_id = data.get('device_id', '') or request.headers.get('X-Device-Id', '')
+        provider = data.get('provider', '') or data.get('active_provider', '')
+        external_api = data.get('external_api', None)
+        provider_id, runtime = get_provider_runtime(provider, device_id)
+        if isinstance(external_api, dict):
+            cfg = normalize_external_api_payload(external_api)
+            if cfg["enabled"]:
+                provider_id = cfg["provider"] or provider_id or "deepseek"
+                runtime = {"api_key": cfg["api_key"], "api_url": cfg["api_url"], "model": cfg["model"]}
+        if runtime.get("api_key"):
+            system_prompt = get_role_system(role)
+            lora_system = get_lora_system(lora)
+            if lora_system:
+                system_prompt = lora_system
+            structured_prompt = get_structured_output_prompt(message, structured_template)
+            if structured_prompt:
+                system_prompt += structured_prompt
+            prompt_parts = []
+            for h in history[-10:]:
+                if isinstance(h, (list, tuple)) and len(h) >= 2:
+                    prompt_parts.append(f"用户: {h[0]}\n助手: {h[1]}")
+            prompt_parts.append(f"用户: {message}")
+            ext_prompt = "\n\n".join(prompt_parts)
+            response = call_external_provider(
+                provider_id,
+                runtime.get("api_url"),
+                runtime.get("api_key"),
+                runtime.get("model"),
+                ext_prompt,
+                system_prompt,
+            )
+            return jsonify({'response': response, 'tokens_in': len(ext_prompt) // 2, 'tokens_out': len(response) // 2, 'provider': provider_id})
+        if load_model() is None:
+            return jsonify(model_unavailable_payload()), 503
         response, tokens_in, tokens_out = chat(message, history, role, lora, temperature, max_tokens, structured_template)
         return jsonify({'response': response, 'tokens_in': tokens_in, 'tokens_out': tokens_out})
     except Exception as e:
-        return jsonify({'error': str(e)})
+        return jsonify({'success': False, 'error': sanitize_error(e)}), 503
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat_compat():
+    return chat_endpoint()
+
+@app.route('/api/model-status', methods=['GET', 'POST'])
+def api_model_status_compat():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if data.get('external_api'):
+            cfg = normalize_external_api_payload(data.get('external_api'))
+            if not cfg["api_key"]:
+                device_id = _request_device_id(data)
+                saved_provider, saved_runtime = get_provider_runtime(cfg["provider"], device_id)
+                if saved_runtime.get("api_key"):
+                    cfg = {
+                        "provider": saved_provider,
+                        "api_key": saved_runtime.get("api_key", ""),
+                        "api_url": saved_runtime.get("api_url", ""),
+                        "model": cfg.get("model") or saved_runtime.get("model", ""),
+                        "enabled": True,
+                    }
+            return jsonify({
+                "success": True,
+                "available": bool(cfg["api_key"]),
+                "provider": cfg["provider"],
+                "model": cfg["model"],
+                "external_provider_configured": bool(cfg["api_key"]),
+                "reason": None if cfg["api_key"] else "missing_api_key",
+            })
+    device_id = _request_device_id()
+    if device_id:
+        provider_id, runtime = get_provider_runtime(None, device_id)
+        if runtime.get("api_key"):
+            return jsonify({
+                "success": True,
+                "available": True,
+                "provider": provider_id,
+                "model": runtime.get("model"),
+                "external_provider_configured": True,
+                "reason": None,
+            })
+    try:
+        m = load_model()
+        if m is None:
+            return jsonify(model_unavailable_payload())
+        return jsonify({"success": True, "available": True, "provider": "ollama", "model": OLLAMA_MODEL})
+    except Exception as e:
+        payload = model_unavailable_payload()
+        payload["detail"] = sanitize_error(e)
+        return jsonify(payload)
+
+@app.route('/models', methods=['GET'])
+def models_compat():
+    providers = default_external_api_config().get("providers", {})
+    local_available = load_model() is not None
+    models = [{"id": OLLAMA_MODEL, "provider": "ollama", "available": local_available}]
+    for provider, cfg in providers.items():
+        models.append({"id": cfg.get("model", ""), "provider": provider, "available": False, "requires_api_key": True})
+    return jsonify({"success": True, "models": models})
+
+@app.route('/api/config', methods=['GET', 'POST'])
+def api_config_compat():
+    auth_cfg = load_auth_config()
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        external_data = data.get("external_api") if isinstance(data.get("external_api"), dict) else data
+        cfg = normalize_external_api_payload(external_data)
+        if cfg["api_key"]:
+            device_id = _request_device_id(data)
+            saved = _save_single_external_api(device_id, cfg)
+            return jsonify({"success": True, "provider": saved["provider"], "api_url": saved["api_url"], "model": saved["model"], "masked_api_key": mask_api_key(saved["api_key"])})
+        return jsonify({"success": False, "error": "missing_api_key"}), 400
+    return jsonify({
+        "success": True,
+        "version": "3.1.0",
+        "desktop_mode": os.environ.get('KAGUYA_DESKTOP_MODE', '') == '1',
+        "auth_enabled": bool(auth_cfg.get("enabled", False)),
+        "ollama_model": OLLAMA_MODEL,
+        "bootstrap_loaded": bool(globals().get("_KAGUYA_BOOTSTRAP_LOADED", False)),
+        "saved_config": _get_active_external_api_summary(request.args.get("device_id", "") or request.headers.get("X-Device-Id", "")),
+    })
+
+@app.route('/api/device/info', methods=['GET'])
+def api_device_info():
+    device_id = _request_device_id()
+    summary = _get_active_external_api_summary(device_id)
+    return jsonify({
+        "success": True,
+        "device": {
+            "device_id": device_id,
+            "device_name": device_id,
+            "platform": sys.platform,
+            "encryption_available": True,
+            "encryption": "python",
+            "vault_exists": summary["has_config"],
+            "active_provider": summary["provider"] if summary["has_config"] else "",
+            "masked_api_key": summary["masked_api_key"],
+        }
+    })
+
+@app.route('/api/device/bind', methods=['POST'])
+def api_device_bind():
+    data = request.get_json(silent=True) or {}
+    cfg = normalize_external_api_payload(data)
+    if not cfg["api_key"]:
+        return jsonify({"success": False, "error": "missing_api_key"}), 400
+    try:
+        saved = _save_single_external_api(_request_device_id(data), cfg)
+        return jsonify({
+            "success": True,
+            "provider": saved["provider"],
+            "api_url": saved["api_url"],
+            "model": saved["model"],
+            "masked_api_key": mask_api_key(saved["api_key"]),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": sanitize_error(e)}), 500
+
+@app.route('/api/device/unbind', methods=['POST'])
+def api_device_unbind():
+    data = request.get_json(silent=True) or {}
+    device_id = _request_device_id(data)
+    user_info = _get_user_workspace(device_id)
+    user_info.pop("external_api", None)
+    ide_user_registry[user_info["id"]] = user_info
+    _save_accounts()
+    return jsonify({"success": True, "device_id": device_id})
+
+@app.route('/api/account/saved-config', methods=['GET'])
+def api_account_saved_config():
+    summary = _get_active_external_api_summary(request.args.get("device_id", "") or request.headers.get("X-Device-Id", ""))
+    return jsonify({"success": True, **summary})
+
+@app.route('/api/account/auto-fill', methods=['GET'])
+def api_account_auto_fill():
+    summary = _get_active_external_api_summary(request.args.get("device_id", "") or request.headers.get("X-Device-Id", ""))
+    return jsonify({"success": True, **summary})
+
+@app.route('/chat/completions', methods=['POST'])
+def chat_completions_compat():
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    user_message = ""
+    for item in reversed(messages):
+        if isinstance(item, dict) and item.get("role") == "user":
+            user_message = item.get("content") or ""
+            break
+    if not user_message:
+        return jsonify({"error": {"message": "messages with a user message are required", "type": "invalid_request_error"}}), 400
+    external_api = data.get("external_api")
+    if isinstance(external_api, dict):
+        cfg = normalize_external_api_payload(external_api)
+    else:
+        cfg = normalize_external_api_payload({})
+    if cfg["enabled"]:
+        text = call_external_provider(
+            cfg["provider"],
+            cfg["api_url"],
+            cfg["api_key"],
+            data.get("model") or cfg["model"],
+            user_message,
+            "",
+        )
+        return jsonify({
+            "id": "chatcmpl-kaguya-compat",
+            "object": "chat.completion",
+            "model": data.get("model") or cfg["model"],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        })
+    payload = model_unavailable_payload()
+    return jsonify({"error": {"message": payload["message"], "type": payload["reason"]}}), 501
 
 @app.route('/stream', methods=['POST'])
 def stream_endpoint():
@@ -30336,10 +30932,44 @@ def stream_endpoint():
         structured_template = data.get('structured_template')
         temperature = data.get('temperature', 0.7)
         max_tokens = data.get('max_tokens', 4096)
+        device_id = data.get('device_id', '') or request.headers.get('X-Device-Id', '')
+        provider = data.get('provider', '') or data.get('active_provider', '')
+        external_api = data.get('external_api', None)
         
         def generate():
             try:
                 print(f"[Stream] 开始生成: msg={message[:20]}...")
+                provider_id, runtime = get_provider_runtime(provider, device_id)
+                if isinstance(external_api, dict):
+                    cfg = normalize_external_api_payload(external_api)
+                    if cfg["enabled"]:
+                        provider_id = cfg["provider"] or provider_id or "deepseek"
+                        runtime = {"api_key": cfg["api_key"], "api_url": cfg["api_url"], "model": cfg["model"]}
+                if runtime.get("api_key"):
+                    system_prompt = get_role_system(role)
+                    lora_system = get_lora_system(lora)
+                    if lora_system:
+                        system_prompt = lora_system
+                    structured_prompt = get_structured_output_prompt(message, structured_template)
+                    if structured_prompt:
+                        system_prompt += structured_prompt
+                    prompt_parts = []
+                    for h in history[-10:]:
+                        if isinstance(h, (list, tuple)) and len(h) >= 2:
+                            prompt_parts.append(f"用户: {h[0]}\n助手: {h[1]}")
+                    prompt_parts.append(f"用户: {message}")
+                    ext_prompt = "\n\n".join(prompt_parts)
+                    text = call_external_provider(
+                        provider_id,
+                        runtime.get("api_url"),
+                        runtime.get("api_key"),
+                        runtime.get("model"),
+                        ext_prompt,
+                        system_prompt,
+                    )
+                    yield f"data: {json.dumps({'content': text, 'done': False, 'provider': provider_id})}\n\n"
+                    yield f"data: {json.dumps({'content': '', 'done': True, 'tokens_in': len(ext_prompt) // 2, 'tokens_out': len(text) // 2, 'provider': provider_id})}\n\n"
+                    return
                 chunk_count = 0
                 for chunk in generate_stream(message, history, role, lora, temperature, max_tokens, "", None, structured_template):
                     if request.environ.get('werkzeug.socket') and request.environ.get('werkzeug.socket')._closed:
@@ -30401,10 +31031,7 @@ def agent_file_write():
     content = data.get('content', '')
     is_dir = data.get('is_dir', False)
     try:
-        if not os.path.isabs(path):
-            path = os.path.join(ws_path, path)
-        if not path or not _validate_path_in_workspace(path, ws_path, user_info):
-            return jsonify({"error": "Access denied: path outside your workspace"})
+        path = authorize_path(path, ws_path, user_info=user_info)
         if is_dir:
             os.makedirs(path, exist_ok=True)
             return jsonify({"success": True, "path": path, "type": "directory"})
@@ -30414,6 +31041,8 @@ def agent_file_write():
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
         return jsonify({"success": True, "path": path, "type": "file"})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: path outside your workspace", "detail": str(e)}), 403
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -30434,16 +31063,17 @@ def agent_run_endpoint():
         # CRITICAL: 不再设置bypass_mode = True,确保权限检查生效
         if not message:
             return jsonify({'error': 'Message is required'}), 400
-        import uuid as _uuid
-        run_id = "run_" + _uuid.uuid4().hex[:12]
+        run_id = str(uuid.uuid4())
         abort_evt = threading.Event()
         _agent_abort_events[run_id] = abort_evt
-        tool_registry._plan_active = False
+
         def generate():
             try:
+                yield f"data: {json.dumps({'type': 'run_started', 'run_id': run_id, 'done': False})}\n\n"
                 ext_api = external_api
                 use_external = False
                 if isinstance(ext_api, dict):
+                    ext_api = _external_api_for_frontend(ext_api)
                     use_external = ext_api.get('enabled') and ext_api.get('apiKey')
                 elif isinstance(ext_api, str) and ext_api.strip():
                     if device_id:
@@ -30452,7 +31082,7 @@ def agent_run_endpoint():
                         prov = user_config.get("providers", {}).get(ap, {})
                         bk_key = prov.get("api_key", "")
                         if bk_key:
-                            ext_api = {"enabled": True, "apiKey": bk_key, "apiUrl": prov.get("api_url", ""), "model": prov.get("model", ""), "provider": ap}
+                            ext_api = _external_api_for_frontend({"enabled": True, "api_key": bk_key, "api_url": prov.get("api_url", ""), "model": prov.get("model", ""), "provider": ap})
                             use_external = True
                         else:
                             ext_api = None
@@ -30466,33 +31096,47 @@ def agent_run_endpoint():
                     prov = user_config.get("providers", {}).get(ap, {})
                     bk_key = prov.get("api_key", "")
                     if bk_key:
-                        ext_api = {"enabled": True, "apiKey": bk_key, "apiUrl": prov.get("api_url", ""), "model": prov.get("model", ""), "provider": ap}
+                        ext_api = _external_api_for_frontend({"enabled": True, "api_key": bk_key, "api_url": prov.get("api_url", ""), "model": prov.get("model", ""), "provider": ap})
                         use_external = True
                 if use_external:
-                    for chunk in agent_loop.run_with_external_api(message, history, working_dir, ext_api):
+                    for chunk in agent_loop.run_with_external_api(message, history, working_dir, ext_api, abort_event=abort_evt, run_id=run_id):
                         if abort_evt.is_set():
-                            yield f"data: {json.dumps({'type': 'info', 'content': 'Agent stopped by user', 'done': True})}\n\n"
-                            return
-                        if request.environ.get('werkzeug.socket') and request.environ.get('werkzeug.socket')._closed:
-                            abort_evt.set()
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
                             return
                         yield f"data: {chunk}\n\n"
+                        if abort_evt.is_set():
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
+                            return
                 else:
-                    for chunk in agent_loop.run(message, history, working_dir):
+                    for chunk in agent_loop.run(message, history, working_dir, abort_event=abort_evt, run_id=run_id):
                         if abort_evt.is_set():
-                            yield f"data: {json.dumps({'type': 'info', 'content': 'Agent stopped by user', 'done': True})}\n\n"
-                            return
-                        if request.environ.get('werkzeug.socket') and request.environ.get('werkzeug.socket')._closed:
-                            abort_evt.set()
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
                             return
                         yield f"data: {chunk}\n\n"
+                        if abort_evt.is_set():
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
+                            return
+            except GeneratorExit:
+                raise
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'content': str(e), 'done': True})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'run_id': run_id, 'content': str(e), 'done': True})}\n\n"
             finally:
                 _agent_abort_events.pop(run_id, None)
         return Response(generate(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/agent/abort', methods=['POST'])
+def agent_abort_endpoint():
+    data = request.get_json(silent=True) or {}
+    run_id = (data.get("run_id") or "").strip()
+    if not run_id:
+        return jsonify({"success": False, "error": "missing_run_id"}), 400
+    abort_evt = _agent_abort_events.get(run_id)
+    if not abort_evt:
+        return jsonify({"success": False, "run_id": run_id, "aborted": False, "error": "run_not_found"}), 404
+    abort_evt.set()
+    return jsonify({"success": True, "run_id": run_id, "aborted": True})
 
 @app.route('/agent/permission/respond', methods=['POST'])
 def permission_respond():
@@ -30518,17 +31162,6 @@ def permission_respond():
         audit_logger.log("permission_response", preq.tool_name, {"request_id": request_id, "allowed": allowed, "always": always}, allowed)
         return jsonify({"status": "ok", "request_id": request_id})
     return jsonify({"error": "Unknown permission request", "request_id": request_id}), 404
-
-@app.route('/agent/abort', methods=['POST'])
-def agent_abort():
-    data = request.get_json(silent=True) or {}
-    run_id = data.get('run_id', '')
-    if run_id and run_id in _agent_abort_events:
-        _agent_abort_events[run_id].set()
-        return jsonify({"status": "aborted", "run_id": run_id})
-    for rid, evt in list(_agent_abort_events.items()):
-        evt.set()
-    return jsonify({"status": "aborted", "count": len(_agent_abort_events)})
 
 @app.route('/agent/permission/config', methods=['GET', 'POST'])
 def permission_config():
@@ -30980,68 +31613,42 @@ def agent_terminal_exec():
     command = data.get('command', '')
     timeout = min(data.get('timeout', 30), 120)
     working_dir = data.get('working_dir', '')
+    shell_mode = bool(data.get('shell'))
+    session_id = data.get('session_id', '')
     if not command:
         return jsonify({"error": "No command specified"})
     if not working_dir:
         working_dir = ws_path
     elif not os.path.isabs(working_dir):
         working_dir = os.path.join(ws_path, working_dir)
-    if working_dir and not os.path.isdir(working_dir):
-        working_dir = ws_path
-    
-    # FIX: Bypass permission check for terminal commands - user already authorized
-    # Only check for obviously dangerous commands
-    cmd_lower = command.lower().strip()
-    dangerous_patterns = [
-        r'\brm\s+(-rf|-r|-f)\s+(/|~|/home|/root|C:\\|/etc|/usr|/var|/sys)',
-        r'\bdel\s+(/[sfq]|/s|/f|/q)\s+[A-Z]:\\',
-        r'\bformat\s+[a-z]:',
-        r'\bshutdown\b', r'\breboot\b', r'\bhalt\b', r'\bpoweroff\b',
-        r':\(\)\{\s*\|\s*&\s*\}\s*;',
-        r'\bdd\s+if=.*of=/dev/',
-        r'\bnet\s+(user|localgroup|share|stop|start)\s',
-        r'\breg\s+(add|delete|import|export|save|load|restore|unload)\b',
-        r'\bicacls\b',
-        r'\brunas\s+/user:',
-    ]
-    is_dangerous = any(re.search(p, cmd_lower) for p in dangerous_patterns)
-    if is_dangerous:
-        return jsonify({"error": "Command blocked for security reasons"})
-    
-    # FIX: Replace python with correct interpreter path
-    current_python = sys.executable
-    cmd_parts = command.strip().split()
-    if cmd_parts and cmd_parts[0].lower() in ('python', 'python.exe', 'python3', 'python3.exe'):
-        cmd_parts[0] = f'"{current_python}"'
-        command = " ".join(cmd_parts)
-    
-    audit_logger.log("terminal_exec", "execute_command", {"command": command[:200], "working_dir": working_dir}, True, device_id)
-    try:
-        proc = subprocess.Popen(
-            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=working_dir,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-        )
-        _terminal_processes[proc.pid] = proc
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-            _terminal_processes.pop(proc.pid, None)
-            return jsonify({"output": f"Command timed out after {timeout} seconds", "exit_code": -1, "command": command})
-        finally:
-            _terminal_processes.pop(proc.pid, None)
-        output = ""
-        if stdout:
-            output += stdout[:8000]
-        if stderr:
-            output += f"\nSTDERR:\n{stderr[:3000]}"
-        if proc.returncode != 0:
-            output += f"\nExit code: {proc.returncode}"
-        return jsonify({"output": output.strip() or "(no output)", "exit_code": proc.returncode, "command": command})
-    except Exception as e:
-        return jsonify({"error": str(e), "command": command})
+    result = execute_terminal_command(
+        command,
+        working_dir,
+        ws_path,
+        user_info=user_info,
+        timeout=timeout,
+        shell=shell_mode,
+        session_id=session_id,
+        device_id=device_id,
+    )
+    perm = result.get("permission", {})
+    audit_logger.log(
+        "terminal_exec",
+        "execute_command",
+        {
+            "command": command[:200],
+            "working_dir": result.get("working_dir", working_dir),
+            "device_id": device_id,
+            "session_id": session_id,
+            "permission": perm,
+            "exit_code": result.get("exit_code"),
+            "timeout": timeout,
+        },
+        bool(result.get("success")),
+        device_id,
+    )
+    status = 200 if (result.get("success") or result.get("exit_code") is not None and result.get("error") is None) else (403 if result.get("error") in ("permission_denied", "working_dir_outside_workspace", "shell_mode_requires_confirmation") else 400)
+    return jsonify(result), status
 
 _terminal_processes = {}
 
@@ -31084,10 +31691,26 @@ def api_version():
 @app.route('/agent/api-status', methods=['GET', 'POST'])
 def agent_api_status():
     external_api = None
+    device_id = request.args.get('device_id', '') or request.headers.get('X-Device-Id', '')
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         external_api = data.get('external_api', None)
-        device_id = data.get('device_id', '')
+        device_id = data.get('device_id', '') or device_id
+    if not external_api and device_id:
+        user_config = _get_user_external_api(device_id)
+        provider = (user_config.get("active_provider") or "deepseek").strip().lower()
+        provider_cfg = user_config.get("providers", {}).get(provider, {})
+        api_key = (provider_cfg.get("api_key") or "").strip()
+        if api_key:
+            external_api = {
+                "enabled": True,
+                "apiKey": api_key,
+                "apiUrl": provider_cfg.get("api_url", ""),
+                "model": provider_cfg.get("model", ""),
+                "provider": provider,
+            }
+    if isinstance(external_api, dict):
+        external_api = _external_api_for_frontend(external_api)
     if external_api and external_api.get('enabled') and external_api.get('apiKey'):
         api_url = external_api.get('apiUrl', 'https://api.deepseek.com')
         model = external_api.get('model', 'deepseek-chat')
@@ -31102,12 +31725,7 @@ def agent_api_status():
                     headers={"Content-Type": "application/json", "x-api-key": external_api['apiKey'], "anthropic-version": "2023-06-01"}
                 )
             else:
-                base = api_url.rstrip('/')
-                if '/chat/completions' not in base:
-                    if '/v1/' in base:
-                        base = base.rsplit('/v1/',1)[0] + '/v1/chat/completions'
-                    else:
-                        base = base + '/v1/chat/completions'
+                base = build_chat_completions_endpoint(provider, api_url)
                 req = urllib.request.Request(
                     base,
                     data=json.dumps({"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}).encode(),
@@ -31118,9 +31736,9 @@ def agent_api_status():
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
                 return jsonify({"available": False, "reason": "auth_error", "message": f"API authentication failed (HTTP {e.code}). Check your API key.", "provider": provider})
-            return jsonify({"available": True, "provider": provider, "model": model, "api_url": api_url, "warning": f"API returned HTTP {e.code} but key is valid"})
+            return jsonify({"available": False, "reason": "verification_failed", "provider": provider, "model": model, "api_url": api_url, "message": f"API returned HTTP {e.code}"})
         except Exception as e:
-            return jsonify({"available": True, "provider": provider, "model": model, "api_url": api_url, "warning": f"Could not verify API ({str(e)[:100]}), but configuration exists"})
+            return jsonify({"available": False, "reason": "verification_failed", "provider": provider, "model": model, "api_url": api_url, "message": str(e)[:200]})
     try:
         m = load_model()
         if m is None:
@@ -31134,9 +31752,12 @@ def agent_api_status():
 @app.route('/agent/api-test', methods=['POST'])
 def agent_api_test():
     data = request.get_json(silent=True) or {}
-    provider = data.get('provider', 'deepseek')
-    api_key = data.get('apiKey', '')
-    api_url = data.get('apiUrl', '')
+    cfg = normalize_external_api_payload(data)
+    provider = cfg["provider"]
+    api_key = cfg["api_key"]
+    api_url = cfg["api_url"]
+    if not api_key:
+        return jsonify({"success": False, "error": "missing_api_key"}), 400
     try:
         import urllib.request, urllib.error
         if provider in ('claude',):
@@ -31150,16 +31771,11 @@ def agent_api_test():
             model.generate_content("hi")
             return jsonify({"success": True, "model": api_url})
         else:
-            base_url = api_url.rstrip('/')
-            if '/chat/completions' in base_url:
-                test_url = base_url
-            elif '/v1/' in base_url:
-                test_url = base_url.rsplit('/v1/', 1)[0] + '/v1/chat/completions'
-            else:
-                test_url = base_url + '/chat/completions'
-            default_models={'deepseek':'deepseek-chat','glm':'glm-4-flash','openai':'gpt-4o-mini','kimi':'moonshot-v1-auto','minimax':'MiniMax-Text-01'}
-            model_name=data.get('model') or default_models.get(provider,'deepseek-chat')
-            req_data = json.dumps({"model": model_name, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}).encode()
+            test_url = build_chat_completions_endpoint(provider, api_url)
+            default_models={'deepseek':'deepseek-chat','glm':'glm-4-flash','openai':'gpt-4o-mini','kimi':'kimi-k2.6','moonshot':'moonshot-v1-auto','minimax':'MiniMax-M2.7'}
+            model_name=cfg.get('model') or data.get('model') or default_models.get(provider,'deepseek-chat')
+            req_payload = build_openai_chat_payload(provider, model_name, [{"role": "user", "content": "hi"}], stream=False, max_tokens=8)
+            req_data = json.dumps(req_payload).encode()
             auth_header = f"Bearer {api_key}"
             if provider == 'glm':
                 auth_header = f"Bearer {api_key}"
@@ -31175,26 +31791,32 @@ def agent_api_test():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-IDE_WORKSPACE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ide_workspaces')
+IDE_WORKSPACE_ROOT = os.path.join(RUNTIME_DIR, 'ide_workspaces')
 os.makedirs(IDE_WORKSPACE_ROOT, exist_ok=True)
 ide_user_registry = {}
-IDE_ACCOUNTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ide_accounts.json')
+IDE_ACCOUNTS_FILE = os.path.join(RUNTIME_DIR, 'ide_accounts.json')
+LEGACY_IDE_ACCOUNTS_FILE = os.path.join(APP_DIR, 'ide_accounts.json')
 
 def _load_accounts():
     global ide_user_registry
     try:
+        if not os.path.exists(IDE_ACCOUNTS_FILE) and os.path.exists(LEGACY_IDE_ACCOUNTS_FILE):
+            os.makedirs(os.path.dirname(IDE_ACCOUNTS_FILE), exist_ok=True)
+            shutil.copy2(LEGACY_IDE_ACCOUNTS_FILE, IDE_ACCOUNTS_FILE)
         if os.path.exists(IDE_ACCOUNTS_FILE):
             with open(IDE_ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
                 ide_user_registry = json.load(f)
-    except Exception:
+    except Exception as e:
+        print(f"[KAGUYA] Failed to load IDE accounts: {e}")
         ide_user_registry = {}
 
 def _save_accounts():
     try:
+        os.makedirs(os.path.dirname(IDE_ACCOUNTS_FILE), exist_ok=True)
         with open(IDE_ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
             json.dump(ide_user_registry, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[KAGUYA] Failed to save IDE accounts: {e}")
 
 _load_accounts()
 
@@ -31223,19 +31845,39 @@ def _get_user_workspace(device_id):
     return ide_user_registry[safe_id]
 
 def _validate_path_in_workspace(path, workspace_path, user_info=None):
-    if os.environ.get('KAGUYA_ELECTRON') or os.environ.get('KAGUYA_DESKTOP_MODE'):
+    try:
+        authorize_path(path, workspace_path, user_info=user_info)
         return True
-    if not os.path.isabs(path):
-        path = os.path.join(workspace_path, path)
-    abs_path = os.path.abspath(path)
-    abs_ws = os.path.abspath(workspace_path)
-    if abs_path.startswith(abs_ws):
-        return True
-    if user_info:
-        for imp in user_info.get("imported_paths", []):
-            if abs_path.startswith(os.path.abspath(imp)):
-                return True
-    return False
+    except Exception:
+        return False
+
+def _path_is_inside(path, root):
+    return is_path_inside(path, root)
+
+def _safe_upload_relative_path(filename):
+    raw = (filename or "uploaded_file").replace("\\", "/").strip()
+    parts = []
+    for part in raw.split("/"):
+        part = part.strip()
+        if not part or part in (".", ".."):
+            continue
+        part = re.sub(r'[\x00-\x1f<>:"|?*]', "_", part).rstrip(" .")
+        if part:
+            parts.append(part[:180])
+    if not parts:
+        parts = ["uploaded_file"]
+    return os.path.join(*parts)
+
+def _dedupe_destination(path):
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    stamp = int(time.time())
+    for idx in range(1, 1000):
+        candidate = f"{base}_{stamp}_{idx}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+    return f"{base}_{stamp}{ext}"
 
 @app.route('/agent/identify', methods=['POST'])
 def agent_identify():
@@ -31270,108 +31912,6 @@ def agent_user_info():
         "workspace": user_info["workspace"]
     })
 
-@app.route('/api/device/info', methods=['GET'])
-def api_device_info():
-    import platform as _platform
-    user_info = _get_user_workspace(request.args.get('device_id', '') or 'default')
-    ext_api = _get_user_external_api(user_info["id"])
-    bound_providers = []
-    for name, cfg in (ext_api.get("providers") or {}).items():
-        if cfg.get("api_key"):
-            bound_providers.append({"name": name, "model": cfg.get("model", ""), "bound_at": ""})
-    return jsonify({
-        "device_id": user_info["id"],
-        "device_name": user_info.get("name", ""),
-        "platform": _platform.system().lower(),
-        "arch": _platform.machine(),
-        "username": os.environ.get("USER", os.environ.get("USERNAME", "")),
-        "is_bound": len(bound_providers) > 0,
-        "active_provider": ext_api.get("active_provider"),
-        "bound_providers": bound_providers,
-        "safe_storage_available": True,
-        "vault_created": None,
-    })
-
-@app.route('/api/device/bind', methods=['POST'])
-def api_device_bind():
-    data = request.get_json(silent=True) or {}
-    device_id = data.get('device_id', '') or 'default'
-    provider = data.get('provider', '')
-    api_key = (data.get('api_key') or '').strip()
-    api_url = (data.get('api_url') or '').strip()
-    model = (data.get('model') or '').strip()
-    if not provider or not api_key:
-        return jsonify({"error": "provider and api_key are required"}), 400
-    user_info = _get_user_workspace(device_id)
-    ext_api = _get_user_external_api(user_info["id"])
-    ext_api["active_provider"] = provider
-    if provider not in ext_api["providers"]:
-        ext_api["providers"][provider] = {}
-    ext_api["providers"][provider]["api_key"] = api_key
-    if api_url:
-        ext_api["providers"][provider]["api_url"] = api_url
-    if model:
-        ext_api["providers"][provider]["model"] = model
-    _save_user_external_api(user_info["id"], ext_api)
-    return jsonify({"ok": True, "message": "Device bound successfully", "provider": provider})
-
-@app.route('/api/device/unbind', methods=['POST'])
-def api_device_unbind():
-    data = request.get_json(silent=True) or {}
-    device_id = data.get('device_id', '') or 'default'
-    provider = data.get('provider')
-    user_info = _get_user_workspace(device_id)
-    ext_api = _get_user_external_api(user_info["id"])
-    if provider:
-        if provider in ext_api.get("providers", {}):
-            ext_api["providers"][provider]["api_key"] = ""
-            if ext_api.get("active_provider") == provider:
-                remaining = [k for k, v in ext_api.get("providers", {}).items() if v.get("api_key")]
-                ext_api["active_provider"] = remaining[0] if remaining else ""
-            _save_user_external_api(user_info["id"], ext_api)
-            return jsonify({"ok": True, "message": f"Unbound {provider}"})
-        return jsonify({"error": "Provider not found"}), 404
-    else:
-        for name in ext_api.get("providers", {}):
-            ext_api["providers"][name]["api_key"] = ""
-        ext_api["active_provider"] = ""
-        _save_user_external_api(user_info["id"], ext_api)
-        return jsonify({"ok": True, "message": "All device bindings cleared"})
-
-@app.route('/api/account/saved-config', methods=['GET'])
-def api_account_saved_config():
-    device_id = request.args.get('device_id', '') or 'default'
-    user_info = _get_user_workspace(device_id)
-    ext_api = _get_user_external_api(user_info["id"])
-    masked_providers = {}
-    for name, cfg in (ext_api.get("providers") or {}).items():
-        key = cfg.get("api_key", "")
-        masked_providers[name] = {
-            "api_url": cfg.get("api_url", ""),
-            "api_key_masked": (key[:4] + "****" + key[-4:]) if len(key) >= 8 else ("****" if key else ""),
-            "api_key_length": len(key),
-            "model": cfg.get("model", ""),
-        }
-    return jsonify({
-        "is_bound": any(v.get("api_key_masked") for v in masked_providers.values()),
-        "active_provider": ext_api.get("active_provider"),
-        "providers": masked_providers,
-        "device_name": user_info.get("name", ""),
-    })
-
-@app.route('/api/account/auto-fill', methods=['POST'])
-def api_account_auto_fill():
-    data = request.get_json(silent=True) or {}
-    device_id = data.get('device_id', '') or 'default'
-    provider = data.get('provider', '')
-    user_info = _get_user_workspace(device_id)
-    ext_api = _get_user_external_api(user_info["id"])
-    prov_cfg = ext_api.get("providers", {}).get(provider, {})
-    key = prov_cfg.get("api_key", "")
-    if key:
-        return jsonify({"found": True, "provider": provider, "api_key": key, "api_url": prov_cfg.get("api_url", ""), "model": prov_cfg.get("model", "")})
-    return jsonify({"found": False})
-
 @app.route('/agent/file-tree', methods=['POST'])
 def agent_file_tree():
     data = request.get_json(silent=True) or {}
@@ -31383,10 +31923,10 @@ def agent_file_tree():
     max_depth = data.get('max_depth', 3)
     if not req_path:
         req_path = ws_path
-    elif not os.path.isabs(req_path):
-        req_path = os.path.join(ws_path, req_path)
-    if not _validate_path_in_workspace(req_path, ws_path, user_info):
-        req_path = ws_path
+    try:
+        req_path = authorize_path(req_path, ws_path, user_info=user_info, must_exist=True)
+    except WorkspaceAuthorizationError:
+        return jsonify({"error": "Access denied: path outside your workspace", "path": req_path}), 403
     try:
         if not os.path.isdir(req_path):
             return jsonify({"error": f"Not a directory: {req_path}", "path": req_path})
@@ -31447,11 +31987,7 @@ def agent_read_file():
     ws_path = user_info["workspace"]
     path = data.get('path', '')
     try:
-        if not os.path.isabs(path):
-            path = os.path.join(ws_path, path)
-        valid = _validate_path_in_workspace(path, ws_path, user_info) if path else False
-        if not path or not valid:
-            return jsonify({"error": "Access denied: file outside your workspace"})
+        path = authorize_path(path, ws_path, user_info=user_info, must_exist=True)
         if not os.path.exists(path) or os.path.isdir(path):
             return jsonify({"error": "File not found"})
         file_size = os.path.getsize(path)
@@ -31470,6 +32006,8 @@ def agent_read_file():
             content = f.read()
         ext = ext_lower.lstrip('.')
         return jsonify({"content": content, "language": ext, "path": path, "size": file_size})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: file outside your workspace", "detail": str(e)}), 403
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -31482,15 +32020,26 @@ def agent_open_project():
     project_path = data.get('path', '').strip()
     if not project_path:
         return jsonify({"error": "No path specified"})
-    project_path = os.path.abspath(project_path)
-    if not os.path.isdir(project_path):
-        return jsonify({"error": f"Directory not found: {project_path}"})
-    allowed = _validate_path_in_workspace(project_path, ws_path, user_info)
-    if not allowed:
-        if project_path not in user_info.get("imported_paths", []):
-            user_info.setdefault("imported_paths", []).append(project_path)
+    trust = bool(data.get("trust") or data.get("confirmed") or data.get("import"))
+    try:
+        project_path, added = authorize_project_root(project_path, ws_path, user_info=user_info, trust=trust)
+        if added:
+            add_imported_root(user_info, project_path)
+            ide_user_registry[user_info["id"]] = user_info
             _save_accounts()
-    return jsonify({"workspace": ws_path, "project_path": project_path, "entries": os.listdir(project_path)[:100]})
+        return jsonify({"workspace": ws_path, "project_path": project_path, "trusted": True, "imported": bool(added), "entries": os.listdir(project_path)[:100]})
+    except WorkspaceAuthorizationError as e:
+        preview_path = os.path.realpath(os.path.abspath(project_path))
+        if not os.path.isdir(preview_path):
+            return jsonify({"error": f"Directory not found: {preview_path}"}), 404
+        return jsonify({
+            "workspace": ws_path,
+            "project_path": preview_path,
+            "trusted": False,
+            "requires_confirmation": True,
+            "error": str(e),
+            "entries": os.listdir(preview_path)[:100],
+        })
 
 _running_processes = {}
 
@@ -31513,6 +32062,11 @@ def agent_run_project():
                 break
     if not project_path or not os.path.isdir(project_path):
         return jsonify({"error": f"Project directory not found: {project_path}"})
+    try:
+        project_path = authorize_path(project_path, ws_path, user_info=user_info, must_exist=True)
+    except WorkspaceAuthorizationError:
+        audit_logger.log("run_project_denied", "start_project", {"project_path": project_path, "start_command": start_command, "reason": "path_outside_workspace"}, False, device_id)
+        return jsonify({"error": "Access denied: project path outside workspace or trusted imports"}), 403
     if not start_command:
         kind = infer_project_kind(project_path)
         if kind == "python":
@@ -31530,6 +32084,25 @@ def agent_run_project():
             start_command = "cargo run"
         else:
             return jsonify({"error": "Cannot determine start command. Please specify start_command."})
+    permission = permission_service.check(
+        "run_project",
+        {"project_path": project_path, "command": start_command},
+        session_id=data.get("session_id", ""),
+        permission_token=data.get("permission_token"),
+    )
+    if not permission.allowed:
+        audit_logger.log(
+            "run_project_denied",
+            "start_project",
+            {"project_path": project_path, "start_command": start_command, "permission": permission.to_dict()},
+            False,
+            device_id,
+        )
+        return jsonify({
+            "success": False,
+            "error": "permission_denied",
+            "permission": permission.to_dict(),
+        }), 403
     pid_key = project_path
     if pid_key in _running_processes:
         old_proc = _running_processes[pid_key]
@@ -31640,15 +32213,13 @@ def agent_write_file():
     path = data.get('path', '')
     content = data.get('content', '')
     try:
-        if not os.path.isabs(path):
-            path = os.path.join(ws_path, path)
-        valid = _validate_path_in_workspace(path, ws_path, user_info) if path else False
-        if not path or not valid:
-            return jsonify({"error": "Access denied: path outside your workspace"})
+        path = authorize_path(path, ws_path, user_info=user_info)
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
         return jsonify({"result": "File saved", "path": path})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: path outside your workspace", "detail": str(e)}), 403
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -31661,11 +32232,7 @@ def agent_revert_file():
     path = data.get('path', '')
     old_content = data.get('old_content')
     try:
-        if not os.path.isabs(path):
-            path = os.path.join(ws_path, path)
-        valid = _validate_path_in_workspace(path, ws_path, user_info) if path else False
-        if not path or not valid:
-            return jsonify({"error": "Access denied: path outside your workspace"})
+        path = authorize_path(path, ws_path, user_info=user_info)
         if old_content is not None:
             os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
@@ -31676,12 +32243,33 @@ def agent_revert_file():
                 os.remove(path)
                 return jsonify({"result": "New file removed", "path": path})
             return jsonify({"error": "Nothing to revert"})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: path outside your workspace", "detail": str(e)}), 403
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/agent/compile', methods=['POST'])
 def agent_compile():
     data = request.get_json(silent=True) or {}
+    permission = permission_service.check(
+        "compile",
+        {"language": data.get("language", "python")},
+        session_id=data.get("session_id", ""),
+        permission_token=data.get("permission_token"),
+    )
+    if not permission.allowed:
+        audit_logger.log(
+            "compile_denied",
+            "compile",
+            {"language": data.get("language", "python"), "permission": permission.to_dict()},
+            False,
+            data.get("device_id", ""),
+        )
+        return jsonify({
+            "success": False,
+            "error": "permission_denied",
+            "permission": permission.to_dict(),
+        }), 403
     compile_params = {
         "language": data.get("language", "python"),
         "code": data.get("code", ""),
@@ -31708,27 +32296,32 @@ def agent_import_files():
             continue
         try:
             if os.path.isfile(src):
-                fname = os.path.basename(src)
-                dst = os.path.join(ws_path, fname)
-                if os.path.exists(dst):
-                    fname = f"imported_{int(time.time())}_{fname}"
-                    dst = os.path.join(ws_path, fname)
+                fname = _safe_upload_relative_path(os.path.basename(src))
+                dst = _dedupe_destination(os.path.join(ws_path, fname))
+                if not _path_is_inside(dst, ws_path):
+                    errors.append({"path": src, "error": "Invalid destination"})
+                    continue
                 import shutil
                 shutil.copy2(src, dst)
                 imported.append({"src": src, "dst": dst, "type": "file"})
             elif os.path.isdir(src):
-                dname = os.path.basename(src)
-                dst = os.path.join(ws_path, dname)
-                if os.path.exists(dst):
-                    dname = f"imported_{int(time.time())}_{dname}"
-                    dst = os.path.join(ws_path, dname)
+                dname = _safe_upload_relative_path(os.path.basename(src.rstrip("\\/")) or "imported_folder")
+                dst = _dedupe_destination(os.path.join(ws_path, dname))
+                if not _path_is_inside(dst, ws_path):
+                    errors.append({"path": src, "error": "Invalid destination"})
+                    continue
+                if _path_is_inside(dst, src):
+                    errors.append({"path": src, "error": "Cannot import a folder into itself"})
+                    continue
                 import shutil
                 shutil.copytree(src, dst, dirs_exist_ok=True)
                 imported.append({"src": src, "dst": dst, "type": "directory"})
         except Exception as e:
             errors.append({"path": src, "error": str(e)})
     if imported:
-        user_info.setdefault("imported_paths", []).extend([i["src"] for i in imported])
+        for item in imported:
+            if item.get("type") == "directory":
+                add_imported_root(user_info, item["src"])
         ide_user_registry[user_info["id"]] = user_info
         _save_accounts()
     return jsonify({"imported": imported, "errors": errors, "workspace": ws_path})
@@ -31747,10 +32340,11 @@ def agent_upload_device_files():
         fname = f.filename
         if not fname:
             continue
-        fname = fname.replace('\\', '/')
-        if fname.startswith('/'):
-            fname = fname[1:]
-        dst = os.path.join(ws_path, fname)
+        fname = _safe_upload_relative_path(fname)
+        dst = _dedupe_destination(os.path.join(ws_path, fname))
+        if not _path_is_inside(dst, ws_path):
+            errors.append({"name": fname, "error": "Invalid destination"})
+            continue
         dst_dir = os.path.dirname(dst)
         try:
             os.makedirs(dst_dir, exist_ok=True)
@@ -31760,7 +32354,6 @@ def agent_upload_device_files():
         except Exception as e:
             errors.append({"name": fname, "error": str(e)})
     if imported:
-        user_info.setdefault("imported_paths", []).extend([i["path"] for i in imported])
         ide_user_registry[user_info["id"]] = user_info
         _save_accounts()
     return jsonify({"imported": imported, "errors": errors, "workspace": ws_path})
@@ -31956,22 +32549,26 @@ if __name__ == '__main__':
     desktop_mode = os.environ.get('KAGUYA_DESKTOP_MODE', '') == '1' or os.environ.get('KAGUYA_ELECTRON', '') == '1'
     
     if not desktop_mode:
-        try:
-            from pyngrok import ngrok as _ngrok
-            _ngrok.set_auth_token("3CLbRalMZDZZ1UFp8CHfFfkQr9m_2qwVzMzc2UG93hc34zTmm")
-            ngrok_tunnel = _ngrok.connect(args.port, "http")
-            ngrok_url = ngrok_tunnel.public_url
-            print(f"[NGROK] Public URL: {ngrok_url}")
-            print(f"[NGROK] Agent IDE: {ngrok_url}/agent-ide")
-        except Exception as e:
-            err_msg = str(e)
-            if 'ERR_NGROK_108' in err_msg or 'authentication failed' in err_msg.lower() or 'limited to 3' in err_msg.lower():
-                print("[NGROK] Info: Public access unavailable (account limit)")
-                print("        Use browser mode for local access: http://127.0.0.1:" + str(args.port))
-            elif 'ngrok' in err_msg.lower():
-                print("[NGROK] Not available - using local mode only")
-            else:
-                print(f"[NGROK] Error: {err_msg[:100]}")
+        ngrok_token = os.environ.get("KAGUYA_NGROK_TOKEN", "").strip()
+        if ngrok_token:
+            try:
+                from pyngrok import ngrok as _ngrok
+                _ngrok.set_auth_token(ngrok_token)
+                ngrok_tunnel = _ngrok.connect(args.port, "http")
+                ngrok_url = ngrok_tunnel.public_url
+                print(f"[NGROK] Public URL: {ngrok_url}")
+                print(f"[NGROK] Agent IDE: {ngrok_url}/agent-ide")
+            except Exception as e:
+                err_msg = str(e)
+                if 'ERR_NGROK_108' in err_msg or 'authentication failed' in err_msg.lower() or 'limited to 3' in err_msg.lower():
+                    print("[NGROK] Info: Public access unavailable (account limit)")
+                    print("        Use browser mode for local access: http://127.0.0.1:" + str(args.port))
+                elif 'ngrok' in err_msg.lower():
+                    print("[NGROK] Not available - using local mode only")
+                else:
+                    print(f"[NGROK] Error: {err_msg[:100]}")
+        else:
+            print("[NGROK] Disabled: KAGUYA_NGROK_TOKEN is not set")
     else:
         print("[NGROK] Disabled in desktop mode (local access only)")
 

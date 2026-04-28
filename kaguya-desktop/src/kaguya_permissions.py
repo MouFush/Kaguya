@@ -1143,6 +1143,24 @@ class PermissionManager:
             })
             return PermissionDecision.DENY.value
 
+    def check_permission(self, session_id: str, tool_name: str,
+                         tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        mode = self.get_session_mode(session_id)
+        risk_level = self._classifier.get_risk_level(tool_name, tool_input)
+        pipeline_result = self._pipeline.evaluate(tool_name, tool_input, mode, session_id)
+        decision = pipeline_result.decision
+        return {
+            "success": True,
+            "session_id": session_id,
+            "tool_name": tool_name,
+            "risk_level": risk_level.value,
+            "mode": mode.value,
+            "decision": decision.value,
+            "auto_approved": decision == PermissionDecision.ALLOW,
+            "reason": pipeline_result.reason,
+            "pipeline_step": pipeline_result.step.value,
+        }
+
     def _handle_no_ui(self, session_id: str, tool_name: str,
                       tool_input: Dict, risk_level: ToolRiskLevel,
                       mode: PermissionMode, pipeline_result: PipelineResult,
