@@ -183,6 +183,9 @@ func TestUploadDeviceFilesStaysInWorkspace(t *testing.T) {
 	if err := mw.WriteField("workspace", root); err != nil {
 		t.Fatal(err)
 	}
+	if err := mw.WriteField("paths", "dir/a.txt"); err != nil {
+		t.Fatal(err)
+	}
 	part, err := mw.CreateFormFile("files", "dir/a.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -375,5 +378,58 @@ func TestAssetAliasesUseAppDir(t *testing.T) {
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != "png" {
 		t.Fatalf("asset alias failed: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCollectionFacadePersistsProjectItems(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/project/tasks", map[string]any{"id": "task-1", "title": "Port module"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/project/tasks", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Port module") {
+		t.Fatalf("get status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGoOwnedStatusFacades(t *testing.T) {
+	_, h := newTestServer(t)
+	for _, path := range []string{"/api/roles", "/api/prompts", "/api/version", "/account/profile", "/auth/setup", "/console/overview", "/system/metrics", "/services/health-check", "/git/status", "/security/ip-whitelist"} {
+		rec := requestJSON(t, h, http.MethodGet, path, nil)
+		if rec.Code >= 500 {
+			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("%s did not return json", path)
+		}
+	}
+}
+
+func TestKnowledgeBaseAddAndSearch(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/kb/add", map[string]any{"text": "Kaguya route migration note"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("kb add status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/kb/search", map[string]any{"query": "migration"})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Kaguya route migration note") {
+		t.Fatalf("kb search status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPrivacySettingsPersistAndToolExecuteDenied(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/privacy/settings", map[string]any{"telemetry": false, "crash_reports": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("privacy write status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/privacy/settings", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "telemetry") {
+		t.Fatalf("privacy read status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/tool/execute", map[string]any{"tool": "shell", "command": "rm -rf ."})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "permission_required") {
+		t.Fatalf("tool execute should be denied, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

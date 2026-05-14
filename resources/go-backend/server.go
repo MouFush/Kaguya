@@ -35,13 +35,13 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	cfg         ServerConfig
-	runtimeDir  string
+	cfg           ServerConfig
+	runtimeDir    string
 	workspaceRoot string
-	devicePath  string
-	mu          sync.Mutex
-	permissions permissionState
-	proxy       http.Handler
+	devicePath    string
+	mu            sync.Mutex
+	permissions   permissionState
+	proxy         http.Handler
 }
 
 type permissionState struct {
@@ -72,11 +72,11 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg:         cfg,
-		runtimeDir:  cfg.RuntimeDir,
+		cfg:           cfg,
+		runtimeDir:    cfg.RuntimeDir,
 		workspaceRoot: filepath.Join(cfg.RuntimeDir, "workspaces"),
-		devicePath:  filepath.Join(cfg.RuntimeDir, "device_vault.enc"),
-		permissions: permissionState{Mode: "ask"},
+		devicePath:    filepath.Join(cfg.RuntimeDir, "device_vault.enc"),
+		permissions:   permissionState{Mode: "ask"},
 	}
 	if cfg.PythonURL != "" {
 		u, err := url.Parse(cfg.PythonURL)
@@ -106,7 +106,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/device/unbind", s.deviceUnbind)
 	mux.HandleFunc("/api/account/saved-config", s.savedConfig)
 	mux.HandleFunc("/api/account/auto-fill", s.autoFill)
+	mux.HandleFunc("/account/profile", s.accountProfile)
+	mux.HandleFunc("/account/sessions", s.accountSessions)
+	mux.HandleFunc("/account/tokens", s.accountTokens)
+	mux.HandleFunc("/auth/account", s.accountProfile)
+	mux.HandleFunc("/auth/admin/accounts", s.authAdminAccounts)
+	mux.HandleFunc("/auth/admin/role", s.authAdminRole)
+	mux.HandleFunc("/auth/login", s.authLogin)
+	mux.HandleFunc("/auth/logout", s.authLogout)
+	mux.HandleFunc("/auth/logout-all", s.authLogout)
+	mux.HandleFunc("/auth/password-reset/confirm", s.authPasswordReset)
+	mux.HandleFunc("/auth/password-reset/request", s.authPasswordReset)
+	mux.HandleFunc("/auth/register", s.authRegister)
+	mux.HandleFunc("/auth/setup", s.authSetup)
+	mux.HandleFunc("/auth/token", s.authToken)
+	mux.HandleFunc("/api/roles", s.roles)
+	mux.HandleFunc("/api/prompts", s.prompts)
+	mux.HandleFunc("/api/prompts/", s.collectionFacade("prompts"))
+	mux.HandleFunc("/api/version", s.apiVersion)
 	mux.HandleFunc("/models", s.models)
+	mux.HandleFunc("/lora/list", s.loraList)
+	mux.HandleFunc("/lora/load", s.structuredUnavailable("lora"))
+	mux.HandleFunc("/scenes/", s.collectionFacade("scenes"))
+	mux.HandleFunc("/templates/", s.collectionFacade("templates"))
 	mux.HandleFunc("/chat", s.chat)
 	mux.HandleFunc("/api/chat", s.chat)
 	mux.HandleFunc("/chat/completions", s.chatCompletions)
@@ -116,13 +138,94 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/agent/abort", s.agentAbort)
 	mux.HandleFunc("/agent/api-status", s.agentAPIStatus)
 	mux.HandleFunc("/agent/api-test", s.agentAPITest)
+	mux.HandleFunc("/agent-ide", s.agentIDE)
+	mux.HandleFunc("/agent/accounts", s.collectionFacade("agent_accounts"))
+	mux.HandleFunc("/agent/audit/logs", s.auditLogs)
+	mux.HandleFunc("/agent/audit/stats", s.auditStats)
+	mux.HandleFunc("/agent/browsable-dirs", s.browsableDirs)
+	mux.HandleFunc("/agent/browser/", s.structuredUnavailable("agent_browser"))
+	mux.HandleFunc("/agent/compile", s.projectCommand("compile"))
+	mux.HandleFunc("/agent/events", s.agentEvents)
+	mux.HandleFunc("/agent/file-analyzer/", s.structuredUnavailable("file_analyzer"))
+	mux.HandleFunc("/agent/file-write", s.writeFile)
+	mux.HandleFunc("/agent/identify", s.agentIdentify)
+	mux.HandleFunc("/agent/import-env", s.importEnv)
+	mux.HandleFunc("/agent/import-files", s.importFiles)
+	mux.HandleFunc("/agent/open-project", s.openProject)
+	mux.HandleFunc("/agent/permission/", s.agentPermission)
+	mux.HandleFunc("/agent/plugins", s.collectionFacade("agent_plugins"))
+	mux.HandleFunc("/agent/plugins/", s.collectionFacade("agent_plugins"))
+	mux.HandleFunc("/agent/project-output", s.projectOutput)
+	mux.HandleFunc("/agent/project-status", s.projectStatus)
+	mux.HandleFunc("/agent/revert-file", s.revertFile)
+	mux.HandleFunc("/agent/run-project", s.projectCommand("run_project"))
+	mux.HandleFunc("/agent/stop-project", s.projectStop)
+	mux.HandleFunc("/agent/system/info", s.agentSystemInfo)
+	mux.HandleFunc("/agent/tasks/", s.agentTaskByID)
+	mux.HandleFunc("/agent/tasks/tree", s.agentTasksTree)
+	mux.HandleFunc("/agent/terminal/kill", s.terminalKill)
+	mux.HandleFunc("/agent/tools", s.agentTools)
+	mux.HandleFunc("/agent/user-info", s.agentUserInfo)
+	mux.HandleFunc("/agent/v2/", s.agentV2)
 	mux.HandleFunc("/rag/documents", s.ragDocuments)
+	mux.HandleFunc("/rag/add_text", s.ragAddText)
+	mux.HandleFunc("/rag/", s.structuredUnavailable("rag"))
 	mux.HandleFunc("/kaguya/features/flags", s.featureFlags)
 	mux.HandleFunc("/security/status", s.securityStatus)
+	mux.HandleFunc("/security/2fa/setup", s.structuredUnavailable("security_2fa"))
+	mux.HandleFunc("/security/audit", s.auditLogs)
+	mux.HandleFunc("/security/audit/clear", s.auditClear)
+	mux.HandleFunc("/security/ip-whitelist", s.securityIPWhitelist)
+	mux.HandleFunc("/security/ip-whitelist/mode", s.securityIPWhitelist)
 	mux.HandleFunc("/external/config", s.externalConfig)
 	mux.HandleFunc("/external/test", s.externalTest)
 	mux.HandleFunc("/deepseek/test", s.deepseekTest)
 	mux.HandleFunc("/deepseek/chat", s.deepseekChat)
+	mux.HandleFunc("/project/", s.collectionFacade("project"))
+	mux.HandleFunc("/artifacts", s.collectionFacade("artifacts"))
+	mux.HandleFunc("/artifacts/", s.collectionFacade("artifacts"))
+	mux.HandleFunc("/ops/", s.collectionFacade("ops"))
+	mux.HandleFunc("/release/", s.collectionFacade("release"))
+	mux.HandleFunc("/alerts/", s.collectionFacade("alerts"))
+	mux.HandleFunc("/ab/", s.collectionFacade("ab"))
+	mux.HandleFunc("/integrations", s.collectionFacade("integrations"))
+	mux.HandleFunc("/integrations/", s.collectionFacade("integrations"))
+	mux.HandleFunc("/workspace/projects", s.collectionFacade("workspace_projects"))
+	mux.HandleFunc("/workspace/projects/", s.collectionFacade("workspace_projects"))
+	mux.HandleFunc("/console/", s.consoleStatus)
+	mux.HandleFunc("/system/metrics", s.systemMetrics)
+	mux.HandleFunc("/performance/", s.collectionFacade("performance"))
+	mux.HandleFunc("/services/health-check", s.servicesHealth)
+	mux.HandleFunc("/services/", s.structuredUnavailable("service_control"))
+	mux.HandleFunc("/dependencies/", s.collectionFacade("dependencies"))
+	mux.HandleFunc("/git/status", s.gitStatus)
+	mux.HandleFunc("/scheduler/", s.collectionFacade("scheduler"))
+	mux.HandleFunc("/audio/", s.audioFile)
+	mux.HandleFunc("/chats/export", s.chatsExport)
+	mux.HandleFunc("/code/execute", s.codeExecute)
+	mux.HandleFunc("/dataflow/stats", s.dataflowStats)
+	mux.HandleFunc("/deepseek-icon", s.imageAsset("deepseek-icon.png"))
+	mux.HandleFunc("/sidebar-icon", s.imageAsset("sidebar-icon.png"))
+	mux.HandleFunc("/deploy/execute", s.structuredUnavailable("deploy_execute"))
+	mux.HandleFunc("/kb/add", s.kbAdd)
+	mux.HandleFunc("/kb/search", s.kbSearch)
+	mux.HandleFunc("/memory", s.collectionFacade("memory"))
+	mux.HandleFunc("/memory/", s.structuredUnavailable("memory"))
+	mux.HandleFunc("/playbooks", s.collectionFacade("playbooks"))
+	mux.HandleFunc("/playbooks/", s.collectionFacade("playbooks"))
+	mux.HandleFunc("/privacy/delete", s.privacyDelete)
+	mux.HandleFunc("/privacy/export", s.privacyExport)
+	mux.HandleFunc("/privacy/settings", s.privacySettings)
+	mux.HandleFunc("/search/global", s.structuredUnavailable("global_search"))
+	mux.HandleFunc("/tool/execute", s.codeExecute)
+	mux.HandleFunc("/tts", s.structuredUnavailable("tts"))
+	mux.HandleFunc("/web/", s.structuredUnavailable("web"))
+	mux.HandleFunc("/multimodal/", s.structuredUnavailable("multimodal"))
+	mux.HandleFunc("/finetune/", s.structuredUnavailable("finetune"))
+	mux.HandleFunc("/workflow", s.collectionFacade("workflow"))
+	mux.HandleFunc("/workflow/", s.collectionFacade("workflow"))
+	mux.HandleFunc("/workflows", s.collectionFacade("workflow"))
+	mux.HandleFunc("/mcp/", s.structuredUnavailable("mcp"))
 	mux.HandleFunc("/permissions/status", s.permissionsStatus)
 	mux.HandleFunc("/permissions/mode", s.permissionsMode)
 	mux.HandleFunc("/permissions/check", s.permissionsCheck)
@@ -277,6 +380,127 @@ func (s *Server) deviceInfo(w http.ResponseWriter, r *http.Request) {
 			"apiKey":               maskAPIKey(cfg.APIKey),
 			"runtime_dir":          s.cfg.RuntimeDir,
 		},
+	})
+}
+
+func (s *Server) roles(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"roles": []map[string]any{
+			{"id": "kaguya", "name": "Kaguya", "description": "Default IDE assistant"},
+			{"id": "coder", "name": "Coder", "description": "Code-focused assistant"},
+			{"id": "analyst", "name": "Analyst", "description": "Research and analysis assistant"},
+		},
+	})
+}
+
+func (s *Server) prompts(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"prompts": []map[string]any{
+			{"id": "code-review", "name": "Code Review", "category": "engineering"},
+			{"id": "debug", "name": "Debug", "category": "engineering"},
+			{"id": "document", "name": "Document", "category": "general"},
+		},
+	})
+}
+
+func (s *Server) loraList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "loras": []any{}, "available": false, "reason": "lora_worker_not_configured"})
+}
+
+func (s *Server) accountProfile(w http.ResponseWriter, r *http.Request) {
+	cfg, _ := s.loadDeviceConfig()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"account": map[string]any{
+			"id":             s.deviceID(),
+			"display_name":   "Local desktop user",
+			"auth_required":  false,
+			"provider":       cfg.Provider,
+			"masked_api_key": maskAPIKey(cfg.APIKey),
+		},
+	})
+}
+
+func (s *Server) accountSessions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"sessions": []map[string]any{{
+			"id":         s.deviceID(),
+			"type":       "desktop_loopback",
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+		}},
+	})
+}
+
+func (s *Server) accountTokens(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost || r.Method == http.MethodDelete {
+		writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "token mutation requires the auth worker")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "tokens": []any{}})
+}
+
+func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"auth":    "desktop_loopback",
+		"message": "Desktop loopback mode does not require password login.",
+	})
+}
+
+func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "logged_out": true})
+}
+
+func (s *Server) authRegister(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "account registration requires the auth worker")
+}
+
+func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":        true,
+		"mode":           "go",
+		"setup_required": false,
+		"auth_required":  false,
+	})
+}
+
+func (s *Server) authToken(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"token":   "",
+		"message": "No browser-readable auth token is issued in desktop loopback mode.",
+	})
+}
+
+func (s *Server) authPasswordReset(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "password reset requires the auth worker")
+}
+
+func (s *Server) authAdminAccounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "accounts": []any{}})
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "account administration requires the auth worker")
+}
+
+func (s *Server) authAdminRole(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "role administration requires the auth worker")
+}
+
+func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"name":    "KaguyaIDE",
+		"version": "3.1.0-go-port",
 	})
 }
 
@@ -488,6 +712,10 @@ func (s *Server) ragDocuments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "documents": []any{}, "mode": "go", "available": false, "reason": "python_worker_unavailable"})
 }
 
+func (s *Server) ragAddText(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "rag_worker_unavailable", "RAG indexing is delegated to the Python worker")
+}
+
 func (s *Server) featureFlags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "features": map[string]any{"go_backend": true, "python_worker": s.proxy != nil}})
 }
@@ -553,8 +781,8 @@ func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[stri
 	cfg := s.normalizedConfig(payload)
 	if cfg.APIKey == "" {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"success": false,
-			"ok":      false,
+			"success":  false,
+			"ok":       false,
 			"provider": cfg.Provider,
 			"api_url":  cfg.APIURL,
 			"apiUrl":   cfg.APIURL,
@@ -565,8 +793,8 @@ func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[stri
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success": false,
-		"ok":      false,
+		"success":  false,
+		"ok":       false,
 		"provider": cfg.Provider,
 		"api_url":  cfg.APIURL,
 		"apiUrl":   cfg.APIURL,
@@ -608,6 +836,220 @@ func (s *Server) agentAPITest(w http.ResponseWriter, r *http.Request) {
 	s.externalTest(w, r)
 }
 
+func (s *Server) agentIDE(w http.ResponseWriter, r *http.Request) {
+	if s.serveIndex(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "page": "agent-ide", "python_worker": s.proxy != nil})
+}
+
+func (s *Server) auditLogs(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(s.runtimeDir, "audit_logs", "go_audit.jsonl")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "logs": []any{}})
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	logs := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var item map[string]any
+		if json.Unmarshal([]byte(line), &item) == nil {
+			logs = append(logs, item)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "logs": logs})
+}
+
+func (s *Server) auditStats(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(s.runtimeDir, "audit_logs", "go_audit.jsonl")
+	b, _ := os.ReadFile(path)
+	count := 0
+	if len(b) > 0 {
+		count = len(strings.Split(strings.TrimSpace(string(b)), "\n"))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "total": count})
+}
+
+func (s *Server) auditClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		methodNotAllowed(w)
+		return
+	}
+	path := filepath.Join(s.runtimeDir, "audit_logs", "go_audit.jsonl")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		writeError(w, http.StatusInternalServerError, "audit_clear_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "cleared": true})
+}
+
+func (s *Server) securityIPWhitelist(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":   true,
+		"mode":      "go",
+		"enabled":   false,
+		"mode_name": "loopback_only",
+		"entries":   []string{"127.0.0.1", "::1"},
+	})
+}
+
+func (s *Server) browsableDirs(w http.ResponseWriter, r *http.Request) {
+	root := s.workspaceFor(s.deviceID())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"dirs":    []map[string]any{{"path": root, "trusted": true, "scope": "workspace"}},
+	})
+}
+
+func (s *Server) agentEvents(w http.ResponseWriter, r *http.Request) {
+	writeSSE(w, map[string]any{"type": "ready", "success": true, "mode": "go", "python_worker": s.proxy != nil})
+}
+
+func (s *Server) agentIdentify(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "agent_id": "kaguya-go", "capabilities": []string{"config", "workspace_files", "safe_terminal"}})
+}
+
+func (s *Server) importEnv(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "env_import_unavailable", "environment import requires explicit Python worker support")
+}
+
+func (s *Server) importFiles(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "import_requires_picker", "file import must be performed through the desktop picker and workspace upload API")
+}
+
+func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	root, err := workspaceRoot(payload)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_workspace", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":               true,
+		"mode":                  "go",
+		"path":                  root,
+		"trusted":               false,
+		"requires_confirmation": true,
+		"message":               "Go backend can preview this project path but does not trust it until the desktop picker confirms import.",
+	})
+}
+
+func (s *Server) agentPermission(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/config"):
+		s.permissionsStatus(w, r)
+	case strings.HasSuffix(r.URL.Path, "/respond"):
+		writeJSON(w, http.StatusOK, map[string]any{"success": false, "mode": "go", "error": "permission_request_not_found"})
+	case strings.HasSuffix(r.URL.Path, "/rule"):
+		s.collectionFacade("permission_rules")(w, r)
+	case strings.HasSuffix(r.URL.Path, "/sandbox-dir"):
+		s.browsableDirs(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "unknown_permission_route", "unknown permission route")
+	}
+}
+
+func (s *Server) projectOutput(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "output": "", "running": false})
+}
+
+func (s *Server) projectStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "running": false, "processes": []any{}})
+}
+
+func (s *Server) revertFile(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "history_unavailable", "file history is not configured in the Go backend")
+}
+
+func (s *Server) projectCommand(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		risk := classifyTool(action)
+		if s.permissions.Mode != "allow" && risk != "low" {
+			s.audit(action, map[string]any{"allowed": false, "risk_level": risk, "reason": "permission_required"})
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"success":               false,
+				"allowed":               false,
+				"requires_confirmation": true,
+				"risk_level":            risk,
+				"error":                 "permission_required",
+			})
+			return
+		}
+		writeError(w, http.StatusServiceUnavailable, action+"_unavailable", "project execution is delegated to the Python worker")
+	}
+}
+
+func (s *Server) projectStop(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "stopped": false, "reason": "no_go_managed_process"})
+}
+
+func (s *Server) agentSystemInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"system":  map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "workspace_root": s.workspaceRoot, "python_worker": s.proxy != nil},
+	})
+}
+
+func (s *Server) agentTaskByID(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"path":    r.URL.Path,
+		"task":    map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/agent/tasks/"), "status": "unavailable"},
+	})
+}
+
+func (s *Server) agentTasksTree(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "tree": []any{}})
+}
+
+func (s *Server) terminalKill(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "killed": false, "reason": "no_go_managed_process"})
+}
+
+func (s *Server) agentTools(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"tools": []map[string]any{
+			{"name": "read_file", "risk_level": "low"},
+			{"name": "write_file", "risk_level": "medium"},
+			{"name": "execute_command", "risk_level": "high"},
+		},
+	})
+}
+
+func (s *Server) agentUserInfo(w http.ResponseWriter, r *http.Request) {
+	s.accountProfile(w, r)
+}
+
+func (s *Server) agentV2(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	switch {
+	case strings.Contains(path, "/command-safety"):
+		var payload map[string]any
+		_ = readJSON(r, &payload)
+		argv := commandArgs(payload["command"])
+		risk := classifyCommand(strings.Join(argv, " "))
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "risk_level": risk, "allowed": risk == "low"})
+	case strings.Contains(path, "/executor/status"):
+		s.projectStatus(w, r)
+	case strings.Contains(path, "/permissions/"):
+		s.permissionsStatus(w, r)
+	case strings.Contains(path, "/sessions"):
+		s.accountSessions(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "unknown_agent_v2_route", "unknown agent v2 route")
+	}
+}
+
 func (s *Server) agentAbort(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]any
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
@@ -629,8 +1071,8 @@ func (s *Server) agentAbort(w http.ResponseWriter, r *http.Request) {
 func (s *Server) permissionsStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"mode": s.permissions.Mode,
-		"ok":   true,
+		"mode":    s.permissions.Mode,
+		"ok":      true,
 	})
 }
 
@@ -792,25 +1234,32 @@ func (s *Server) uploadDeviceFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	count := 0
+	pathOverrides := r.MultipartForm.Value["paths"]
+	fileIndex := 0
 	for _, headers := range r.MultipartForm.File {
 		for _, header := range headers {
-			if err := s.saveUploadedFile(root, header); err != nil {
+			rel := header.Filename
+			if fileIndex < len(pathOverrides) && pathOverrides[fileIndex] != "" {
+				rel = pathOverrides[fileIndex]
+			}
+			if err := s.saveUploadedFile(root, header, rel); err != nil {
 				writeError(w, http.StatusForbidden, "upload_failed", err.Error())
 				return
 			}
+			fileIndex++
 			count++
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "uploaded": count})
 }
 
-func (s *Server) saveUploadedFile(root string, header *multipart.FileHeader) error {
+func (s *Server) saveUploadedFile(root string, header *multipart.FileHeader, relativeName string) error {
 	src, err := header.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	name := filepath.Clean(filepath.FromSlash(header.Filename))
+	name := filepath.Clean(filepath.FromSlash(relativeName))
 	if filepath.IsAbs(name) {
 		name = filepath.Base(name)
 	}
@@ -895,14 +1344,14 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 	timedOut := ctx.Err() == context.DeadlineExceeded
 	s.audit("terminal_exec", map[string]any{"allowed": true, "risk_level": risk, "command": argv, "working_dir": cwd, "exit_code": exitCode, "timeout": timedOut})
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":   err == nil && !timedOut,
-		"ok":        err == nil && !timedOut,
-		"exit_code": exitCode,
-		"stdout":    stdout.String(),
-		"stderr":    stderr.String(),
-		"shell":     false,
+		"success":    err == nil && !timedOut,
+		"ok":         err == nil && !timedOut,
+		"exit_code":  exitCode,
+		"stdout":     stdout.String(),
+		"stderr":     stderr.String(),
+		"shell":      false,
 		"risk_level": risk,
-		"timeout":   timedOut,
+		"timeout":    timedOut,
 	})
 }
 
@@ -920,6 +1369,236 @@ func (s *Server) proxyFallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) collectionFacade(domain string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := domain + "_" + safeName(r.URL.Path)
+		if r.Method == http.MethodGet {
+			items, err := s.loadCollection(key)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "load_failed", err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": true,
+				"mode":    "go",
+				"domain":  domain,
+				"path":    r.URL.Path,
+				"items":   items,
+			})
+			return
+		}
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			var payload map[string]any
+			_ = readJSON(r, &payload)
+			if payload == nil {
+				payload = map[string]any{}
+			}
+			payload["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+			if payload["id"] == nil || payload["id"] == "" {
+				payload["id"] = domain + "-" + time.Now().UTC().Format("20060102150405.000000000")
+			}
+			items, _ := s.loadCollection(key)
+			items = upsertCollectionItem(items, payload)
+			if err := s.saveCollection(key, items); err != nil {
+				writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "domain": domain, "item": payload, "items": items})
+			return
+		}
+		if r.Method == http.MethodDelete {
+			if err := s.saveCollection(key, []map[string]any{}); err != nil {
+				writeError(w, http.StatusInternalServerError, "delete_failed", err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "domain": domain, "deleted": true})
+			return
+		}
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) structuredUnavailable(feature string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"success":   false,
+			"available": false,
+			"mode":      "go",
+			"feature":   feature,
+			"error":     "worker_not_configured",
+			"message":   feature + " is not yet implemented in the Go backend.",
+		})
+	}
+}
+
+func (s *Server) consoleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "path": r.URL.Path, "status": "ok", "backend": "go"})
+}
+
+func (s *Server) systemMetrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"metrics": map[string]any{
+			"runtime_dir":     s.runtimeDir,
+			"goos":            runtime.GOOS,
+			"python_worker":   s.proxy != nil,
+			"workspace_root":  s.workspaceRoot,
+			"permission_mode": s.permissions.Mode,
+		},
+	})
+}
+
+func (s *Server) servicesHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"services": []map[string]any{
+			{"id": "go-backend", "status": "healthy"},
+			{"id": "python-worker", "status": map[bool]string{true: "available", false: "unavailable"}[s.proxy != nil]},
+		},
+	})
+}
+
+func (s *Server) gitStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "repositories": []any{}, "available": false, "reason": "git_status_not_configured"})
+}
+
+func (s *Server) audioFile(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.AppDir == "" {
+		writeError(w, http.StatusNotFound, "audio_not_configured", "audio asset directory is not configured")
+		return
+	}
+	rel := strings.TrimPrefix(r.URL.Path, "/audio/")
+	target, err := safeJoin(filepath.Join(s.cfg.AppDir, "audio_cache"), rel)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "outside_audio_cache", err.Error())
+		return
+	}
+	http.ServeFile(w, r, target)
+}
+
+func (s *Server) chatsExport(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"format":  "json",
+		"chats":   []any{},
+	})
+}
+
+func (s *Server) codeExecute(w http.ResponseWriter, r *http.Request) {
+	risk := classifyTool("execute_command")
+	s.audit("code_execute", map[string]any{"allowed": false, "risk_level": risk, "reason": "permission_required"})
+	writeJSON(w, http.StatusForbidden, map[string]any{
+		"success":               false,
+		"mode":                  "go",
+		"allowed":               false,
+		"requires_confirmation": true,
+		"risk_level":            risk,
+		"error":                 "permission_required",
+	})
+}
+
+func (s *Server) dataflowStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "stats": map[string]any{"events": 0, "pipelines": 0}})
+}
+
+func (s *Server) kbAdd(w http.ResponseWriter, r *http.Request) {
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	text := firstString(payload, "text", "content", "document")
+	if strings.TrimSpace(text) == "" {
+		writeError(w, http.StatusBadRequest, "missing_text", "text is required")
+		return
+	}
+	item := map[string]any{
+		"id":         "kb-" + time.Now().UTC().Format("20060102150405.000000000"),
+		"text":       text,
+		"created_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	items, _ := s.loadCollection("knowledge_base")
+	items = append(items, item)
+	if err := s.saveCollection("knowledge_base", items); err != nil {
+		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "item": item})
+}
+
+func (s *Server) kbSearch(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		var payload map[string]any
+		_ = readJSON(r, &payload)
+		query = firstString(payload, "q", "query", "text")
+	}
+	items, _ := s.loadCollection("knowledge_base")
+	results := []map[string]any{}
+	for _, item := range items {
+		text := strings.ToLower(firstString(item, "text", "content"))
+		if query == "" || strings.Contains(text, strings.ToLower(query)) {
+			results = append(results, item)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "query": query, "results": results})
+}
+
+func (s *Server) privacySettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		items, _ := s.loadCollection("privacy_settings")
+		settings := map[string]any{"telemetry": false, "crash_reports": false}
+		if len(items) > 0 {
+			settings = items[len(items)-1]
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "settings": settings})
+		return
+	}
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["id"] = "settings"
+	payload["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	if err := s.saveCollection("privacy_settings", []map[string]any{payload}); err != nil {
+		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "settings": payload})
+}
+
+func (s *Server) privacyExport(w http.ResponseWriter, r *http.Request) {
+	cfg, _ := s.loadDeviceConfig()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"mode":    "go",
+		"export":  map[string]any{"device": maskedDevice(cfg), "collections_dir": filepath.Join(s.runtimeDir, "go_collections")},
+	})
+}
+
+func (s *Server) privacyDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		methodNotAllowed(w)
+		return
+	}
+	removed := []string{}
+	for _, rel := range []string{"go_collections", "audit_logs"} {
+		path := filepath.Join(s.runtimeDir, rel)
+		if err := os.RemoveAll(path); err == nil {
+			removed = append(removed, rel)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "deleted": removed})
 }
 
 func (s *Server) loadDeviceConfig() (deviceConfig, error) {
@@ -1386,6 +2065,69 @@ func (s *Server) audit(action string, fields map[string]any) {
 	}
 	defer f.Close()
 	_, _ = f.Write(append(b, '\n'))
+}
+
+func (s *Server) collectionPath(key string) string {
+	return filepath.Join(s.runtimeDir, "go_collections", key+".json")
+}
+
+func (s *Server) loadCollection(key string) ([]map[string]any, error) {
+	path := s.collectionPath(key)
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return []map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(b, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Server) saveCollection(key string, items []map[string]any) error {
+	path := s.collectionPath(key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o600)
+}
+
+func upsertCollectionItem(items []map[string]any, item map[string]any) []map[string]any {
+	id := fmt.Sprint(item["id"])
+	for i := range items {
+		if fmt.Sprint(items[i]["id"]) == id {
+			items[i] = item
+			return items
+		}
+	}
+	return append(items, item)
+}
+
+func safeName(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "default"
+	}
+	return out
 }
 
 func readJSON(r *http.Request, dst any) error {

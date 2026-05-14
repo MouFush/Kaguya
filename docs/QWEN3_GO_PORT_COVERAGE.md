@@ -2,13 +2,13 @@
 
 The legacy monolith must not be deleted until the Go backend reaches route and behavior parity. The current state is intentionally tracked by `resources/python-app/scripts/go_route_coverage.py`.
 
-Current local audit on 2026-05-15 after restoring the legacy monolith:
+Current local audit on 2026-05-15 after restoring the legacy monolith and expanding the Go HTTP surface:
 
 - Legacy Flask routes in `resources/python-app/qwen3_web.py`: 241 static `@app.route` entries in the restored source
-- Go HTTP handlers in `resources/go-backend/server.go`: 42
-- Direct Go route coverage: 35 / 241 = 14.52%
-- Missing legacy routes: 206
-- Conclusion: the Go backend is not yet a full port. Deleting the monolith now would remove most of the product.
+- Go HTTP handlers in `resources/go-backend/server.go`: 145
+- Direct Go route coverage: 241 / 241 = 100%
+- Missing legacy routes: 0
+- Conclusion: the Go backend now has a mapped HTTP entrypoint for every static Flask route found by the audit. This is still not enough to delete the monolith: several routes are intentionally structured `unavailable` responses or durable local facades, not full behavior parity.
 
 Hard deletion gate:
 
@@ -19,6 +19,8 @@ python resources\python-app\scripts\smoke_go.py
 ```
 
 The monolith can be physically deleted only after the coverage gate passes and the remaining Python modules are libraries, not HTTP entrypoints.
+
+Route coverage is a deletion prerequisite, not the deletion approval. The next gate is behavior parity for the high-risk domains: auth/session lifecycle, RAG document lifecycle, agent run/tool loop, external provider streaming, project execution, and workflow/MCP integrations.
 
 Migration order:
 
