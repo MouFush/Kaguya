@@ -112,6 +112,7 @@ function setupAutoUpdater() {
 
 let mainWindow = null;
 let pythonProcess = null;
+let goProcess = null;
 let tray = null;
 let serverPort = DEFAULT_PORT;
 let terminalSessions = new Map();
@@ -479,6 +480,150 @@ function isLocalAppUrl(rawUrl) {
         return parsed.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsed.hostname);
     } catch (err) {
         return false;
+    }
+}
+
+function getResourcesRoot() {
+    if (app.isPackaged) {
+        return process.resourcesPath;
+    }
+    return path.resolve(__dirname, '..', '..');
+}
+
+function getGoBackendDir() {
+    return path.join(getResourcesRoot(), 'go-backend');
+}
+
+function findGoBackendExecutable() {
+    if (process.env.KAGUYA_GO_BACKEND && fs.existsSync(process.env.KAGUYA_GO_BACKEND)) {
+        return { command: process.env.KAGUYA_GO_BACKEND, args: [], cwd: path.dirname(process.env.KAGUYA_GO_BACKEND), source: 'KAGUYA_GO_BACKEND' };
+    }
+    const dir = getGoBackendDir();
+    const exeName = process.platform === 'win32' ? 'kaguya-go-backend.exe' : 'kaguya-go-backend';
+    const binary = path.join(dir, exeName);
+    if (fs.existsSync(binary)) {
+        return { command: binary, args: [], cwd: dir, source: 'bundled-binary' };
+    }
+    if (fs.existsSync(path.join(dir, 'go.mod')) && commandExists('go')) {
+        return { command: 'go', args: ['run', '.'], cwd: dir, source: 'go-run' };
+    }
+    return null;
+}
+
+function commandExists(command) {
+    try {
+        const { execSync } = require('child_process');
+        const lookup = process.platform === 'win32' ? `where ${command}` : `command -v ${command}`;
+        execSync(lookup, { stdio: 'ignore', windowsHide: true });
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+function waitForBackend(port, route = '/') {
+    return new Promise((resolve, reject) => {
+        const req = require('http').get(`http://127.0.0.1:${port}${route}`, (res) => {
+            res.resume();
+            if (res.statusCode && res.statusCode < 500) resolve();
+            else reject(new Error(`status ${res.statusCode}`));
+        });
+        req.on('error', reject);
+        req.setTimeout(1000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
+
+async function startGoServer(port) {
+    const backend = findGoBackendExecutable();
+    const resourcePath = getResourcePath();
+    const pythonPath = getPythonPath();
+    const qwenPath = path.join(resourcePath, 'qwen3_web.py');
+    const runtimeDir = path.join(app.getPath('userData'), 'kaguya', 'go-backend');
+    updateStartupDiagnostics({
+        backendModeAttempted: 'go',
+        goBackendDir: getGoBackendDir(),
+        goBackendFound: !!backend,
+        goRuntimeDir: runtimeDir,
+        goPythonScript: qwenPath,
+        goPythonScriptExists: fs.existsSync(qwenPath),
+    });
+    if (!backend) {
+        throw new Error(`Go backend executable not found. Expected ${path.join(getGoBackendDir(), process.platform === 'win32' ? 'kaguya-go-backend.exe' : 'kaguya-go-backend')} or a Go toolchain for go run.`);
+    }
+
+    const args = backend.args.concat([
+        '--host', '127.0.0.1',
+        '--port', String(port),
+        '--runtime-dir', runtimeDir,
+        '--python-script', qwenPath,
+        '--python', pythonPath,
+    ]);
+    console.log('[Main] Starting Go backend:', backend.command, args.join(' '));
+    updateStartupDiagnostics({
+        goCommand: backend.command,
+        goArgs: args,
+        goSource: backend.source,
+        backendPort: port,
+    });
+
+    goProcess = spawn(backend.command, args, {
+        cwd: backend.cwd,
+        env: Object.assign({}, process.env, {
+            KAGUYA_DESKTOP_MODE: '1',
+            KAGUYA_ELECTRON: '1',
+            KAGUYA_DISABLE_NGROK: '1',
+            KAGUYA_RUNTIME_DIR: runtimeDir,
+        }),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
+
+    let goStdout = '';
+    let goStderr = '';
+    goProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        goStdout += output;
+        updateStartupDiagnostics({ lastGoStdout: goStdout.slice(-2000) });
+        console.log('[Go]', output.trim());
+    });
+    goProcess.stderr.on('data', (data) => {
+        const output = data.toString();
+        goStderr += output;
+        updateStartupDiagnostics({ lastGoStderr: goStderr.slice(-2000) });
+        console.error('[Go Err]', output.trim());
+    });
+    goProcess.on('close', (code) => {
+        console.log(`[Go] Process exited with code ${code}`);
+        updateStartupDiagnostics({ lastGoExitCode: code, lastGoStderr: goStderr.slice(-2000) });
+        goProcess = null;
+    });
+
+    for (let i = 0; i < 150; i++) {
+        await new Promise(r => setTimeout(r, 300));
+        try {
+            await waitForBackend(port, '/health');
+            console.log(`[OK] Go backend ready at http://127.0.0.1:${port}/`);
+            updateStartupDiagnostics({ backendMode: 'go' });
+            return port;
+        } catch (err) {
+            if (i % 10 === 0) {
+                console.log(`[Main] Waiting for Go backend... (${i}/150)`);
+            }
+        }
+    }
+    throw new Error(`Go backend did not become healthy. Last stderr: ${goStderr.slice(-2000)}`);
+}
+
+async function startBackendServer(port) {
+    try {
+        await startGoServer(port);
+        return { port, mode: 'go' };
+    } catch (goErr) {
+        console.warn('[Main] Go backend unavailable, falling back to Python:', goErr.message);
+        updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'python' });
+        await startPythonServer(port);
+        updateStartupDiagnostics({ backendMode: 'python' });
+        return { port, mode: 'python' };
     }
 }
 
@@ -1757,6 +1902,24 @@ ipcMain.handle('device-unbind', async () => clearDeviceVault());
 // ========== Lifecycle ==========
 
 function stopPythonServer() {
+    if (goProcess) {
+        console.log('[Main] Stopping Go backend...');
+        try {
+            if (process.platform === 'win32') {
+                exec(`taskkill /pid ${goProcess.pid} /T /F`, (err) => {
+                    if (err && goProcess) goProcess.kill();
+                });
+            } else {
+                goProcess.kill('SIGTERM');
+                setTimeout(() => {
+                    if (goProcess) goProcess.kill('SIGKILL');
+                }, 5000);
+            }
+        } catch (e) {
+            try { goProcess.kill(); } catch (_) {}
+        }
+        goProcess = null;
+    }
     if (pythonProcess) {
         console.log('[Main] Stopping Python server...');
         try {
@@ -1812,12 +1975,12 @@ app.on('ready', async () => {
             } else {
                 serverPort = externalPort;
                 try {
-                    await startPythonServer(serverPort);
-                    console.log('[Main] Python server started successfully');
+                    const backend = await startBackendServer(serverPort);
+                    console.log(`[Main] ${backend.mode} backend started successfully`);
                     createWindow(serverPort);
                     createTray();
                 } catch (err) {
-                    console.error('[Main] Python server failed:', err);
+                    console.error('[Main] Backend server failed:', err);
                     console.log('[Main] Showing setup page instead of quitting');
                     serverPort = 0;
                     createSetupWindow();
@@ -1828,12 +1991,12 @@ app.on('ready', async () => {
             serverPort = await findFreePort();
             console.log(`[Main] Using port ${serverPort}`);
             try {
-                await startPythonServer(serverPort);
-                console.log('[Main] Python server started successfully');
+                const backend = await startBackendServer(serverPort);
+                console.log(`[Main] ${backend.mode} backend started successfully`);
                 createWindow(serverPort);
                 createTray();
             } catch (err) {
-                console.error('[Main] Python server failed:', err);
+                console.error('[Main] Backend server failed:', err);
                 console.log('[Main] Showing setup page instead of quitting');
                 serverPort = 0;
                 createSetupWindow();
