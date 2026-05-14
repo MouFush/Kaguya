@@ -609,11 +609,19 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	_ = r.Body.Close()
 	if s.proxy != nil {
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		s.proxy.ServeHTTP(w, r)
 		return
 	}
-	cfg, _ := s.loadDeviceConfig()
+	var payload map[string]any
+	_ = json.Unmarshal(body, &payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	cfg := s.normalizedConfig(payload)
 	if cfg.APIKey == "" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"success": false,
@@ -623,16 +631,90 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusNotImplemented, map[string]any{
-		"success": false,
-		"mode":    "go",
-		"error":   "external_provider_proxy_not_implemented",
-		"message": "External provider configuration is saved, but chat proxy should run through the Python worker in this build.",
-	})
+	s.externalProviderChat(w, r, cfg, payload)
 }
 
 func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.chat(w, r)
+}
+
+func (s *Server) externalProviderChat(w http.ResponseWriter, r *http.Request, cfg deviceConfig, payload map[string]any) {
+	if payload["messages"] == nil {
+		message := firstString(payload, "message", "prompt", "input")
+		if message == "" {
+			writeError(w, http.StatusBadRequest, "missing_message", "messages or message is required")
+			return
+		}
+		payload["messages"] = []map[string]any{{"role": "user", "content": message}}
+	}
+	if payload["model"] == nil || payload["model"] == "" {
+		payload["model"] = cfg.Model
+	}
+	delete(payload, "api_key")
+	delete(payload, "apiKey")
+	delete(payload, "api_url")
+	delete(payload, "apiUrl")
+	delete(payload, "provider")
+
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(cfg.APIURL), bytes.NewReader(reqBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_api_url", err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"success":  false,
+			"mode":     "go",
+			"provider": cfg.Provider,
+			"model":    cfg.Model,
+			"error":    "provider_request_failed",
+			"message":  err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if resp.StatusCode >= 400 {
+		writeJSON(w, resp.StatusCode, map[string]any{
+			"success":       false,
+			"mode":          "go",
+			"provider":      cfg.Provider,
+			"model":         cfg.Model,
+			"error":         "provider_error",
+			"status_code":   resp.StatusCode,
+			"upstream_body": string(respBody),
+		})
+		return
+	}
+	var upstream map[string]any
+	if err := json.Unmarshal(respBody, &upstream); err != nil {
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(respBody)
+		return
+	}
+	if r.URL.Path == "/chat/completions" {
+		writeJSON(w, resp.StatusCode, upstream)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":  true,
+		"mode":     "go",
+		"provider": cfg.Provider,
+		"model":    cfg.Model,
+		"response": extractAssistantContent(upstream),
+		"raw":      upstream,
+	})
 }
 
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
@@ -1988,6 +2070,30 @@ func normalizeProviderDefaults(cfg *deviceConfig) {
 			cfg.Model = "deepseek-chat"
 		}
 	}
+}
+
+func chatCompletionsURL(base string) string {
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/chat/completions") {
+		return base
+	}
+	return base + "/chat/completions"
+}
+
+func extractAssistantContent(upstream map[string]any) string {
+	choices, _ := upstream["choices"].([]any)
+	if len(choices) == 0 {
+		return ""
+	}
+	first, _ := choices[0].(map[string]any)
+	if first == nil {
+		return ""
+	}
+	message, _ := first["message"].(map[string]any)
+	if message == nil {
+		return firstString(first, "text", "content")
+	}
+	return firstString(message, "content")
 }
 
 func (s *Server) normalizedConfig(payload map[string]any) deviceConfig {

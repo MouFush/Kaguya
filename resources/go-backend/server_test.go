@@ -272,6 +272,47 @@ func TestKimiDefaultsAndNoPlaintextResponse(t *testing.T) {
 	}
 }
 
+func TestExternalProviderChatUsesSavedOpenAICompatibleConfig(t *testing.T) {
+	var gotAuth, gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["api_key"] != nil || payload["apiKey"] != nil {
+			t.Fatalf("provider payload leaked api key: %#v", payload)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cmpl-test","choices":[{"message":{"role":"assistant","content":"pong"}}]}`))
+	}))
+	defer upstream.Close()
+
+	_, h := newTestServer(t)
+	key := "sk-provider-secret"
+	rec := requestJSON(t, h, http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "kimi",
+		"api_url":  upstream.URL + "/v1",
+		"api_key":  key,
+		"model":    "kimi-k2.6",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/api/chat", map[string]any{"message": "ping"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chat status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/chat/completions" || gotAuth != "Bearer "+key {
+		t.Fatalf("upstream path/auth mismatch path=%s auth=%s", gotPath, gotAuth)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, key) || !strings.Contains(body, "pong") {
+		t.Fatalf("chat response leaked key or missed content: %s", body)
+	}
+}
+
 func TestStreamSSEFallbackIsStructuredUnavailable(t *testing.T) {
 	_, h := newTestServer(t)
 	rec := requestJSON(t, h, http.MethodPost, "/stream", map[string]any{"message": "hi"})
