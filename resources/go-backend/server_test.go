@@ -335,3 +335,45 @@ func TestDeepSeekFallbacksAreStructuredAndMasked(t *testing.T) {
 		t.Fatalf("unexpected deepseek chat response: %#v", got)
 	}
 }
+
+func TestServesExtractedIndexWithoutPythonWorker(t *testing.T) {
+	dir := t.TempDir()
+	staticDir := filepath.Join(dir, "static")
+	if err := os.MkdirAll(staticDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<html>kaguya-go-index</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir(), StaticDir: staticDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "kaguya-go-index") {
+		t.Fatalf("index not served by go backend: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAssetAliasesUseAppDir(t *testing.T) {
+	appDir := t.TempDir()
+	assetDir := filepath.Join(appDir, "assets")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(assetDir, "kaguya-header.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir(), AppDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/header-img", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "png" {
+		t.Fatalf("asset alias failed: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}

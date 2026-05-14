@@ -555,9 +555,12 @@ async function startGoServer(port) {
         '--host', '127.0.0.1',
         '--port', String(port),
         '--runtime-dir', runtimeDir,
-        '--python-script', qwenPath,
-        '--python', pythonPath,
+        '--app-dir', resourcePath,
+        '--static-dir', path.join(getGoBackendDir(), 'static'),
     ]);
+    if (process.env.KAGUYA_ENABLE_PYTHON_WORKER === '1') {
+        args.push('--python-script', qwenPath, '--python', pythonPath);
+    }
     console.log('[Main] Starting Go backend:', backend.command, args.join(' '));
     updateStartupDiagnostics({
         goCommand: backend.command,
@@ -619,11 +622,15 @@ async function startBackendServer(port) {
         await startGoServer(port);
         return { port, mode: 'go' };
     } catch (goErr) {
-        console.warn('[Main] Go backend unavailable, falling back to Python:', goErr.message);
-        updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'python' });
-        await startPythonServer(port);
-        updateStartupDiagnostics({ backendMode: 'python' });
-        return { port, mode: 'python' };
+        updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'disabled' });
+        if (process.env.KAGUYA_ALLOW_LEGACY_QWEN3 === '1') {
+            console.warn('[Main] Go backend unavailable, legacy qwen3 fallback explicitly enabled:', goErr.message);
+            updateStartupDiagnostics({ backendFallback: 'python' });
+            await startPythonServer(port);
+            updateStartupDiagnostics({ backendMode: 'python' });
+            return { port, mode: 'python' };
+        }
+        throw new Error(`Go backend unavailable and legacy qwen3 fallback is disabled. ${goErr.message}`);
     }
 }
 

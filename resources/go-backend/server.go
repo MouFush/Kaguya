@@ -30,6 +30,8 @@ import (
 type ServerConfig struct {
 	RuntimeDir string
 	PythonURL  string
+	AppDir     string
+	StaticDir  string
 }
 
 type Server struct {
@@ -88,6 +90,14 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/background", s.imageAsset("kaguya-header.png"))
+	mux.HandleFunc("/wallpaper", s.imageAsset("kaguya-hero.png"))
+	mux.HandleFunc("/header-img", s.imageAsset("kaguya-header.png"))
+	mux.HandleFunc("/hero-img", s.imageAsset("kaguya-hero.png"))
+	mux.HandleFunc("/welcome-img", s.imageAsset("kaguya-welcome.png"))
+	mux.HandleFunc("/favicon.ico", s.imageAsset("favicon.ico"))
+	mux.HandleFunc("/static/", s.staticFile)
+	mux.HandleFunc("/assets/", s.assetFile)
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/api/config", s.apiConfig)
 	mux.HandleFunc("/api/model-status", s.modelStatus)
@@ -140,6 +150,69 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		"backend_available": s.proxy != nil,
 		"runtime_dir":       s.cfg.RuntimeDir,
 	})
+}
+
+func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != "/" {
+		return false
+	}
+	candidates := []string{}
+	if s.cfg.StaticDir != "" {
+		candidates = append(candidates, filepath.Join(s.cfg.StaticDir, "index.html"))
+	}
+	candidates = append(candidates, filepath.Join(s.runtimeDir, "static", "index.html"))
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			http.ServeFile(w, r, candidate)
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) staticFile(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.AppDir == "" {
+		writeError(w, http.StatusNotFound, "static_not_configured", "app-dir is not configured")
+		return
+	}
+	rel := strings.TrimPrefix(r.URL.Path, "/static/")
+	target, err := safeJoin(filepath.Join(s.cfg.AppDir, "static"), rel)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "outside_static", err.Error())
+		return
+	}
+	http.ServeFile(w, r, target)
+}
+
+func (s *Server) assetFile(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.AppDir == "" {
+		writeError(w, http.StatusNotFound, "assets_not_configured", "app-dir is not configured")
+		return
+	}
+	rel := strings.TrimPrefix(r.URL.Path, "/assets/")
+	target, err := safeJoin(filepath.Join(s.cfg.AppDir, "assets"), rel)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "outside_assets", err.Error())
+		return
+	}
+	http.ServeFile(w, r, target)
+}
+
+func (s *Server) imageAsset(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.AppDir == "" {
+			writeError(w, http.StatusNotFound, "asset_not_configured", "app-dir is not configured")
+			return
+		}
+		target, err := safeJoin(filepath.Join(s.cfg.AppDir, "assets"), name)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "outside_assets", err.Error())
+			return
+		}
+		http.ServeFile(w, r, target)
+	}
 }
 
 func (s *Server) apiConfig(w http.ResponseWriter, r *http.Request) {
@@ -834,6 +907,9 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proxyFallback(w http.ResponseWriter, r *http.Request) {
+	if s.serveIndex(w, r) {
+		return
+	}
 	if s.proxy == nil {
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

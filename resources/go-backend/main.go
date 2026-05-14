@@ -20,6 +20,8 @@ type options struct {
 	pythonURL    string
 	pythonScript string
 	pythonBin    string
+	appDir       string
+	staticDir    string
 	runtimeDir   string
 }
 
@@ -31,6 +33,8 @@ func parseOptions(args []string) (options, error) {
 	fs.StringVar(&opt.pythonURL, "python-url", "", "Existing Python worker base URL")
 	fs.StringVar(&opt.pythonScript, "python-script", "", "Optional Python worker script to start")
 	fs.StringVar(&opt.pythonBin, "python", "python", "Python executable")
+	fs.StringVar(&opt.appDir, "app-dir", "", "Legacy python-app resource directory for assets")
+	fs.StringVar(&opt.staticDir, "static-dir", "", "Go backend static directory")
 	fs.StringVar(&opt.runtimeDir, "runtime-dir", "", "Runtime data directory")
 	if err := fs.Parse(args); err != nil {
 		return opt, err
@@ -71,6 +75,8 @@ func main() {
 	srv, err := NewServer(ServerConfig{
 		RuntimeDir: opt.runtimeDir,
 		PythonURL:  opt.pythonURL,
+		AppDir:     opt.appDir,
+		StaticDir:  opt.staticDir,
 	})
 	if err != nil {
 		log.Fatal(err)
