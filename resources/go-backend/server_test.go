@@ -46,6 +46,27 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return got
 }
 
+func decodeSSEFrames(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
+	t.Helper()
+	parts := strings.Split(rec.Body.String(), "\n\n")
+	frames := []map[string]any{}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !strings.HasPrefix(part, "data: ") {
+			t.Fatalf("unexpected SSE frame %q", part)
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(part, "data: ")), &frame); err != nil {
+			t.Fatalf("decode SSE frame: %v: %s", err, part)
+		}
+		frames = append(frames, frame)
+	}
+	return frames
+}
+
 func TestDeviceBindMasksAndPersistsAPIKey(t *testing.T) {
 	s, h := newTestServer(t)
 	key := "sk-1234567890abcdef"
@@ -185,5 +206,127 @@ func TestUploadDeviceFilesStaysInWorkspace(t *testing.T) {
 	}
 	if string(got) != "uploaded" {
 		t.Fatalf("uploaded content=%q", string(got))
+	}
+}
+
+func TestCoreFacadeRoutesWithoutPythonWorker(t *testing.T) {
+	_, h := newTestServer(t)
+	for _, item := range []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodGet, "/security/status", nil},
+		{http.MethodGet, "/agent/api-status", nil},
+		{http.MethodGet, "/external/config", nil},
+		{http.MethodPost, "/external/test", map[string]any{}},
+		{http.MethodPost, "/deepseek/test", map[string]any{}},
+		{http.MethodPost, "/agent/api-test", map[string]any{}},
+		{http.MethodGet, "/models", nil},
+		{http.MethodGet, "/rag/documents", nil},
+		{http.MethodGet, "/kaguya/features/flags", nil},
+	} {
+		rec := requestJSON(t, h, item.method, item.path, item.body)
+		if rec.Code >= 500 {
+			t.Fatalf("%s %s returned %d body=%s", item.method, item.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("%s %s did not return json", item.method, item.path)
+		}
+	}
+}
+
+func TestKimiDefaultsAndNoPlaintextResponse(t *testing.T) {
+	_, h := newTestServer(t)
+	key := "sk-kimi-secret-abcdef"
+	rec := requestJSON(t, h, http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "kimi",
+		"apiKey":   key,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, key) {
+		t.Fatalf("response leaked key: %s", body)
+	}
+	if !strings.Contains(body, "api.moonshot.ai") || !strings.Contains(body, "kimi-k2.6") {
+		t.Fatalf("kimi defaults missing: %s", body)
+	}
+	got := decodeBody(t, rec)
+	if got["apiUrl"] == "" || got["apiKey"] == key {
+		t.Fatalf("camelCase Kimi compatibility fields missing or leaked: %#v", got)
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/external/config", nil)
+	got = decodeBody(t, rec)
+	if got["apiUrl"] == "" || got["apiKey"] == key || strings.Contains(rec.Body.String(), key) {
+		t.Fatalf("external config compatibility fields missing or leaked: %s", rec.Body.String())
+	}
+}
+
+func TestStreamSSEFallbackIsStructuredUnavailable(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/stream", map[string]any{"message": "hi"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("expected SSE content type, got %s", rec.Header().Get("Content-Type"))
+	}
+	frames := decodeSSEFrames(t, rec)
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames, got %#v", frames)
+	}
+	if frames[0]["type"] != "unavailable" || frames[0]["success"] != false || frames[0]["available"] != false {
+		t.Fatalf("unexpected unavailable frame: %#v", frames[0])
+	}
+	if frames[1]["type"] != "done" || frames[1]["done"] != true || frames[1]["status"] != "unavailable" || frames[1]["success"] != false {
+		t.Fatalf("unexpected done frame: %#v", frames[1])
+	}
+}
+
+func TestAgentRunSSEFallbackHasUnavailableDoneAborted(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/agent/run", map[string]any{"message": "hi"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	frames := decodeSSEFrames(t, rec)
+	if len(frames) != 3 {
+		t.Fatalf("expected 3 frames, got %#v", frames)
+	}
+	runID, _ := frames[0]["run_id"].(string)
+	if frames[0]["type"] != "run_started" || runID == "" {
+		t.Fatalf("missing run_started frame: %#v", frames[0])
+	}
+	if frames[1]["type"] != "unavailable" || frames[1]["run_id"] != runID || frames[1]["success"] != false {
+		t.Fatalf("unexpected unavailable frame: %#v", frames[1])
+	}
+	if frames[2]["type"] != "done" || frames[2]["done"] != true || frames[2]["status"] != "aborted" || frames[2]["aborted"] != true || frames[2]["success"] != false {
+		t.Fatalf("unexpected done/aborted frame: %#v", frames[2])
+	}
+}
+
+func TestDeepSeekFallbacksAreStructuredAndMasked(t *testing.T) {
+	_, h := newTestServer(t)
+	key := "sk-deepseek-secret-abcdef"
+	rec := requestJSON(t, h, http.MethodPost, "/deepseek/test", map[string]any{"apiKey": key})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), key) {
+		t.Fatalf("deepseek test leaked key: %s", rec.Body.String())
+	}
+	got := decodeBody(t, rec)
+	if got["success"] != false || got["provider"] != "deepseek" || got["apiUrl"] == "" || got["model"] == "" {
+		t.Fatalf("unexpected deepseek test response: %#v", got)
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/deepseek/chat", map[string]any{"messages": []any{}})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got = decodeBody(t, rec)
+	if got["success"] != false || got["available"] != false || got["provider"] != "deepseek" || got["apiUrl"] == "" {
+		t.Fatalf("unexpected deepseek chat response: %#v", got)
 	}
 }

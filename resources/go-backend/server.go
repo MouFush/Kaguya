@@ -100,10 +100,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/chat", s.chat)
 	mux.HandleFunc("/api/chat", s.chat)
 	mux.HandleFunc("/chat/completions", s.chatCompletions)
+	mux.HandleFunc("/stream", s.stream)
 	mux.HandleFunc("/agent/tasks", s.agentTasks)
+	mux.HandleFunc("/agent/run", s.agentRun)
 	mux.HandleFunc("/agent/abort", s.agentAbort)
+	mux.HandleFunc("/agent/api-status", s.agentAPIStatus)
+	mux.HandleFunc("/agent/api-test", s.agentAPITest)
 	mux.HandleFunc("/rag/documents", s.ragDocuments)
 	mux.HandleFunc("/kaguya/features/flags", s.featureFlags)
+	mux.HandleFunc("/security/status", s.securityStatus)
+	mux.HandleFunc("/external/config", s.externalConfig)
+	mux.HandleFunc("/external/test", s.externalTest)
+	mux.HandleFunc("/deepseek/test", s.deepseekTest)
+	mux.HandleFunc("/deepseek/chat", s.deepseekChat)
 	mux.HandleFunc("/permissions/status", s.permissionsStatus)
 	mux.HandleFunc("/permissions/mode", s.permissionsMode)
 	mux.HandleFunc("/permissions/check", s.permissionsCheck)
@@ -147,8 +156,11 @@ func (s *Server) apiConfig(w http.ResponseWriter, r *http.Request) {
 		"has_config":     cfg.APIKey != "",
 		"provider":       cfg.Provider,
 		"api_url":        cfg.APIURL,
+		"apiUrl":         cfg.APIURL,
 		"model":          cfg.Model,
 		"masked_api_key": maskAPIKey(cfg.APIKey),
+		"api_key":        maskAPIKey(cfg.APIKey),
+		"apiKey":         maskAPIKey(cfg.APIKey),
 	})
 }
 
@@ -185,8 +197,11 @@ func (s *Server) deviceInfo(w http.ResponseWriter, r *http.Request) {
 			"vault_exists":         cfg.APIKey != "",
 			"active_provider":      cfg.Provider,
 			"api_url":              cfg.APIURL,
+			"apiUrl":               cfg.APIURL,
 			"model":                cfg.Model,
 			"masked_api_key":       maskAPIKey(cfg.APIKey),
+			"api_key":              maskAPIKey(cfg.APIKey),
+			"apiKey":               maskAPIKey(cfg.APIKey),
 			"runtime_dir":          s.cfg.RuntimeDir,
 		},
 	})
@@ -245,9 +260,11 @@ func (s *Server) deviceBind(w http.ResponseWriter, r *http.Request) {
 		"device_id":      next.DeviceID,
 		"provider":       next.Provider,
 		"api_url":        next.APIURL,
+		"apiUrl":         next.APIURL,
 		"model":          next.Model,
 		"masked_api_key": maskAPIKey(next.APIKey),
 		"api_key":        maskAPIKey(next.APIKey),
+		"apiKey":         maskAPIKey(next.APIKey),
 		"encryption":     "aes-gcm-local",
 	})
 }
@@ -277,8 +294,11 @@ func (s *Server) autoFill(w http.ResponseWriter, r *http.Request) {
 		"available":      cfg.APIKey != "",
 		"provider":       cfg.Provider,
 		"api_url":        cfg.APIURL,
+		"apiUrl":         cfg.APIURL,
 		"model":          cfg.Model,
 		"masked_api_key": maskAPIKey(cfg.APIKey),
+		"api_key":        maskAPIKey(cfg.APIKey),
+		"apiKey":         maskAPIKey(cfg.APIKey),
 	})
 }
 
@@ -318,12 +338,73 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.chat(w, r)
 }
 
+func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
+	if s.proxy != nil {
+		s.proxy.ServeHTTP(w, r)
+		return
+	}
+	writeSSE(w,
+		map[string]any{
+			"type":      "unavailable",
+			"success":   false,
+			"available": false,
+			"mode":      "go",
+			"error":     "python_worker_unavailable",
+			"message":   "Streaming chat requires the Python worker in this build.",
+		},
+		map[string]any{
+			"type":      "done",
+			"done":      true,
+			"success":   false,
+			"available": false,
+			"status":    "unavailable",
+			"mode":      "go",
+		},
+	)
+}
+
 func (s *Server) agentTasks(w http.ResponseWriter, r *http.Request) {
 	if s.proxy != nil {
 		s.proxy.ServeHTTP(w, r)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "tasks": []any{}, "mode": "go"})
+}
+
+func (s *Server) agentRun(w http.ResponseWriter, r *http.Request) {
+	if s.proxy != nil {
+		s.proxy.ServeHTTP(w, r)
+		return
+	}
+	runID := "go-" + time.Now().UTC().Format("20060102150405.000000000")
+	writeSSE(w,
+		map[string]any{
+			"type":    "run_started",
+			"run_id":  runID,
+			"success": false,
+			"mode":    "go",
+		},
+		map[string]any{
+			"type":      "unavailable",
+			"run_id":    runID,
+			"success":   false,
+			"available": false,
+			"error":     "python_worker_unavailable",
+			"message":   "Agent execution is delegated to the Python worker.",
+			"mode":      "go",
+		},
+		map[string]any{
+			"type":      "done",
+			"done":      true,
+			"run_id":    runID,
+			"success":   false,
+			"available": false,
+			"status":    "aborted",
+			"aborted":   true,
+			"error":     "python_worker_unavailable",
+			"mode":      "go",
+		},
+	)
 }
 
 func (s *Server) ragDocuments(w http.ResponseWriter, r *http.Request) {
@@ -336,6 +417,115 @@ func (s *Server) ragDocuments(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) featureFlags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "features": map[string]any{"go_backend": true, "python_worker": s.proxy != nil}})
+}
+
+func (s *Server) securityStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":                 true,
+		"mode":                    "go",
+		"local_only":              true,
+		"permission_service":      "go",
+		"permission_mode":         s.permissions.Mode,
+		"csrf_required_remote":    true,
+		"terminal_shell_default":  false,
+		"workspace_escape_denied": true,
+	})
+}
+
+func (s *Server) externalConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.savedConfig(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	s.deviceBind(w, r)
+}
+
+func (s *Server) externalTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	s.externalTestWithPayload(w, payload)
+}
+
+func (s *Server) deepseekTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if firstString(payload, "provider") == "" {
+		payload["provider"] = "deepseek"
+	}
+	s.externalTestWithPayload(w, payload)
+}
+
+func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[string]any) {
+	cfg := s.normalizedConfig(payload)
+	if cfg.APIKey == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success": false,
+			"ok":      false,
+			"provider": cfg.Provider,
+			"api_url":  cfg.APIURL,
+			"apiUrl":   cfg.APIURL,
+			"model":    cfg.Model,
+			"error":    "missing_api_key",
+			"message":  "No API key is configured.",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": false,
+		"ok":      false,
+		"provider": cfg.Provider,
+		"api_url":  cfg.APIURL,
+		"apiUrl":   cfg.APIURL,
+		"model":    cfg.Model,
+		"error":    "network_test_not_implemented",
+		"message":  "The Go facade validates configuration shape; live provider tests are delegated to the Python worker.",
+	})
+}
+
+func (s *Server) deepseekChat(w http.ResponseWriter, r *http.Request) {
+	if s.proxy != nil {
+		s.proxy.ServeHTTP(w, r)
+		return
+	}
+	cfg, _ := s.loadDeviceConfig()
+	if cfg.Provider == "" {
+		cfg.Provider = "deepseek"
+	}
+	normalizeProviderDefaults(&cfg)
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"success":   false,
+		"available": false,
+		"mode":      "go",
+		"provider":  cfg.Provider,
+		"api_url":   cfg.APIURL,
+		"apiUrl":    cfg.APIURL,
+		"model":     cfg.Model,
+		"error":     "python_worker_unavailable",
+		"message":   "DeepSeek chat requires the Python worker in this build.",
+	})
+}
+
+func (s *Server) agentAPIStatus(w http.ResponseWriter, r *http.Request) {
+	s.modelStatus(w, r)
+}
+
+func (s *Server) agentAPITest(w http.ResponseWriter, r *http.Request) {
+	s.externalTest(w, r)
 }
 
 func (s *Server) agentAbort(w http.ResponseWriter, r *http.Request) {
@@ -1005,9 +1195,11 @@ func maskedDevice(cfg deviceConfig) map[string]any {
 		"device_id":      cfg.DeviceID,
 		"provider":       cfg.Provider,
 		"api_url":        cfg.APIURL,
+		"apiUrl":         cfg.APIURL,
 		"model":          cfg.Model,
 		"masked_api_key": maskAPIKey(cfg.APIKey),
 		"api_key":        maskAPIKey(cfg.APIKey),
+		"apiKey":         maskAPIKey(cfg.APIKey),
 		"bound":          cfg.APIKey != "",
 		"updated":        cfg.Updated,
 	}
@@ -1026,6 +1218,64 @@ func normalizeProviderDefaults(cfg *deviceConfig) {
 	if provider == "openai" && cfg.APIURL == "" {
 		cfg.APIURL = "https://api.openai.com/v1"
 	}
+	if provider == "deepseek" {
+		if cfg.APIURL == "" {
+			cfg.APIURL = "https://api.deepseek.com/v1"
+		}
+		if cfg.Model == "" {
+			cfg.Model = "deepseek-chat"
+		}
+	}
+}
+
+func (s *Server) normalizedConfig(payload map[string]any) deviceConfig {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	existing, _ := s.loadDeviceConfig()
+	cfg := deviceConfig{
+		DeviceID: firstString(payload, "device_id", "deviceId"),
+		Provider: firstString(payload, "provider"),
+		APIURL:   firstString(payload, "api_url", "apiUrl"),
+		APIKey:   firstString(payload, "api_key", "apiKey"),
+		Model:    firstString(payload, "model"),
+		Updated:  time.Now().UTC().Format(time.RFC3339),
+	}
+	if nested, ok := payload["external_api"].(map[string]any); ok {
+		n := s.normalizedConfig(nested)
+		if cfg.Provider == "" {
+			cfg.Provider = n.Provider
+		}
+		if cfg.APIURL == "" {
+			cfg.APIURL = n.APIURL
+		}
+		if cfg.APIKey == "" {
+			cfg.APIKey = n.APIKey
+		}
+		if cfg.Model == "" {
+			cfg.Model = n.Model
+		}
+	}
+	if cfg.DeviceID == "" {
+		cfg.DeviceID = existing.DeviceID
+	}
+	if cfg.DeviceID == "" {
+		cfg.DeviceID = s.deviceID()
+	}
+	if cfg.Provider == "" {
+		cfg.Provider = existing.Provider
+	}
+	if cfg.APIURL == "" {
+		cfg.APIURL = existing.APIURL
+	}
+	if cfg.APIKey == "" || cfg.APIKey == maskAPIKey(existing.APIKey) {
+		cfg.APIKey = existing.APIKey
+	}
+	if cfg.Model == "" {
+		cfg.Model = existing.Model
+	}
+	normalizeProviderDefaults(&cfg)
+	return cfg
 }
 
 func (s *Server) deviceID() string {
@@ -1066,6 +1316,21 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeSSE(w http.ResponseWriter, frames ...map[string]any) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	for _, frame := range frames {
+		b, err := json.Marshal(frame)
+		if err != nil {
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
