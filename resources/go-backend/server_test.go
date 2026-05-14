@@ -262,6 +262,11 @@ func TestKimiDefaultsAndNoPlaintextResponse(t *testing.T) {
 	if got["apiUrl"] == "" || got["apiKey"] == key || strings.Contains(rec.Body.String(), key) {
 		t.Fatalf("external config compatibility fields missing or leaked: %s", rec.Body.String())
 	}
+	rec = requestJSON(t, h, http.MethodPost, "/deepseek/chat", map[string]any{"messages": []any{}})
+	got = decodeBody(t, rec)
+	if got["provider"] != "deepseek" || !strings.Contains(got["apiUrl"].(string), "deepseek") {
+		t.Fatalf("deepseek endpoint inherited Kimi config: %#v", got)
+	}
 }
 
 func TestStreamSSEFallbackIsStructuredUnavailable(t *testing.T) {

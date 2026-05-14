@@ -467,6 +467,12 @@ func (s *Server) deepseekTest(w http.ResponseWriter, r *http.Request) {
 	if firstString(payload, "provider") == "" {
 		payload["provider"] = "deepseek"
 	}
+	if firstString(payload, "api_url", "apiUrl") == "" {
+		payload["api_url"] = "https://api.deepseek.com/v1"
+	}
+	if firstString(payload, "model") == "" {
+		payload["model"] = "deepseek-chat"
+	}
 	s.externalTestWithPayload(w, payload)
 }
 
@@ -503,9 +509,10 @@ func (s *Server) deepseekChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, _ := s.loadDeviceConfig()
-	if cfg.Provider == "" {
-		cfg.Provider = "deepseek"
+	if !strings.EqualFold(cfg.Provider, "deepseek") {
+		cfg = deviceConfig{}
 	}
+	cfg.Provider = "deepseek"
 	normalizeProviderDefaults(&cfg)
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 		"success":   false,
