@@ -316,12 +316,12 @@ function getResourcePath() {
             appIsPackaged: app.isPackaged,
             resourcesPath: process.resourcesPath,
             resourcePath: packagedPath,
-            qwen3Exists: fs.existsSync(path.join(packagedPath, 'qwen3_web.py')),
+            pythonAppExists: fs.existsSync(packagedPath),
         });
         console.log('[Startup] app.isPackaged:', app.isPackaged);
         console.log('[Startup] process.resourcesPath:', process.resourcesPath);
         console.log('[Startup] resourcePath:', packagedPath);
-        console.log('[Startup] qwen3_web.py exists:', fs.existsSync(path.join(packagedPath, 'qwen3_web.py')));
+        console.log('[Startup] python-app exists:', fs.existsSync(packagedPath));
         return packagedPath;
     }
     
@@ -330,56 +330,26 @@ function getResourcePath() {
     
     if (sourceDir) {
         const sourcePath = path.resolve(sourceDir);
-        if (fs.existsSync(path.join(sourcePath, 'qwen3_web.py'))) {
+        if (fs.existsSync(sourcePath)) {
             console.log('[Main] Using KAGUYA_SOURCE_DIR:', sourcePath);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: sourcePath, qwen3Exists: true });
+            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: sourcePath, pythonAppExists: true });
             return sourcePath;
         }
     }
-    
-    if (homeDir) {
-        const desktopAppPath = path.join(homeDir, '.conda', 'kaguya-desktop', 'dist', 'KaguyaIDE-3.1.0-full', 'app');
-        if (fs.existsSync(path.join(desktopAppPath, 'qwen3_web.py'))) {
-            console.log('[Main] Using USERPROFILE path:', desktopAppPath);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: desktopAppPath, qwen3Exists: true });
-            return desktopAppPath;
-        }
-        
-        const condaPath = path.join(homeDir, '.conda');
-        if (fs.existsSync(path.join(condaPath, 'qwen3_web.py'))) {
-            console.log('[Main] Using conda path:', condaPath);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: condaPath, qwen3Exists: true });
-            return condaPath;
-        }
-    }
-    
+
     try {
-        const appPath = app.getAppPath();
-        if (appPath) {
-            const parentDir = path.dirname(path.dirname(appPath));
-            const appDir = path.join(parentDir, 'app');
-            if (fs.existsSync(path.join(appDir, 'qwen3_web.py'))) {
-                console.log('[Main] Using app path:', appDir);
-                updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: appDir, qwen3Exists: true });
-                return appDir;
-            }
+        const resourcesRoot = getResourcesRoot();
+        const pythonApp = path.join(resourcesRoot, 'python-app');
+        if (fs.existsSync(pythonApp)) {
+            console.log('[Main] Using resources python-app:', pythonApp);
+            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: pythonApp, pythonAppExists: true });
+            return pythonApp;
         }
     } catch(e) {}
     
-    try {
-        const electronDir = __dirname;
-        const parentDir = path.dirname(electronDir);
-        const appDir = path.join(parentDir, 'app');
-        if (fs.existsSync(path.join(appDir, 'qwen3_web.py'))) {
-            console.log('[Main] Using __dirname path:', appDir);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: appDir, qwen3Exists: true });
-            return appDir;
-        }
-    } catch(e) {}
-    
-    console.log('[Main] WARNING: Could not find app directory, falling back to homeDir/.conda');
-    const fallbackPath = path.join(homeDir || os.homedir(), '.conda');
-    updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: fallbackPath, qwen3Exists: false });
+    console.log('[Main] WARNING: Could not find python-app resources directory');
+    const fallbackPath = path.join(homeDir || os.homedir(), 'KaguyaIDE', 'python-app');
+    updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: fallbackPath, pythonAppExists: false });
     return fallbackPath;
 }
 
@@ -536,16 +506,14 @@ function waitForBackend(port, route = '/') {
 async function startGoServer(port) {
     const backend = findGoBackendExecutable();
     const resourcePath = getResourcePath();
-    const pythonPath = getPythonPath();
-    const qwenPath = path.join(resourcePath, 'qwen3_web.py');
     const runtimeDir = path.join(app.getPath('userData'), 'kaguya', 'go-backend');
     updateStartupDiagnostics({
         backendModeAttempted: 'go',
         goBackendDir: getGoBackendDir(),
         goBackendFound: !!backend,
         goRuntimeDir: runtimeDir,
-        goPythonScript: qwenPath,
-        goPythonScriptExists: fs.existsSync(qwenPath),
+        pythonAppPath: resourcePath,
+        pythonAppExists: fs.existsSync(resourcePath),
     });
     if (!backend) {
         throw new Error(`Go backend executable not found. Expected ${path.join(getGoBackendDir(), process.platform === 'win32' ? 'kaguya-go-backend.exe' : 'kaguya-go-backend')} or a Go toolchain for go run.`);
@@ -558,9 +526,6 @@ async function startGoServer(port) {
         '--app-dir', resourcePath,
         '--static-dir', path.join(getGoBackendDir(), 'static'),
     ]);
-    if (process.env.KAGUYA_ENABLE_PYTHON_WORKER === '1') {
-        args.push('--python-script', qwenPath, '--python', pythonPath);
-    }
     console.log('[Main] Starting Go backend:', backend.command, args.join(' '));
     updateStartupDiagnostics({
         goCommand: backend.command,
@@ -623,207 +588,8 @@ async function startBackendServer(port) {
         return { port, mode: 'go' };
     } catch (goErr) {
         updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'disabled' });
-        if (process.env.KAGUYA_ALLOW_LEGACY_QWEN3 === '1') {
-            console.warn('[Main] Go backend unavailable, legacy qwen3 fallback explicitly enabled:', goErr.message);
-            updateStartupDiagnostics({ backendFallback: 'python' });
-            await startPythonServer(port);
-            updateStartupDiagnostics({ backendMode: 'python' });
-            return { port, mode: 'python' };
-        }
-        throw new Error(`Go backend unavailable and legacy qwen3 fallback is disabled. ${goErr.message}`);
+        throw new Error(`Go backend unavailable. ${goErr.message}`);
     }
-}
-
-async function startPythonServer(port) {
-    const tmpDir = os.tmpdir();
-    const launcherScript = path.join(tmpDir, 'kaguya_launcher.py');
-    
-    const resourcePath = getResourcePath();
-    const qwenPath = path.join(resourcePath, 'qwen3_web.py');
-    const startServerPath = path.join(resourcePath, 'start_server.py');
-    const pythonPath = getPythonPath();
-    updateStartupDiagnostics({
-        appIsPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        resourcePath,
-        pythonAppPath: resourcePath,
-        pythonPath,
-        launcherScript,
-        flaskPort: port,
-        attemptedScript: qwenPath,
-        qwen3Path: qwenPath,
-        qwen3Exists: fs.existsSync(qwenPath),
-        startServerExists: fs.existsSync(startServerPath),
-    });
-    console.log('[Startup] app.isPackaged:', app.isPackaged);
-    console.log('[Startup] process.resourcesPath:', process.resourcesPath);
-    console.log('[Startup] final resourcePath:', resourcePath);
-    console.log('[Startup] Python path:', pythonPath);
-    console.log('[Startup] launcherScript:', launcherScript);
-    console.log('[Startup] Flask port:', port);
-    console.log('[Startup] qwen3_web.py exists:', fs.existsSync(qwenPath));
-
-    if (!fs.existsSync(qwenPath)) {
-        throw new Error(`qwen3_web.py not found at ${qwenPath}. The packaged resources/python-app directory is missing or corrupt.`);
-    }
-    
-    const launcherContent = `
-import os, sys
-
-app_dir = r'${resourcePath.replace(/\\/g, '\\\\')}'
-if not os.path.exists(os.path.join(app_dir, 'qwen3_web.py')):
-    import pathlib
-    home = str(pathlib.Path.home())
-    for candidate in [
-        os.path.join(home, '.conda', 'kaguya-desktop', 'dist', 'KaguyaIDE-3.1.0-full', 'app'),
-        os.path.join(home, '.conda'),
-    ]:
-        if os.path.exists(os.path.join(candidate, 'qwen3_web.py')):
-            app_dir = candidate
-            break
-
-if not os.path.exists(os.path.join(app_dir, 'qwen3_web.py')):
-    print('[LAUNCHER ERROR] qwen3_web.py not found in:', app_dir, file=sys.stderr)
-    sys.exit(1)
-
-os.chdir(app_dir)
-if app_dir not in sys.path:
-    sys.path.insert(0, app_dir)
-os.environ['KAGUYA_DESKTOP_MODE'] = '1'
-os.environ['KAGUYA_PORT'] = '${port}'
-os.environ['KAGUYA_ELECTRON'] = '1'
-os.environ['KAGUYA_DISABLE_NGROK'] = '1'
-os.environ['PYTHONIOENCODING'] = 'utf-8'
-os.environ['PYTHONUTF8'] = '1'
-
-print('[LAUNCHER] App dir:', app_dir)
-print('[LAUNCHER] Starting Flask on port ${port}...')
-
-sys.argv = ['qwen3_web.py', '--port', '${port}', '--localhost-only']
-import runpy
-runpy.run_path(os.path.join(app_dir, 'qwen3_web.py'), run_name='__main__')
-`;
-    
-    try {
-        fs.writeFileSync(launcherScript, launcherContent, 'utf-8');
-        console.log('[Main] Created launcher script:', launcherScript);
-    } catch(e) {
-        console.error('[Main] Failed to create launcher:', e.message);
-        throw new Error('Failed to create launcher script');
-    }
-
-    console.log('[Main] Python path:', pythonPath);
-    console.log('[Main] Launcher script:', launcherScript);
-
-    // Verify Python is executable
-    let verifiedPythonPath = pythonPath;
-    if (pythonPath === 'python') {
-        try {
-            const { execSync } = require('child_process');
-            const result = execSync('where python', { encoding: 'utf8', windowsHide: true });
-            const paths = result.trim().split('\n').map(p => p.trim()).filter(p => p);
-            if (paths.length > 0) {
-                verifiedPythonPath = paths[0];
-                console.log('[Main] Found Python in PATH:', verifiedPythonPath);
-                updateStartupDiagnostics({ pythonPath: verifiedPythonPath, pythonSource: 'PATH' });
-            }
-        } catch (e) {
-            console.error('[Main] Python not found in PATH');
-            throw new Error('Python not found. Please install Python 3.9+ and ensure it is in PATH.');
-        }
-    }
-
-    const env = Object.assign({}, process.env, {
-        'KAGUYA_DESKTOP_MODE': '1',
-        'KAGUYA_PORT': String(port),
-        'KAGUYA_PERMISSION_MODE': 'bypassPermissions',
-        'KAGUYA_ELECTRON': '1',
-        'KAGUYA_DISABLE_NGROK': '1',
-        'KAGUYA_RUNTIME_DIR': path.join(app.getPath('userData'), 'kaguya', 'python-app'),
-        'PYTHONIOENCODING': 'utf-8',
-        'PYTHONUTF8': '1',
-    });
-
-    const args = [launcherScript];
-
-    console.log('[Main] Starting Python server via launcher...');
-    console.log('[Main] Command:', verifiedPythonPath, args.join(' '));
-
-    pythonProcess = spawn(verifiedPythonPath, args, {
-        cwd: tmpDir,
-        env: env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-    });
-
-    let serverStdout = '';
-    let serverStderr = '';
-
-    pythonProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        serverStdout += output;
-        updateStartupDiagnostics({ lastPythonStdout: serverStdout.slice(-2000) });
-        console.log('[Python]', output.trim());
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-        const output = data.toString();
-        serverStderr += output;
-        updateStartupDiagnostics({ lastPythonStderr: serverStderr.slice(-2000) });
-        console.error('[Python Err]', output.trim());
-    });
-
-    pythonProcess.on('error', (err) => {
-        console.error('[Main] Python process error:', err.message);
-        updateStartupDiagnostics({ lastError: err.message });
-        dialog.showErrorBox('Python Error',
-            `Failed to start Python process:\n${err.message}\n\n` +
-            `Python path: ${verifiedPythonPath}\n` +
-            `Launcher: ${launcherScript}`);
-    });
-
-    pythonProcess.on('close', (code) => {
-        console.log(`[Python] Process exited with code ${code}`);
-        if (code !== 0 && code !== null) {
-            console.error('[Main] Python exited unexpectedly. Last stderr:', serverStderr.slice(-2000));
-            updateStartupDiagnostics({ lastError: `Python exited with code ${code}`, lastPythonStderr: serverStderr.slice(-2000) });
-        }
-        pythonProcess = null;
-        try { fs.unlinkSync(launcherScript); } catch(e) {}
-    });
-
-    // Wait for server
-    console.log('[Main] Waiting for server to start...');
-    for (let i = 0; i < 200; i++) {
-        await new Promise(r => setTimeout(r, 300));
-        try {
-            await new Promise((resolve, reject) => {
-                const req = require('http').get(`http://127.0.0.1:${port}/`, (res) => {
-                    res.resume();
-                    resolve();
-                });
-                req.on('error', reject);
-                req.setTimeout(1000, () => { req.destroy(); reject(new Error('timeout')); });
-            });
-            console.log(`[OK] Server ready at http://127.0.0.1:${port}/`);
-            return port;
-        } catch (e) {
-            if (i % 10 === 0) {
-                console.log(`[Main] Waiting for server... (${i}/200)`);
-            }
-        }
-    }
-    const timeoutError = new Error(
-        'Python backend did not become healthy. ' +
-        `Port: ${port}. Resource path: ${resourcePath}. Python: ${verifiedPythonPath}. ` +
-        `Last stderr: ${serverStderr.slice(-2000)}`
-    );
-    updateStartupDiagnostics({
-        lastError: timeoutError.message,
-        lastPythonStderr: serverStderr.slice(-2000),
-        lastPythonStdout: serverStdout.slice(-2000),
-    });
-    throw timeoutError;
 }
 
 let miniServer = null;

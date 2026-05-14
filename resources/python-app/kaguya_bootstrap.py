@@ -5,7 +5,7 @@
 负责初始化所有kaguya_*模块、注册Flask API路由、注入前端JS模块
 
 使用方式:
-  方式1: 在qwen3_web.py顶部添加: from kaguya_bootstrap import *
+  方式1: 由 Go backend 或 Python worker 显式导入本模块
   方式2: 作为独立入口运行: python kaguya_bootstrap.py --port 5000
   方式3: 通过Flask蓝图注册到现有app
 """

@@ -302,7 +302,7 @@ class ProjectInstructionsLoader:
 - Memory system uses SQLite for persistence
 
 ## Important Files
-- qwen3_web.py: Main application
+- Go backend: Main desktop HTTP application
 - ollama_adapter.py: LLM adapter
 - kaguya_core/: Core framework
 

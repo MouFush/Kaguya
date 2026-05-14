@@ -1,4 +1,4 @@
-# KaguyaIDE 3.1.0 Audit Notes
+﻿# KaguyaIDE 3.1.0 Audit Notes
 
 This file records observed integration facts from the current desktop package source. It is not a security guarantee.
 
@@ -7,15 +7,15 @@ This file records observed integration facts from the current desktop package so
 - Electron entry: `resources/app.asar.src/electron/main.js`
 - Electron preload: `resources/app.asar.src/electron/preload.js`
 - Packaged Electron archive used by the app: `resources/app.asar`
-- Python backend entry used by Electron: `resources/python-app/qwen3_web.py`
+- Python backend entry used by Electron: `resources/python-app/removed_flask_monolith.py`
 - Alternate bootstrap entry: `resources/python-app/start_server.py`
-- Bootstrap module registered by `qwen3_web.py`: `resources/python-app/kaguya_bootstrap.py`
+- Bootstrap module registered by `removed_flask_monolith.py`: `resources/python-app/kaguya_bootstrap.py`
 
 ## Startup And Binding
 
 - Electron launches Python with `KAGUYA_ELECTRON=1`, `KAGUYA_DESKTOP_MODE=1`, `KAGUYA_DISABLE_NGROK=1`, and `KAGUYA_RUNTIME_DIR=<Electron userData>/kaguya/python-app`.
 - Electron loads the web UI from `http://127.0.0.1:<port>/`.
-- `qwen3_web.py --localhost-only` binds Flask to `127.0.0.1`; the generic CLI default still accepts `--host` for non-desktop usage.
+- `removed_flask_monolith.py --localhost-only` binds Flask to `127.0.0.1`; the generic CLI default still accepts `--host` for non-desktop usage.
 - Desktop mode must not be treated as unlimited file-system permission.
 
 ## Runtime Data
@@ -89,3 +89,5 @@ Device API-key APIs:
 ## Electron IPC Surface
 
 The preload exposes only `kaguyaDesktop` with app info, device vault, and file/folder dialogs. Generic file-system and shell IPC handlers in `main.js` return disabled errors; the renderer should use Flask APIs for workspace-scoped actions.
+
+

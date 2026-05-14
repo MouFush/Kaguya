@@ -1,4 +1,4 @@
-# Kaguya IDE 3.1.0 整体项目文档
+﻿# Kaguya IDE 3.1.0 整体项目文档
 
 更新时间：2026-04-27  
 项目目录：`C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop`  
@@ -45,7 +45,7 @@ KaguyaIDE-3.1.0-win64-Desktop
 | --- | --- | --- |
 | 桌面外壳 | Electron/Chromium | `Kaguya IDE.exe` 与运行时 DLL 提供桌面容器 |
 | 前端资源 | `resources\app.asar`，Flask 内嵌 HTML/JS，`static` 资源 | 部分界面可能由 Electron 资源加载，部分由 Flask 直接返回 |
-| 后端框架 | Flask | `qwen3_web.py` 和 `kaguya_bootstrap.py` 都提供 Flask 路由 |
+| 后端框架 | Flask | `removed_flask_monolith.py` 和 `kaguya_bootstrap.py` 都提供 Flask 路由 |
 | 默认模型后端 | Ollama | 默认模型名 `qwen3.5:4b`，默认地址 `http://localhost:11434` |
 | 外部模型 | DeepSeek/OpenAI/Claude/Kimi 等 | 通过 `external_api` 和账号级配置保存 |
 | 存储 | JSON 文件、SQLite、文件目录 | 项目配置、账号、RAG、记忆、审计、工作流等分散存储 |
@@ -59,7 +59,7 @@ flowchart LR
     User["用户"] --> Exe["Kaguya IDE.exe"]
     Exe --> Electron["Electron / Chromium 外壳"]
     Electron --> WebUI["Web UI / Agent IDE"]
-    WebUI --> FlaskMain["qwen3_web.py 主 Flask 应用"]
+    WebUI --> FlaskMain["removed_flask_monolith.py 主 Flask 应用"]
     WebUI --> Bootstrap["kaguya_bootstrap.py 增强接口层"]
     FlaskMain --> Ollama["Ollama qwen3.5:4b"]
     FlaskMain --> ExternalAPI["外部模型 API"]
@@ -74,10 +74,10 @@ flowchart LR
 
 系统有两个主要 Flask 入口：
 
-- `resources\python-app\qwen3_web.py`：主应用，包含聊天、RAG、知识库、工作流、MCP、项目中心、Agent IDE 等大量业务接口。
+- `resources\python-app\removed_flask_monolith.py`：主应用，包含聊天、RAG、知识库、工作流、MCP、项目中心、Agent IDE 等大量业务接口。
 - `resources\python-app\kaguya_bootstrap.py`：增强引导层，负责初始化 feature flags、hooks、权限、agents、skills、accounts、ACP、tool executor，并注册增强 API。
 
-`start_server.py` 是一个轻量启动脚本，优先调用 `kaguya_bootstrap.run_kaguya_server()`，如果导入失败则回退到直接加载 `qwen3_web.py`。
+`start_server.py` 是一个轻量启动脚本，优先调用 `kaguya_bootstrap.run_kaguya_server()`，如果导入失败则回退到直接加载 `removed_flask_monolith.py`。
 
 ## 5. 启动方式
 
@@ -111,7 +111,7 @@ http://127.0.0.1:5000/permissions/status
 
 ```powershell
 cd C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\resources\python-app
-python -B qwen3_web.py --localhost-only --port 5000
+python -B removed_flask_monolith.py --localhost-only --port 5000
 ```
 
 常用参数：
@@ -125,7 +125,7 @@ python -B qwen3_web.py --localhost-only --port 5000
 | `--cert` | 指定 SSL 证书 |
 | `--key` | 指定 SSL 私钥 |
 
-安全提示：`qwen3_web.py` 默认 host 是 `0.0.0.0`，如果不加 `--localhost-only`，局域网可能可以访问。开发和个人使用建议优先使用 `--localhost-only`。
+安全提示：`removed_flask_monolith.py` 默认 host 是 `0.0.0.0`，如果不加 `--localhost-only`，局域网可能可以访问。开发和个人使用建议优先使用 `--localhost-only`。
 
 ### 5.4 Ollama 准备
 
@@ -180,7 +180,7 @@ ollama serve
 
 | 文件 | 主要职责 |
 | --- | --- |
-| `qwen3_web.py` | 主 Web 应用，约 249 个 Flask 路由，覆盖聊天、RAG、Agent IDE、项目中心、权限、安全、工作流等功能 |
+| `removed_flask_monolith.py` | 主 Web 应用，约 249 个 Flask 路由，覆盖聊天、RAG、Agent IDE、项目中心、权限、安全、工作流等功能 |
 | `start_server.py` | 启动脚本，优先启动增强引导层，失败时回退到主应用 |
 | `ollama_adapter.py` | Ollama API 适配器，封装 chat、stream、generate、embeddings，并兼容原模型接口 |
 | `kaguya_bootstrap.py` | 增强系统引导层，统一加载 feature flags、hooks、permissions、agents、skills、accounts、ACP、tool executor |
@@ -224,13 +224,13 @@ ollama serve
 | `security_framework_refactored.py` | 重构版安全框架 |
 | `claw_code_ref` | 参考实现，包含 history、query engine、runtime、session store、transcript |
 
-建议后续开发优先把新增公共能力放入 `kaguya_core`，逐步降低 `qwen3_web.py` 的单体复杂度。
+建议后续开发优先把新增公共能力放入 `kaguya_core`，逐步降低 `removed_flask_monolith.py` 的单体复杂度。
 
 ## 9. 功能模块说明
 
 ### 9.1 聊天与模型调用
 
-主聊天链路位于 `qwen3_web.py`。默认通过 `ollama_adapter.py` 调用 Ollama：
+主聊天链路位于 `removed_flask_monolith.py`。默认通过 `ollama_adapter.py` 调用 Ollama：
 
 - 默认模型：`qwen3.5:4b`
 - 默认 Ollama 地址：`http://localhost:11434`
@@ -252,7 +252,7 @@ ollama serve
 
 ### 9.2 RAG 与知识库
 
-RAG 功能集中在 `qwen3_web.py` 前半部分，使用文件解析、分块、TF-IDF、BM25、混合检索、重排、缓存和元数据过滤。
+RAG 功能集中在 `removed_flask_monolith.py` 前半部分，使用文件解析、分块、TF-IDF、BM25、混合检索、重排、缓存和元数据过滤。
 
 关键能力：
 
@@ -330,7 +330,7 @@ Agent IDE 是面向开发和自动化工作的界面，相关接口集中在 `/a
 
 工具系统分为两套：
 
-- 主应用内置工具：`qwen3_web.py`、`kaguya_tool_system.py`、`kaguya_terminal.py`、`kaguya_file_operations.py`。
+- 主应用内置工具：`removed_flask_monolith.py`、`kaguya_tool_system.py`、`kaguya_terminal.py`、`kaguya_file_operations.py`。
 - 增强引导层工具执行器：`kaguya_tool_executor.py`。
 
 权限系统由 `kaguya_permissions.py` 提供，核心概念包括：
@@ -554,7 +554,7 @@ resources\python-app\finetune
 
 ### 9.12 运营、发布、告警、A/B、集成
 
-这些模块集中在 `qwen3_web.py` 后半部分，面向项目运营和治理。
+这些模块集中在 `removed_flask_monolith.py` 后半部分，面向项目运营和治理。
 
 | 模块 | 代表接口 |
 | --- | --- |
@@ -740,7 +740,7 @@ http://127.0.0.1:5000/kaguya/system/status
 
 ```powershell
 cd C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\resources\python-app
-python -B qwen3_web.py --localhost-only --port 5000
+python -B removed_flask_monolith.py --localhost-only --port 5000
 ```
 
 浏览器访问：
@@ -770,9 +770,9 @@ ollama pull qwen3.5:4b
 
 根目录没有 `.git`，不适合作为长期开发主线。建议定位原始源码仓库后再进行结构化维护。
 
-### 15.2 `qwen3_web.py` 过于庞大
+### 15.2 `removed_flask_monolith.py` 过于庞大
 
-`qwen3_web.py` 约 1.8 MB，包含 420 个顶层类/函数和约 249 个 Flask 路由。它同时承担 RAG、账号、安全、工作流、Agent IDE、项目中心、运营、发布、告警、集成等职责，维护成本很高。
+`removed_flask_monolith.py` 约 1.8 MB，包含 420 个顶层类/函数和约 249 个 Flask 路由。它同时承担 RAG、账号、安全、工作流、Agent IDE、项目中心、运营、发布、告警、集成等职责，维护成本很高。
 
 建议逐步拆分：
 
@@ -798,11 +798,11 @@ ollama pull qwen3.5:4b
 
 ### 15.4 敏感信息风险
 
-运行目录中存在密钥、JWT secret、账号、外部 API 配置、SQLite 数据库和审计日志。`qwen3_web.py` 中还存在硬编码 ngrok 相关 token 的代码路径。发布前应统一清理或迁移到安全配置机制，不应把密钥写入源码或分发包。
+运行目录中存在密钥、JWT secret、账号、外部 API 配置、SQLite 数据库和审计日志。`removed_flask_monolith.py` 中还存在硬编码 ngrok 相关 token 的代码路径。发布前应统一清理或迁移到安全配置机制，不应把密钥写入源码或分发包。
 
 ### 15.5 默认网络绑定风险
 
-`qwen3_web.py` 默认绑定 `0.0.0.0`，如果认证未开启，局域网内其他设备可能访问服务。建议桌面应用和本地开发默认使用：
+`removed_flask_monolith.py` 默认绑定 `0.0.0.0`，如果认证未开启，局域网内其他设备可能访问服务。建议桌面应用和本地开发默认使用：
 
 ```powershell
 --localhost-only
@@ -816,7 +816,7 @@ ollama pull qwen3.5:4b
 
 当前语法扫描出现过以下非阻断警告：
 
-- `qwen3_web.py` 中存在无效转义序列警告。
+- `removed_flask_monolith.py` 中存在无效转义序列警告。
 - `kaguya_bootstrap.py` 中使用 `datetime.utcnow()`，Python 新版本提示弃用。
 
 建议后续修复，减少未来运行时风险。
@@ -830,7 +830,7 @@ ollama pull qwen3.5:4b
 处理：
 
 ```powershell
-python -B qwen3_web.py --localhost-only --port 5050
+python -B removed_flask_monolith.py --localhost-only --port 5050
 ```
 
 或：
@@ -907,7 +907,7 @@ GET /permissions/request
 
 1. 找回或建立源码仓库，避免继续直接维护分发包。
 2. 固化依赖清单，补充 `pyproject.toml` 或项目级 `requirements.txt`。
-3. 把 `qwen3_web.py` 拆成 routes、services、repositories 三层。
+3. 把 `removed_flask_monolith.py` 拆成 routes、services、repositories 三层。
 4. 将密钥、ngrok token、外部 API key 全部迁移到环境变量或本地安全存储。
 5. 引入 Flask app factory，便于测试和模块化注册蓝图。
 6. 为账号、权限、文件、RAG、Agent IDE 增加自动化测试。
@@ -921,7 +921,7 @@ GET /permissions/request
 常看文件：
 
 ```text
-resources\python-app\qwen3_web.py
+resources\python-app\removed_flask_monolith.py
 resources\python-app\kaguya_bootstrap.py
 resources\python-app\ollama_adapter.py
 resources\python-app\kaguya_permissions.py
@@ -963,4 +963,5 @@ http://127.0.0.1:5000/permissions/status
 - CI/CD 流程。
 - 完整依赖清单。
 - 自动化测试说明。
+
 

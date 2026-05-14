@@ -1,15 +1,15 @@
-# Go Backend Refactor Notes
+﻿# Go Backend Refactor Notes
 
-This build introduces a Go backend in `resources/go-backend`. The migration target is to remove `qwen3_web.py` as an HTTP backend. Python is allowed only as an optional worker for model/agent/RAG internals during migration.
+This build introduces a Go backend in `resources/go-backend`. The legacy Flask monolith file has been physically removed from the package; Python is now limited to small helper modules.
 
 ## Startup Model
 
 - Electron first tries `resources/go-backend/kaguya-go-backend.exe`.
 - If no binary is present and `go` is available, Electron runs `go run .` from `resources/go-backend`.
-- If Go cannot start, Electron opens the diagnostic/setup flow. Legacy `qwen3_web.py` fallback is disabled unless `KAGUYA_ALLOW_LEGACY_QWEN3=1` is explicitly set.
+- If Go cannot start, Electron opens the diagnostic/setup flow. There is no legacy Flask fallback.
 - Go serves `resources/go-backend/static/index.html` directly for `/`.
 - Go serves legacy static resources from `--app-dir` for `/static/*`, `/assets/*`, `/header-img`, `/hero-img`, `/welcome-img`, `/background`, `/wallpaper`, and `/favicon.ico`.
-- Go starts Python as a localhost-only worker only when `--python-script` is provided. Electron no longer passes that flag by default; set `KAGUYA_ENABLE_PYTHON_WORKER=1` only for migration debugging.
+- Go does not start the removed Flask app. Any future Python worker must be a small non-Flask module with an explicit contract.
 
 ## Go-Owned APIs
 
@@ -60,12 +60,11 @@ go build -o kaguya-go-backend.exe .
 
 The binary should stay outside `app.asar`, at `resources/go-backend/kaguya-go-backend.exe`.
 
-## qwen3_web.py Removal Gate
+## Removed Monolith
 
-`resources/python-app/qwen3_web.py` is no longer a normal startup dependency. Do not physically delete it until all of these are true:
+`resources/python-app/removed Flask monolith` has been deleted. The replacement ownership is:
 
-- `resources/go-backend/kaguya-go-backend.exe` is built and bundled.
-- Electron starts Go without `KAGUYA_ENABLE_PYTHON_WORKER=1`.
-- `GET /`, image aliases, `/static/*`, config, device vault, file upload, terminal, permissions, external API, and agent facade routes pass smoke tests through Go.
-- Python worker responsibilities are moved into small modules that are not Flask apps.
-- `start_server.py`, Electron startup diagnostics, and docs no longer reference `qwen3_web.py`.
+- Go owns HTTP startup, static UI delivery, config, device vault, file upload, terminal, permissions, external API facade, and agent facade routes.
+- `resources/python-app/kaguya_worker_adapter.py` owns pure Python compatibility helpers.
+- Remaining Python modules are libraries only; they are not the desktop backend entrypoint.
+

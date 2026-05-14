@@ -35,13 +35,13 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	cfg         ServerConfig
-	runtimeDir  string
+	cfg           ServerConfig
+	runtimeDir    string
 	workspaceRoot string
-	devicePath  string
-	mu          sync.Mutex
-	permissions permissionState
-	proxy       http.Handler
+	devicePath    string
+	mu            sync.Mutex
+	permissions   permissionState
+	proxy         http.Handler
 }
 
 type permissionState struct {
@@ -72,11 +72,11 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg:         cfg,
-		runtimeDir:  cfg.RuntimeDir,
+		cfg:           cfg,
+		runtimeDir:    cfg.RuntimeDir,
 		workspaceRoot: filepath.Join(cfg.RuntimeDir, "workspaces"),
-		devicePath:  filepath.Join(cfg.RuntimeDir, "device_vault.enc"),
-		permissions: permissionState{Mode: "ask"},
+		devicePath:    filepath.Join(cfg.RuntimeDir, "device_vault.enc"),
+		permissions:   permissionState{Mode: "ask"},
 	}
 	if cfg.PythonURL != "" {
 		u, err := url.Parse(cfg.PythonURL)
@@ -553,8 +553,8 @@ func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[stri
 	cfg := s.normalizedConfig(payload)
 	if cfg.APIKey == "" {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"success": false,
-			"ok":      false,
+			"success":  false,
+			"ok":       false,
 			"provider": cfg.Provider,
 			"api_url":  cfg.APIURL,
 			"apiUrl":   cfg.APIURL,
@@ -565,8 +565,8 @@ func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[stri
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success": false,
-		"ok":      false,
+		"success":  false,
+		"ok":       false,
 		"provider": cfg.Provider,
 		"api_url":  cfg.APIURL,
 		"apiUrl":   cfg.APIURL,
@@ -629,8 +629,8 @@ func (s *Server) agentAbort(w http.ResponseWriter, r *http.Request) {
 func (s *Server) permissionsStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"mode": s.permissions.Mode,
-		"ok":   true,
+		"mode":    s.permissions.Mode,
+		"ok":      true,
 	})
 }
 
@@ -792,25 +792,32 @@ func (s *Server) uploadDeviceFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	count := 0
+	pathOverrides := r.MultipartForm.Value["paths"]
+	fileIndex := 0
 	for _, headers := range r.MultipartForm.File {
 		for _, header := range headers {
-			if err := s.saveUploadedFile(root, header); err != nil {
+			rel := header.Filename
+			if fileIndex < len(pathOverrides) && pathOverrides[fileIndex] != "" {
+				rel = pathOverrides[fileIndex]
+			}
+			if err := s.saveUploadedFile(root, header, rel); err != nil {
 				writeError(w, http.StatusForbidden, "upload_failed", err.Error())
 				return
 			}
+			fileIndex++
 			count++
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "uploaded": count})
 }
 
-func (s *Server) saveUploadedFile(root string, header *multipart.FileHeader) error {
+func (s *Server) saveUploadedFile(root string, header *multipart.FileHeader, relativeName string) error {
 	src, err := header.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	name := filepath.Clean(filepath.FromSlash(header.Filename))
+	name := filepath.Clean(filepath.FromSlash(relativeName))
 	if filepath.IsAbs(name) {
 		name = filepath.Base(name)
 	}
@@ -895,14 +902,14 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 	timedOut := ctx.Err() == context.DeadlineExceeded
 	s.audit("terminal_exec", map[string]any{"allowed": true, "risk_level": risk, "command": argv, "working_dir": cwd, "exit_code": exitCode, "timeout": timedOut})
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":   err == nil && !timedOut,
-		"ok":        err == nil && !timedOut,
-		"exit_code": exitCode,
-		"stdout":    stdout.String(),
-		"stderr":    stderr.String(),
-		"shell":     false,
+		"success":    err == nil && !timedOut,
+		"ok":         err == nil && !timedOut,
+		"exit_code":  exitCode,
+		"stdout":     stdout.String(),
+		"stderr":     stderr.String(),
+		"shell":      false,
 		"risk_level": risk,
-		"timeout":   timedOut,
+		"timeout":    timedOut,
 	})
 }
 

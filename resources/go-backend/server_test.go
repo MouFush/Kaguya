@@ -183,6 +183,9 @@ func TestUploadDeviceFilesStaysInWorkspace(t *testing.T) {
 	if err := mw.WriteField("workspace", root); err != nil {
 		t.Fatal(err)
 	}
+	if err := mw.WriteField("paths", "dir/a.txt"); err != nil {
+		t.Fatal(err)
+	}
 	part, err := mw.CreateFormFile("files", "dir/a.txt")
 	if err != nil {
 		t.Fatal(err)
