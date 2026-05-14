@@ -59,3 +59,4 @@ func TestDangerousCommandClassification(t *testing.T) {
 		t.Fatalf("dir should be low")
 	}
 }
+

@@ -1,4 +1,4 @@
-"""Small compatibility helpers for the Go backend migration.
+"""Small compatibility helpers extracted from qwen3_web.py.
 
 This module intentionally contains pure functions only. The Go backend can own
 the process/security boundary while the legacy Python worker keeps heavier

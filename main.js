@@ -1,10 +1,9 @@
-const { app, BrowserWindow, Menu, Tray, shell, dialog, ipcMain, nativeTheme, safeStorage } = require('electron');
+const { app, BrowserWindow, Menu, Tray, shell, dialog, ipcMain, nativeTheme } = require('electron');
 const path = require('path');
 const { spawn, exec, execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
-const crypto = require('crypto');
 
 let autoUpdater = null;
 try {
@@ -112,7 +111,6 @@ function setupAutoUpdater() {
 
 let mainWindow = null;
 let pythonProcess = null;
-let goProcess = null;
 let tray = null;
 let serverPort = DEFAULT_PORT;
 let terminalSessions = new Map();
@@ -120,173 +118,6 @@ let startupDiagnostics = {};
 
 function updateStartupDiagnostics(extra) {
     startupDiagnostics = Object.assign(startupDiagnostics, extra || {});
-}
-
-function getDeviceVaultDir() {
-    return path.join(app.getPath('userData'), 'kaguya');
-}
-
-function getDeviceIdentityPath() {
-    return path.join(getDeviceVaultDir(), 'device_identity.json');
-}
-
-function getDeviceVaultPath() {
-    return path.join(getDeviceVaultDir(), 'device_vault.enc');
-}
-
-function ensureDeviceIdentity() {
-    const dir = getDeviceVaultDir();
-    fs.mkdirSync(dir, { recursive: true });
-    const identityPath = getDeviceIdentityPath();
-    if (fs.existsSync(identityPath)) {
-        try {
-            const existing = JSON.parse(fs.readFileSync(identityPath, 'utf8'));
-            if (existing && existing.device_id) {
-                return existing;
-            }
-        } catch (err) {
-            console.warn('[DeviceVault] Invalid device identity, regenerating:', err.message);
-        }
-    }
-    const identity = {
-        device_id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
-        device_name: os.hostname() || 'Kaguya Desktop',
-        platform: process.platform,
-        created_at: new Date().toISOString(),
-        vault_version: 1,
-    };
-    fs.writeFileSync(identityPath, JSON.stringify(identity, null, 2), 'utf8');
-    return identity;
-}
-
-function normalizeExternalApiPayload(data) {
-    data = data && typeof data === 'object' ? data : {};
-    const provider = String(data.provider || data.active_provider || 'deepseek').trim().toLowerCase();
-    const apiKey = String(data.api_key || data.apiKey || '').trim();
-    const apiUrl = String(data.api_url || data.apiUrl || '').trim();
-    const model = String(data.model || '').trim();
-    return {
-        provider,
-        api_key: apiKey,
-        api_url: apiUrl,
-        model,
-        enabled: Boolean((data.enabled === undefined ? true : data.enabled) && apiKey),
-    };
-}
-
-function maskApiKey(apiKey) {
-    if (!apiKey) return '';
-    if (apiKey.length < 8) return '****';
-    return apiKey.slice(0, 4) + '****' + apiKey.slice(-4);
-}
-
-function deriveFallbackVaultKey() {
-    const identity = ensureDeviceIdentity();
-    const username = (() => {
-        try { return os.userInfo().username || ''; } catch (err) { return ''; }
-    })();
-    return crypto.pbkdf2Sync(
-        `${identity.device_id}|${os.hostname()}|${username}|${app.getPath('userData')}`,
-        'kaguya-device-vault-v1',
-        100000,
-        32,
-        'sha256'
-    );
-}
-
-function encryptFallbackVault(plainText) {
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', deriveFallbackVaultKey(), iv);
-    const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return Buffer.concat([iv, tag, encrypted]).toString('base64');
-}
-
-function decryptFallbackVault(encoded) {
-    const raw = Buffer.from(encoded, 'base64');
-    const iv = raw.subarray(0, 12);
-    const tag = raw.subarray(12, 28);
-    const encrypted = raw.subarray(28);
-    const decipher = crypto.createDecipheriv('aes-256-gcm', deriveFallbackVaultKey(), iv);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
-}
-
-function saveDeviceVault(config) {
-    const normalized = normalizeExternalApiPayload(config);
-    if (!normalized.api_key) {
-        return { success: false, error: 'missing_api_key' };
-    }
-    ensureDeviceIdentity();
-    const payload = {
-        provider: normalized.provider,
-        api_key: normalized.api_key,
-        api_url: normalized.api_url,
-        model: normalized.model,
-        updated_at: new Date().toISOString(),
-    };
-    const plainText = JSON.stringify(payload);
-    const encryptionAvailable = safeStorage && safeStorage.isEncryptionAvailable();
-    const envelope = encryptionAvailable ? {
-        version: 1,
-        encryption: 'safeStorage',
-        data: safeStorage.encryptString(plainText).toString('base64'),
-    } : {
-        version: 1,
-        encryption: 'fallback',
-        data: encryptFallbackVault(plainText),
-    };
-    fs.writeFileSync(getDeviceVaultPath(), JSON.stringify(envelope), 'utf8');
-    return { success: true, encryption: envelope.encryption, config: payload };
-}
-
-function loadDeviceVault() {
-    const vaultPath = getDeviceVaultPath();
-    if (!fs.existsSync(vaultPath)) {
-        return null;
-    }
-    try {
-        const envelope = JSON.parse(fs.readFileSync(vaultPath, 'utf8'));
-        let plainText = '';
-        if (envelope.encryption === 'safeStorage') {
-            if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
-                throw new Error('safeStorage encryption is not available');
-            }
-            plainText = safeStorage.decryptString(Buffer.from(envelope.data, 'base64'));
-        } else if (envelope.encryption === 'fallback') {
-            plainText = decryptFallbackVault(envelope.data);
-        } else {
-            throw new Error('unsupported vault encryption');
-        }
-        const parsed = JSON.parse(plainText);
-        return normalizeExternalApiPayload(parsed).api_key ? Object.assign(parsed, { encryption: envelope.encryption }) : null;
-    } catch (err) {
-        console.error('[DeviceVault] Failed to load vault:', err.message);
-        return null;
-    }
-}
-
-function clearDeviceVault() {
-    const vaultPath = getDeviceVaultPath();
-    if (fs.existsSync(vaultPath)) {
-        fs.unlinkSync(vaultPath);
-    }
-    return { success: true };
-}
-
-function getDeviceInfo() {
-    const identity = ensureDeviceIdentity();
-    const vault = loadDeviceVault();
-    return {
-        device_id: identity.device_id,
-        device_name: identity.device_name,
-        platform: identity.platform,
-        encryption_available: Boolean(safeStorage && safeStorage.isEncryptionAvailable()),
-        encryption: vault?.encryption || (safeStorage && safeStorage.isEncryptionAvailable() ? 'safeStorage' : 'fallback'),
-        vault_exists: Boolean(vault && vault.api_key),
-        active_provider: vault?.provider || '',
-        masked_api_key: vault?.api_key ? maskApiKey(vault.api_key) : '',
-    };
 }
 
 function htmlEscape(value) {
@@ -465,195 +296,22 @@ function getShellPath() {
     return process.env.SHELL || '/bin/bash';
 }
 
-function isAllowedExternalUrl(rawUrl) {
-    try {
-        const parsed = new URL(rawUrl);
-        return ['https:', 'http:', 'mailto:'].includes(parsed.protocol);
-    } catch (err) {
-        return false;
-    }
-}
-
-function isLocalAppUrl(rawUrl) {
-    try {
-        const parsed = new URL(rawUrl);
-        return parsed.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsed.hostname);
-    } catch (err) {
-        return false;
-    }
-}
-
-function getResourcesRoot() {
-    if (app.isPackaged) {
-        return process.resourcesPath;
-    }
-    return path.resolve(__dirname, '..', '..');
-}
-
-function getGoBackendDir() {
-    return path.join(getResourcesRoot(), 'go-backend');
-}
-
-function findGoBackendExecutable() {
-    if (process.env.KAGUYA_GO_BACKEND && fs.existsSync(process.env.KAGUYA_GO_BACKEND)) {
-        return { command: process.env.KAGUYA_GO_BACKEND, args: [], cwd: path.dirname(process.env.KAGUYA_GO_BACKEND), source: 'KAGUYA_GO_BACKEND' };
-    }
-    const dir = getGoBackendDir();
-    const exeName = process.platform === 'win32' ? 'kaguya-go-backend.exe' : 'kaguya-go-backend';
-    const binary = path.join(dir, exeName);
-    if (fs.existsSync(binary)) {
-        return { command: binary, args: [], cwd: dir, source: 'bundled-binary' };
-    }
-    if (fs.existsSync(path.join(dir, 'go.mod')) && commandExists('go')) {
-        return { command: 'go', args: ['run', '.'], cwd: dir, source: 'go-run' };
-    }
-    return null;
-}
-
-function commandExists(command) {
-    try {
-        const { execSync } = require('child_process');
-        const lookup = process.platform === 'win32' ? `where ${command}` : `command -v ${command}`;
-        execSync(lookup, { stdio: 'ignore', windowsHide: true });
-        return true;
-    } catch (err) {
-        return false;
-    }
-}
-
-function waitForBackend(port, route = '/') {
-    return new Promise((resolve, reject) => {
-        const req = require('http').get(`http://127.0.0.1:${port}${route}`, (res) => {
-            res.resume();
-            if (res.statusCode && res.statusCode < 500) resolve();
-            else reject(new Error(`status ${res.statusCode}`));
-        });
-        req.on('error', reject);
-        req.setTimeout(1000, () => { req.destroy(); reject(new Error('timeout')); });
-    });
-}
-
-async function startGoServer(port) {
-    const backend = findGoBackendExecutable();
-    const resourcePath = getResourcePath();
-    const pythonPath = getPythonPath();
-    const qwenPath = path.join(resourcePath, 'qwen3_web.py');
-    const runtimeDir = path.join(app.getPath('userData'), 'kaguya', 'go-backend');
-    updateStartupDiagnostics({
-        backendModeAttempted: 'go',
-        goBackendDir: getGoBackendDir(),
-        goBackendFound: !!backend,
-        goRuntimeDir: runtimeDir,
-        goPythonScript: qwenPath,
-        goPythonScriptExists: fs.existsSync(qwenPath),
-    });
-    if (!backend) {
-        throw new Error(`Go backend executable not found. Expected ${path.join(getGoBackendDir(), process.platform === 'win32' ? 'kaguya-go-backend.exe' : 'kaguya-go-backend')} or a Go toolchain for go run.`);
-    }
-
-    const args = backend.args.concat([
-        '--host', '127.0.0.1',
-        '--port', String(port),
-        '--runtime-dir', runtimeDir,
-        '--app-dir', resourcePath,
-        '--static-dir', path.join(getGoBackendDir(), 'static'),
-    ]);
-    if (process.env.KAGUYA_ENABLE_PYTHON_WORKER === '1') {
-        args.push('--python-script', qwenPath, '--python', pythonPath);
-    }
-    console.log('[Main] Starting Go backend:', backend.command, args.join(' '));
-    updateStartupDiagnostics({
-        goCommand: backend.command,
-        goArgs: args,
-        goSource: backend.source,
-        backendPort: port,
-    });
-
-    goProcess = spawn(backend.command, args, {
-        cwd: backend.cwd,
-        env: Object.assign({}, process.env, {
-            KAGUYA_DESKTOP_MODE: '1',
-            KAGUYA_ELECTRON: '1',
-            KAGUYA_DISABLE_NGROK: '1',
-            KAGUYA_RUNTIME_DIR: runtimeDir,
-        }),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-    });
-
-    let goStdout = '';
-    let goStderr = '';
-    goProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        goStdout += output;
-        updateStartupDiagnostics({ lastGoStdout: goStdout.slice(-2000) });
-        console.log('[Go]', output.trim());
-    });
-    goProcess.stderr.on('data', (data) => {
-        const output = data.toString();
-        goStderr += output;
-        updateStartupDiagnostics({ lastGoStderr: goStderr.slice(-2000) });
-        console.error('[Go Err]', output.trim());
-    });
-    goProcess.on('close', (code) => {
-        console.log(`[Go] Process exited with code ${code}`);
-        updateStartupDiagnostics({ lastGoExitCode: code, lastGoStderr: goStderr.slice(-2000) });
-        goProcess = null;
-    });
-
-    for (let i = 0; i < 150; i++) {
-        await new Promise(r => setTimeout(r, 300));
-        try {
-            await waitForBackend(port, '/health');
-            console.log(`[OK] Go backend ready at http://127.0.0.1:${port}/`);
-            updateStartupDiagnostics({ backendMode: 'go' });
-            return port;
-        } catch (err) {
-            if (i % 10 === 0) {
-                console.log(`[Main] Waiting for Go backend... (${i}/150)`);
-            }
-        }
-    }
-    throw new Error(`Go backend did not become healthy. Last stderr: ${goStderr.slice(-2000)}`);
-}
-
-async function startBackendServer(port) {
-    try {
-        await startGoServer(port);
-        return { port, mode: 'go' };
-    } catch (goErr) {
-        updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'disabled' });
-        if (process.env.KAGUYA_ALLOW_LEGACY_QWEN3 === '1') {
-            console.warn('[Main] Go backend unavailable, legacy qwen3 fallback explicitly enabled:', goErr.message);
-            updateStartupDiagnostics({ backendFallback: 'python' });
-            await startPythonServer(port);
-            updateStartupDiagnostics({ backendMode: 'python' });
-            return { port, mode: 'python' };
-        }
-        throw new Error(`Go backend unavailable and legacy qwen3 fallback is disabled. ${goErr.message}`);
-    }
-}
-
 async function startPythonServer(port) {
     const tmpDir = os.tmpdir();
     const launcherScript = path.join(tmpDir, 'kaguya_launcher.py');
     
     const resourcePath = getResourcePath();
     const qwenPath = path.join(resourcePath, 'qwen3_web.py');
-    const startServerPath = path.join(resourcePath, 'start_server.py');
     const pythonPath = getPythonPath();
     updateStartupDiagnostics({
         appIsPackaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
         resourcePath,
-        pythonAppPath: resourcePath,
         pythonPath,
         launcherScript,
         flaskPort: port,
-        attemptedScript: qwenPath,
         qwen3Path: qwenPath,
         qwen3Exists: fs.existsSync(qwenPath),
-        startServerExists: fs.existsSync(startServerPath),
     });
     console.log('[Startup] app.isPackaged:', app.isPackaged);
     console.log('[Startup] process.resourcesPath:', process.resourcesPath);
@@ -739,7 +397,6 @@ runpy.run_path(os.path.join(app_dir, 'qwen3_web.py'), run_name='__main__')
         'KAGUYA_PERMISSION_MODE': 'bypassPermissions',
         'KAGUYA_ELECTRON': '1',
         'KAGUYA_DISABLE_NGROK': '1',
-        'KAGUYA_RUNTIME_DIR': path.join(app.getPath('userData'), 'kaguya', 'python-app'),
         'PYTHONIOENCODING': 'utf-8',
         'PYTHONUTF8': '1',
     });
@@ -838,87 +495,12 @@ function startMiniServer(port) {
         openai: { url: 'https://api.openai.com/v1', model: 'gpt-4o', type: 'openai' },
         claude: { url: 'https://api.anthropic.com', model: 'claude-3-7-sonnet-20250219', type: 'claude' },
         qwen: { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', type: 'openai' },
-        kimi: { url: 'https://api.moonshot.ai/v1', model: 'kimi-k2.6', type: 'openai' },
-        moonshot: { url: 'https://api.moonshot.ai/v1', model: 'moonshot-v1-8k', type: 'openai' },
-        minimax: { url: 'https://api.minimaxi.com/v1', model: 'MiniMax-M2.7', type: 'openai' },
+        moonshot: { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', type: 'openai' },
         zhipu: { url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', type: 'openai' },
         groq: { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', type: 'openai' },
-        custom: { url: '', model: '', type: 'openai' },
     };
 
-    let savedApiConfig = loadDeviceVault();
-
-    function sendJson(res, status, payload) {
-        res.writeHead(status, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(payload));
-    }
-
-    function readJsonBody(req, callback) {
-        let body = '';
-        req.on('data', c => body += c);
-        req.on('end', () => {
-            try {
-                callback(null, body ? JSON.parse(body) : {});
-            } catch (err) {
-                callback(err);
-            }
-        });
-    }
-
-    function currentVaultConfig() {
-        const vault = loadDeviceVault();
-        savedApiConfig = vault || savedApiConfig;
-        return savedApiConfig;
-    }
-
-    function miniDiagnostics() {
-        return Object.assign({
-            mode: 'mini',
-            backend_available: false,
-            appIsPackaged: app.isPackaged,
-            resourcesPath: process.resourcesPath,
-            resourcePath: startupDiagnostics.resourcePath || '',
-            pythonAppPath: startupDiagnostics.pythonAppPath || '',
-            pythonPath: startupDiagnostics.pythonPath || '',
-            attemptedScript: startupDiagnostics.attemptedScript || startupDiagnostics.qwen3Path || '',
-            port,
-            cwd: process.cwd(),
-            qwen3Exists: startupDiagnostics.qwen3Exists || false,
-            startServerExists: startupDiagnostics.startServerExists || false,
-            stdoutTail: startupDiagnostics.lastPythonStdout || '',
-            stderrTail: startupDiagnostics.lastPythonStderr || '',
-        }, startupDiagnostics);
-    }
-
-    function chatEndpointFor(provider, apiUrl) {
-        const pInfo = providerUrls[provider] || providerUrls.custom;
-        const base = String(apiUrl || pInfo.url || '').replace(/\/+$/, '');
-        if (!base) throw new Error('api_url required');
-        if (pInfo.type === 'claude') {
-            return base.endsWith('/v1/messages') ? base : base + '/v1/messages';
-        }
-        if (base.endsWith('/chat/completions')) return base;
-        if (base.endsWith('/v1')) return base + '/chat/completions';
-        if (base.includes('/v1/')) return base.split('/v1/')[0] + '/v1/chat/completions';
-        return base + '/chat/completions';
-    }
-
-    function isKimiK2(provider, model) {
-        return ['kimi', 'moonshot'].includes(String(provider || '').toLowerCase()) &&
-            String(model || '').toLowerCase().startsWith('kimi-k2');
-    }
-
-    function buildOpenAiMiniPayload(provider, model, messages, chatData, stream) {
-        const payload = { model, messages, stream };
-        if (isKimiK2(provider, model)) {
-            payload.thinking = { type: 'disabled' };
-            payload.max_completion_tokens = chatData.max_tokens || 4096;
-            return payload;
-        }
-        payload.temperature = chatData.temperature || 0.3;
-        payload.max_tokens = chatData.max_tokens || 4096;
-        return payload;
-    }
+    let savedApiConfig = null;
 
     const server = http.createServer((req, res) => {
         const parsedUrl = url.parse(req.url, true);
@@ -929,195 +511,6 @@ function startMiniServer(port) {
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
         if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
-
-        if ((pathname === '/docs' || pathname === '/readme') && req.method === 'GET') {
-            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-            res.end('Kaguya IDE mini fallback\nmode: mini\nbackend_available: false\n\nThe Python Flask backend is unavailable. Use /api/device/bind to save an external provider or inspect /api/config for diagnostics.\n');
-            return;
-        }
-
-        if (pathname === '/api/device/info' && req.method === 'GET') {
-            sendJson(res, 200, { success: true, mode: 'mini', backend_available: false, device: getDeviceInfo() });
-            return;
-        }
-
-        if (pathname === '/api/device/bind' && req.method === 'POST') {
-            readJsonBody(req, (err, data) => {
-                if (err) return sendJson(res, 400, { success: false, mode: 'mini', error: err.message });
-                const cfg = normalizeExternalApiPayload(data);
-                if (!cfg.api_key) return sendJson(res, 400, { success: false, mode: 'mini', error: 'missing_api_key' });
-                const saved = saveDeviceVault(cfg);
-                if (!saved.success) return sendJson(res, 400, Object.assign({ mode: 'mini' }, saved));
-                savedApiConfig = saved.config;
-                sendJson(res, 200, {
-                    success: true,
-                    mode: 'mini',
-                    provider: saved.config.provider,
-                    api_url: saved.config.api_url,
-                    model: saved.config.model,
-                    masked_api_key: maskApiKey(saved.config.api_key),
-                    encryption: saved.encryption,
-                });
-            });
-            return;
-        }
-
-        if (pathname === '/api/device/unbind' && req.method === 'POST') {
-            clearDeviceVault();
-            savedApiConfig = null;
-            sendJson(res, 200, { success: true, mode: 'mini' });
-            return;
-        }
-
-        if ((pathname === '/api/account/saved-config' || pathname === '/api/account/auto-fill') && req.method === 'GET') {
-            const cfg = currentVaultConfig();
-            sendJson(res, 200, {
-                success: true,
-                mode: 'mini',
-                has_config: Boolean(cfg && cfg.api_key),
-                provider: cfg?.provider || '',
-                api_url: cfg?.api_url || '',
-                model: cfg?.model || '',
-                masked_api_key: cfg?.api_key ? maskApiKey(cfg.api_key) : '',
-            });
-            return;
-        }
-
-        if (pathname === '/api/config' && req.method === 'GET') {
-            const cfg = currentVaultConfig();
-            sendJson(res, 200, {
-                success: true,
-                mode: 'mini',
-                backend_available: false,
-                external_provider_configured: Boolean(cfg && cfg.api_key),
-                provider: cfg?.provider || null,
-                model: cfg?.model || null,
-                masked_api_key: cfg?.api_key ? maskApiKey(cfg.api_key) : '',
-                diagnostics: miniDiagnostics(),
-            });
-            return;
-        }
-
-        if (pathname === '/api/config' && req.method === 'POST') {
-            readJsonBody(req, (err, data) => {
-                if (err) return sendJson(res, 400, { success: false, mode: 'mini', error: err.message });
-                const cfg = normalizeExternalApiPayload(data.external_api || data);
-                if (!cfg.api_key) return sendJson(res, 400, { success: false, mode: 'mini', error: 'missing_api_key' });
-                const saved = saveDeviceVault(cfg);
-                if (!saved.success) return sendJson(res, 400, Object.assign({ mode: 'mini' }, saved));
-                savedApiConfig = saved.config;
-                sendJson(res, 200, { success: true, mode: 'mini', provider: saved.config.provider, api_url: saved.config.api_url, model: saved.config.model, masked_api_key: maskApiKey(saved.config.api_key) });
-            });
-            return;
-        }
-
-        if (pathname === '/api/model-status' && req.method === 'GET') {
-            const cfg = currentVaultConfig();
-            sendJson(res, 200, {
-                success: true,
-                mode: 'mini',
-                backend_available: false,
-                external_provider_configured: Boolean(cfg && cfg.api_key),
-                model: cfg?.model || '',
-                provider: cfg?.provider || '',
-                available: false,
-                reason: 'python_backend_unavailable',
-            });
-            return;
-        }
-
-        if (pathname === '/api/model-status' && req.method === 'POST') {
-            readJsonBody(req, (err, data) => {
-                if (err) return sendJson(res, 400, { success: false, mode: 'mini', available: false, error: err.message });
-                const cfg = normalizeExternalApiPayload(data.external_api || data);
-                if (!cfg.api_key) {
-                    return sendJson(res, 200, { success: true, mode: 'mini', backend_available: false, external_provider_configured: false, available: false, reason: 'missing_api_key' });
-                }
-                const pInfo = providerUrls[cfg.provider] || providerUrls.custom;
-                let testUrl = '';
-                try {
-                    testUrl = pInfo.type === 'claude'
-                        ? chatEndpointFor(cfg.provider, cfg.api_url || pInfo.url)
-                        : chatEndpointFor(cfg.provider, cfg.api_url || pInfo.url).replace(/\/chat\/completions$/, '/models');
-                    const target = new URL(testUrl);
-                    const headers = pInfo.type === 'claude'
-                        ? { 'x-api-key': cfg.api_key, 'anthropic-version': '2023-06-01' }
-                        : { 'Authorization': 'Bearer ' + cfg.api_key };
-                    const testReq = https.request({ hostname: target.hostname, path: target.pathname + target.search, method: 'GET', headers, timeout: 10000 }, (testRes) => {
-                        testRes.resume();
-                        const ok = testRes.statusCode >= 200 && testRes.statusCode < 300;
-                        if (ok) {
-                            const saved = saveDeviceVault(cfg);
-                            if (saved.success) savedApiConfig = saved.config;
-                        }
-                        sendJson(res, 200, {
-                            success: true,
-                            mode: 'mini',
-                            backend_available: false,
-                            external_provider_configured: true,
-                            provider: cfg.provider,
-                            model: cfg.model || pInfo.model || '',
-                            available: ok,
-                            reason: ok ? null : 'provider_verification_failed',
-                            message: ok ? 'External provider verified.' : 'API returned status ' + testRes.statusCode,
-                        });
-                    });
-                    testReq.on('error', (e) => sendJson(res, 200, { success: true, mode: 'mini', backend_available: false, external_provider_configured: true, provider: cfg.provider, model: cfg.model || pInfo.model || '', available: false, reason: 'provider_verification_failed', message: e.message }));
-                    testReq.end();
-                } catch (e) {
-                    sendJson(res, 200, { success: true, mode: 'mini', backend_available: false, external_provider_configured: true, provider: cfg.provider, model: cfg.model || '', available: false, reason: 'provider_verification_failed', message: e.message });
-                }
-            });
-            return;
-        }
-
-        if ((pathname === '/api/chat' || pathname === '/chat/completions') && req.method === 'POST') {
-            readJsonBody(req, (err, chatData) => {
-                if (err) return sendJson(res, 400, { success: false, mode: 'mini', error: err.message });
-                const cfg = currentVaultConfig();
-                if (!cfg || !cfg.api_key) {
-                    return sendJson(res, 503, {
-                        success: false,
-                        mode: 'mini',
-                        error: 'backend_unavailable',
-                        message: 'Python backend is unavailable and no external provider is configured.',
-                    });
-                }
-                try {
-                    const pInfo = providerUrls[cfg.provider] || providerUrls.custom;
-                    const targetUrl = chatEndpointFor(cfg.provider, cfg.api_url || pInfo.url);
-                    const target = new URL(targetUrl);
-                    const messages = Array.isArray(chatData.messages) ? chatData.messages : [{ role: 'user', content: String(chatData.message || '') }];
-                    const model = chatData.model || cfg.model || pInfo.model;
-                    const msgBody = pInfo.type === 'claude' ? JSON.stringify({
-                        model: cfg.model || pInfo.model,
-                        messages,
-                        stream: chatData.stream !== false,
-                        max_tokens: chatData.max_tokens || 4096,
-                    }) : JSON.stringify(buildOpenAiMiniPayload(cfg.provider, model, messages, chatData, chatData.stream !== false && pathname === '/api/chat'));
-                    const headers = pInfo.type === 'claude' ? {
-                        'Content-Type': 'application/json',
-                        'x-api-key': cfg.api_key,
-                        'anthropic-version': '2023-06-01',
-                    } : {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + cfg.api_key,
-                    };
-                    const proxyReq = https.request({ hostname: target.hostname, path: target.pathname + target.search, method: 'POST', headers }, (proxyRes) => {
-                        res.writeHead(proxyRes.statusCode || 502, { 'Content-Type': proxyRes.headers['content-type'] || 'application/json' });
-                        proxyRes.pipe(res);
-                    });
-                    proxyReq.on('error', (e) => {
-                        sendJson(res, 502, { success: false, mode: 'mini', error: 'provider_proxy_failed', message: e.message });
-                    });
-                    proxyReq.write(msgBody);
-                    proxyReq.end();
-                } catch (e) {
-                    sendJson(res, 502, { success: false, mode: 'mini', error: 'provider_proxy_failed', message: e.message });
-                }
-            });
-            return;
-        }
 
         if (pathname === '/api/model-status' && req.method === 'POST') {
             let body = '';
@@ -1179,11 +572,15 @@ function startMiniServer(port) {
                     const targetUrl = apiBase + (pInfo.type === 'openai' ? '/chat/completions' : '/v1/messages');
                     const targetParsed = new URL(targetUrl);
 
-                    const legacyModel = savedApiConfig.model || pInfo.model;
-                    const legacyMessages = chatData.messages || [];
-                    const msgBody = pInfo.type === 'openai' ? JSON.stringify(buildOpenAiMiniPayload(savedApiConfig.provider, legacyModel, legacyMessages, chatData, chatData.stream !== false)) : JSON.stringify({
+                    const msgBody = pInfo.type === 'openai' ? JSON.stringify({
                         model: savedApiConfig.model || pInfo.model,
-                        messages: legacyMessages,
+                        messages: chatData.messages || [],
+                        stream: chatData.stream !== false,
+                        temperature: chatData.temperature || 0.3,
+                        max_tokens: chatData.max_tokens || 4096,
+                    }) : JSON.stringify({
+                        model: savedApiConfig.model || pInfo.model,
+                        messages: chatData.messages || [],
                         stream: chatData.stream !== false,
                         max_tokens: chatData.max_tokens || 4096,
                     });
@@ -1263,12 +660,9 @@ function startMiniServer(port) {
 
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-            success: false,
-            mode: 'mini',
-            backend_available: false,
             error: 'Not found',
             hint: 'Mini server mode: Python backend is not available. See setup diagnostics for resourcePath, pythonPath and stderr.',
-            diagnostics: miniDiagnostics(),
+            diagnostics: startupDiagnostics,
         }));
     });
 
@@ -1313,8 +707,7 @@ function createSetupWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
-            sandbox: true,
-            webSecurity: true,
+            sandbox: false,
         },
         show: false,
         backgroundColor: '#0a0a0f',
@@ -1363,7 +756,6 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#7c5cfc,#0
 <option value="openai">OpenAI</option>
 <option value="claude">Claude (Anthropic)</option>
 <option value="qwen">Qwen (Alibaba)</option>
-<option value="kimi">Kimi K2.6</option>
 <option value="moonshot">Moonshot (Kimi)</option>
 <option value="zhipu">Zhipu (GLM)</option>
 <option value="groq">Groq</option>
@@ -1396,12 +788,12 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#7c5cfc,#0
 const providerUrls = {
 deepseek:'https://api.deepseek.com',openai:'https://api.openai.com/v1',
 claude:'https://api.anthropic.com',qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1',
-kimi:'https://api.moonshot.ai/v1',moonshot:'https://api.moonshot.ai/v1',zhipu:'https://open.bigmodel.cn/api/paas/v4',
+moonshot:'https://api.moonshot.cn/v1',zhipu:'https://open.bigmodel.cn/api/paas/v4',
 groq:'https://api.groq.com/openai/v1'
 };
 const providerModels = {
 deepseek:'deepseek-chat',openai:'gpt-4o',claude:'claude-3-7-sonnet-20250219',
-qwen:'qwen-plus',kimi:'kimi-k2.6',moonshot:'moonshot-v1-8k',zhipu:'glm-4-flash',groq:'llama-3.3-70b-versatile'
+qwen:'qwen-plus',moonshot:'moonshot-v1-8k',zhipu:'glm-4-flash',groq:'llama-3.3-70b-versatile'
 };
 document.getElementById('provider').onchange = function(){
 document.getElementById('apiUrl').placeholder = providerUrls[this.value] || '';
@@ -1418,10 +810,7 @@ try{
 const resp = await fetch('/api/model-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({external_api:{enabled:true,provider:provider,apiKey:apiKey,apiUrl:apiUrl,model:model}})});
 const data = await resp.json();
 if(data.available){statusEl.className='status ok';statusEl.textContent='API connected! Starting Kaguya IDE...';
-const bindResp=await fetch('/api/device/bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:provider,apiKey:apiKey,apiUrl:apiUrl,model:model})});
-const bindData=await bindResp.json();
-if(!bindData.success){throw new Error(bindData.error||'Failed to save API config');}
-localStorage.setItem('kaguya_external_api',JSON.stringify({enabled:true,provider:provider,apiUrl:apiUrl,model:model,masked_api_key:bindData.masked_api_key}));
+localStorage.setItem('kaguya_external_api',JSON.stringify({enabled:true,provider:provider,apiKey:apiKey,apiUrl:apiUrl,model:model}));
 setTimeout(()=>{window.location.reload();},1500);
 }else{statusEl.className='status err';statusEl.textContent='API test failed: '+(data.message||'Unknown error');}
 }catch(e){statusEl.className='status err';statusEl.textContent='Connection error: '+e.message;}
@@ -1459,9 +848,8 @@ function createWindow(port) {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
-            webviewTag: false,
-            sandbox: true,
-            webSecurity: true,
+            webviewTag: true,
+            sandbox: false,
         },
         show: false,
         backgroundColor: '#0a0a0f',
@@ -1476,19 +864,11 @@ function createWindow(port) {
     mainWindow.loadURL(url);
 
     mainWindow.webContents.setWindowOpenHandler(({ url: openUrl }) => {
-        if (isLocalAppUrl(openUrl)) {
+        if (openUrl.startsWith('http://127.0.0.1:') || openUrl.startsWith('http://localhost:')) {
             return { action: 'allow' };
         }
-        if (isAllowedExternalUrl(openUrl)) {
-            shell.openExternal(openUrl);
-        }
+        require('electron').shell.openExternal(openUrl);
         return { action: 'deny' };
-    });
-
-    mainWindow.webContents.on('will-navigate', (event, navUrl) => {
-        if (!isLocalAppUrl(navUrl)) {
-            event.preventDefault();
-        }
     });
 
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDesc) => {
@@ -1670,10 +1050,26 @@ function createTerminalSession(cwd) {
     return sessionId;
 }
 
-ipcMain.handle('terminal-create', () => ({ success: false, error: 'native_terminal_ipc_disabled' }));
+ipcMain.handle('terminal-create', (event, opts) => {
+    return createTerminalSession(opts?.cwd);
+});
 
 ipcMain.on('terminal-write', (event, { sessionId, data }) => {
-    mainWindow?.webContents.send('terminal-error', { sessionId, error: 'native_terminal_ipc_disabled' });
+    const session = terminalSessions.get(sessionId);
+    if (session && session.process.stdin.writable) {
+        const lines = data.split('\n');
+        for (const line of lines) {
+            if (line.trim() && isTerminalCommandDangerous(line)) {
+                mainWindow?.webContents.send('terminal-data', {
+                    sessionId,
+                    data: `\r\n\x1b[31m[BLOCKED] Dangerous command blocked: ${line.trim()}\x1b[0m\r\n`,
+                    stream: 'stderr'
+                });
+                continue;
+            }
+            session.process.stdin.write(line + '\n');
+        }
+    }
 });
 
 ipcMain.on('terminal-resize', (event, { sessionId, cols, rows }) => {
@@ -1691,7 +1087,6 @@ ipcMain.on('terminal-kill', (event, { sessionId }) => {
 // ========== IPC: File System ==========
 
 ipcMain.handle('fs-readFile', async (event, filePath, options) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         const encoding = options?.encoding || 'utf-8';
         const content = await fs.promises.readFile(filePath, encoding);
@@ -1702,7 +1097,6 @@ ipcMain.handle('fs-readFile', async (event, filePath, options) => {
 });
 
 ipcMain.handle('fs-writeFile', async (event, filePath, content, options) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         const dir = path.dirname(filePath);
         await fs.promises.mkdir(dir, { recursive: true });
@@ -1714,7 +1108,6 @@ ipcMain.handle('fs-writeFile', async (event, filePath, content, options) => {
 });
 
 ipcMain.handle('fs-readDir', async (event, dirPath, options) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const result = entries.map(entry => ({
@@ -1731,7 +1124,6 @@ ipcMain.handle('fs-readDir', async (event, dirPath, options) => {
 });
 
 ipcMain.handle('fs-stat', async (event, filePath) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         const stat = await fs.promises.stat(filePath);
         return {
@@ -1749,7 +1141,6 @@ ipcMain.handle('fs-stat', async (event, filePath) => {
 });
 
 ipcMain.handle('fs-mkdir', async (event, dirPath, options) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         await fs.promises.mkdir(dirPath, { recursive: options?.recursive ?? true });
         return { success: true };
@@ -1759,7 +1150,6 @@ ipcMain.handle('fs-mkdir', async (event, dirPath, options) => {
 });
 
 ipcMain.handle('fs-remove', async (event, filePath) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         const stat = await fs.promises.stat(filePath);
         if (stat.isDirectory()) {
@@ -1774,7 +1164,6 @@ ipcMain.handle('fs-remove', async (event, filePath) => {
 });
 
 ipcMain.handle('fs-rename', async (event, oldPath, newPath) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         await fs.promises.rename(oldPath, newPath);
         return { success: true };
@@ -1784,7 +1173,6 @@ ipcMain.handle('fs-rename', async (event, oldPath, newPath) => {
 });
 
 ipcMain.handle('fs-copy', async (event, src, dest) => {
-    return { success: false, error: 'generic_fs_ipc_disabled' };
     try {
         await fs.promises.copyFile(src, dest);
         return { success: true };
@@ -1794,7 +1182,6 @@ ipcMain.handle('fs-copy', async (event, src, dest) => {
 });
 
 ipcMain.handle('fs-exists', async (event, filePath) => {
-    return false;
     try {
         await fs.promises.access(filePath);
         return true;
@@ -1806,7 +1193,6 @@ ipcMain.handle('fs-exists', async (event, filePath) => {
 // ========== IPC: Shell Execution ==========
 
 ipcMain.handle('shell-execute', async (event, command, options) => {
-    return { success: false, error: 'shell_execute_ipc_disabled' };
     return new Promise((resolve) => {
         const cwd = options?.cwd || getResourcePath();
         const timeout = options?.timeout || 30000;
@@ -1825,19 +1211,16 @@ ipcMain.handle('shell-execute', async (event, command, options) => {
 });
 
 ipcMain.handle('shell-openExternal', async (event, url) => {
-    if (!isAllowedExternalUrl(url)) {
-        return { success: false, error: 'blocked_url_protocol' };
-    }
-    await shell.openExternal(url);
+    shell.openExternal(url);
     return { success: true };
 });
 
 ipcMain.handle('shell-showItemInFolder', async (event, filePath) => {
-    return { success: false, error: 'generic_shell_ipc_disabled' };
+    shell.showItemInFolder(filePath);
+    return { success: true };
 });
 
 ipcMain.handle('shell-openPath', async (event, filePath) => {
-    return { success: false, error: 'generic_shell_ipc_disabled' };
     const result = await shell.openPath(filePath);
     return { success: !result, error: result || null };
 });
@@ -1889,44 +1272,9 @@ ipcMain.handle('app-getInfo', () => ({
 
 ipcMain.handle('app-getTheme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
 
-ipcMain.handle('device-getInfo', async () => ({ success: true, device: getDeviceInfo() }));
-
-ipcMain.handle('device-bind', async (event, config) => {
-    const saved = saveDeviceVault(config || {});
-    if (!saved.success) return saved;
-    return {
-        success: true,
-        provider: saved.config.provider,
-        api_url: saved.config.api_url,
-        model: saved.config.model,
-        masked_api_key: maskApiKey(saved.config.api_key),
-        encryption: saved.encryption,
-    };
-});
-
-ipcMain.handle('device-unbind', async () => clearDeviceVault());
-
 // ========== Lifecycle ==========
 
 function stopPythonServer() {
-    if (goProcess) {
-        console.log('[Main] Stopping Go backend...');
-        try {
-            if (process.platform === 'win32') {
-                exec(`taskkill /pid ${goProcess.pid} /T /F`, (err) => {
-                    if (err && goProcess) goProcess.kill();
-                });
-            } else {
-                goProcess.kill('SIGTERM');
-                setTimeout(() => {
-                    if (goProcess) goProcess.kill('SIGKILL');
-                }, 5000);
-            }
-        } catch (e) {
-            try { goProcess.kill(); } catch (_) {}
-        }
-        goProcess = null;
-    }
     if (pythonProcess) {
         console.log('[Main] Stopping Python server...');
         try {
@@ -1982,12 +1330,12 @@ app.on('ready', async () => {
             } else {
                 serverPort = externalPort;
                 try {
-                    const backend = await startBackendServer(serverPort);
-                    console.log(`[Main] ${backend.mode} backend started successfully`);
+                    await startPythonServer(serverPort);
+                    console.log('[Main] Python server started successfully');
                     createWindow(serverPort);
                     createTray();
                 } catch (err) {
-                    console.error('[Main] Backend server failed:', err);
+                    console.error('[Main] Python server failed:', err);
                     console.log('[Main] Showing setup page instead of quitting');
                     serverPort = 0;
                     createSetupWindow();
@@ -1998,12 +1346,12 @@ app.on('ready', async () => {
             serverPort = await findFreePort();
             console.log(`[Main] Using port ${serverPort}`);
             try {
-                const backend = await startBackendServer(serverPort);
-                console.log(`[Main] ${backend.mode} backend started successfully`);
+                await startPythonServer(serverPort);
+                console.log('[Main] Python server started successfully');
                 createWindow(serverPort);
                 createTray();
             } catch (err) {
-                console.error('[Main] Backend server failed:', err);
+                console.error('[Main] Python server failed:', err);
                 console.log('[Main] Showing setup page instead of quitting');
                 serverPort = 0;
                 createSetupWindow();

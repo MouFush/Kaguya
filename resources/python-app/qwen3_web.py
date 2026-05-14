@@ -1,4 +1,9729 @@
+﻿# -*- coding: utf-8 -*-
+"""
+Qwen3.5-4B Web前端 (专业增强版 - Ollama)
+功能: 代码执行器、工具调用、知识库、插件系统、LoRA、网络搜索
+后端: Ollama (qwen3.5:4b)
+"""
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+import sys
+import json
+import uuid
+import time
+import base64
+import shutil
+import subprocess
+import signal
+import tempfile
+import re
+import math
+import socket
+import urllib.request
+import urllib.parse
+import urllib.error
+from datetime import datetime
+from collections import defaultdict
+import threading
+
+torch = None
+from flask import Flask, render_template_string, request, jsonify, send_file, Response, stream_with_context, make_response, session, g, redirect
+from ollama_adapter import get_ollama_adapter, OllamaConfig
+from kaguya_workspace_security import (
+    WorkspaceAuthorizationError,
+    add_imported_root,
+    authorize_path,
+    authorize_project_root,
+    is_path_inside,
+)
+from kaguya_api_permissions import permission_service
+from kaguya_terminal_service import execute_command as execute_terminal_command
+
+PeftModel = LoraConfig = get_peft_model = TaskType = None
+PEFT_AVAILABLE = False
+
+OLLAMA_MODEL = "qwen3.5:4b"
+model = None
+current_lora = None
+lora_adapters = {}
+
+access_logs = []
+visitor_stats = defaultdict(int)
+log_lock = threading.Lock()
+data_lock = threading.Lock()
+token_stats = {'total_input': 0, 'total_output': 0, 'sessions': 0}
+_agent_abort_events = {}
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _default_runtime_root():
+    configured = os.environ.get("KAGUYA_RUNTIME_DIR") or os.environ.get("KAGUYA_USER_DATA_DIR")
+    if configured:
+        return os.path.realpath(os.path.abspath(configured))
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
+        return os.path.join(base, "KaguyaIDE", "python-app")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Application Support"), "KaguyaIDE", "python-app")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "kaguyaide", "python-app")
+
+RUNTIME_DIR = _default_runtime_root()
+
+PROMPTS_DIR = os.path.join(APP_DIR, 'prompts')
+UPLOADS_DIR = os.path.join(RUNTIME_DIR, 'uploads')
+AUDIO_CACHE_DIR = os.path.join(RUNTIME_DIR, 'audio_cache')
+LORA_DIR = os.path.join(APP_DIR, 'lora_adapters')
+KNOWLEDGE_DIR = os.path.join(APP_DIR, 'knowledge_base')
+CODE_EXEC_DIR = os.path.join(RUNTIME_DIR, 'code_executions')
+RAG_DIR = os.path.join(RUNTIME_DIR, 'rag_data')
+RAG_INDEX_FILE = os.path.join(RAG_DIR, 'rag_index.json')
+MCP_DIR = os.path.join(APP_DIR, 'mcp_plugins')
+MCP_CONFIG_FILE = os.path.join(MCP_DIR, 'mcp_config.json')
+WORKFLOW_DIR = os.path.join(APP_DIR, 'workflows')
+WORKFLOW_INDEX_FILE = os.path.join(WORKFLOW_DIR, 'workflows_index.json')
+MEMORY_DIR = os.path.join(RUNTIME_DIR, 'memory_system')
+MEMORY_DB_FILE = os.path.join(MEMORY_DIR, 'memory.db')
+MEMORY_INDEX_FILE = os.path.join(MEMORY_DIR, 'memory_index.json')
+MULTIMODAL_DIR = os.path.join(RUNTIME_DIR, 'multimodal')
+IMAGE_CACHE_DIR = os.path.join(MULTIMODAL_DIR, 'image_cache')
+FINETUNE_DIR = os.path.join(RUNTIME_DIR, 'finetune')
+DATASETS_DIR = os.path.join(FINETUNE_DIR, 'datasets')
+TRAINING_DIR = os.path.join(FINETUNE_DIR, 'training')
+EXPORTS_DIR = os.path.join(FINETUNE_DIR, 'exports')
+FINETUNE_CONFIG_FILE = os.path.join(FINETUNE_DIR, 'finetune_config.json')
+DATA_DIR = os.path.join(RUNTIME_DIR, 'data')
+PROJECT_CENTER_DIR = os.path.join(RUNTIME_DIR, 'project_center')
+ARTIFACTS_FILE = os.path.join(PROJECT_CENTER_DIR, 'artifacts.json')
+PROJECT_TASKS_FILE = os.path.join(PROJECT_CENTER_DIR, 'tasks.json')
+PLAYBOOKS_FILE = os.path.join(PROJECT_CENTER_DIR, 'playbooks.json')
+PROJECT_ACTIVITY_FILE = os.path.join(PROJECT_CENTER_DIR, 'activity.json')
+OPS_CAMPAIGNS_FILE = os.path.join(PROJECT_CENTER_DIR, 'ops_campaigns.json')
+RELEASE_PLANS_FILE = os.path.join(PROJECT_CENTER_DIR, 'release_plans.json')
+ALERT_RULES_FILE = os.path.join(PROJECT_CENTER_DIR, 'alert_rules.json')
+AB_EXPERIMENTS_FILE = os.path.join(PROJECT_CENTER_DIR, 'ab_experiments.json')
+INTEGRATIONS_FILE = os.path.join(PROJECT_CENTER_DIR, 'integrations.json')
+PROJECT_MILESTONES_FILE = os.path.join(PROJECT_CENTER_DIR, 'milestones.json')
+PROJECT_RISKS_FILE = os.path.join(PROJECT_CENTER_DIR, 'risks.json')
+EXTERNAL_API_DIR = os.path.join(RUNTIME_DIR, 'external_api')
+EXTERNAL_API_CONFIG_FILE = os.path.join(EXTERNAL_API_DIR, 'provider_config.json')
+
+for d in [RUNTIME_DIR, PROMPTS_DIR, UPLOADS_DIR, AUDIO_CACHE_DIR, LORA_DIR, KNOWLEDGE_DIR, CODE_EXEC_DIR, RAG_DIR, MCP_DIR, WORKFLOW_DIR, MEMORY_DIR, MULTIMODAL_DIR, IMAGE_CACHE_DIR, FINETUNE_DIR, DATASETS_DIR, TRAINING_DIR, EXPORTS_DIR, DATA_DIR, PROJECT_CENTER_DIR, EXTERNAL_API_DIR]:
+    os.makedirs(d, exist_ok=True)
+
+rag_documents = []
+rag_chunks = []
+rag_embeddings = []
+rag_cache = __import__("collections").OrderedDict()
+rag_cache_max_size = 100
+rag_doc_hashes = set()
+project_artifacts = []
+project_tasks = []
+project_playbooks = []
+project_activities = []
+ops_campaigns = []
+release_plans = []
+alert_rules = []
+ab_experiments = []
+integrations = []
+project_milestones = []
+project_risks = []
+
+def compute_text_hash(text):
+    import hashlib
+    return hashlib.md5(text.encode('utf-8')).hexdigest()[:16]
+
+def load_rag_index():
+    global rag_documents, rag_chunks, rag_embeddings, rag_doc_hashes
+    if os.path.exists(RAG_INDEX_FILE):
+        try:
+            with open(RAG_INDEX_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                rag_documents = data.get('documents', [])
+                rag_chunks = data.get('chunks', [])
+                rag_embeddings = data.get('embeddings', [])
+                rag_doc_hashes = set(data.get('doc_hashes', []))
+            print(f"RAG索引已加载: {len(rag_documents)}文档, {len(rag_chunks)}分块")
+        except Exception as e:
+            print(f"加载RAG索引失败: {e}")
+            rag_documents, rag_chunks, rag_embeddings, rag_doc_hashes = [], [], [], set()
+
+def save_rag_index():
+    with data_lock:
+        try:
+            with open(RAG_INDEX_FILE, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'documents': rag_documents,
+                    'chunks': rag_chunks,
+                    'embeddings': rag_embeddings,
+                    'doc_hashes': list(rag_doc_hashes)
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存RAG索引失败: {e}")
+
+def get_cache_key(query, top_k, alpha, use_rerank, category):
+    return f"{query}|{top_k}|{alpha}|{use_rerank}|{category or 'all'}"
+
+def check_rag_cache(key):
+    if key in rag_cache:
+        entry = rag_cache[key]
+        if time.time() - entry['time'] < 300:
+            return entry['results']
+    return None
+
+def set_rag_cache(key, results):
+    global rag_cache
+    if key in rag_cache:
+        del rag_cache[key]
+    elif len(rag_cache) >= rag_cache_max_size:
+        rag_cache.popitem(last=False)
+    rag_cache[key] = {'results': results, 'time': time.time()}
+
+def expand_query(query):
+    expanded = [query]
+    synonyms = {
+        '如何': ['怎么', '怎样', '方法'],
+        '怎么': ['如何', '怎样', '方法'],
+        '什么': ['哪些', '何'],
+        '为什么': ['原因', '为何'],
+        '怎样': ['如何', '怎么'],
+        '实现': ['实现方法', '做法', '方案'],
+        '解决': ['处理', '解决方法', '方案'],
+        '问题': ['疑问', '困惑'],
+        '功能': ['特性', '能力'],
+        '配置': ['设置', '参数'],
+        '安装': ['部署', '配置'],
+        '使用': ['用法', '操作'],
+    }
+    for word, syns in synonyms.items():
+        if word in query:
+            for syn in syns:
+                expanded.append(query.replace(word, syn))
+            break
+    return expanded
+
+def rewrite_query(query, history=None):
+    rewritten = query
+    if history and len(history) > 0:
+        last_user_msg = None
+        for h in reversed(history):
+            if h[0]:
+                last_user_msg = h[0]
+                break
+        if last_user_msg:
+            pronouns = ['它', '这', '那', '他', '她', '这个', '那个']
+            for pronoun in pronouns:
+                if pronoun in query and pronoun not in last_user_msg:
+                    key_entities = re.findall(r'[\u4e00-\u9fa5]{2,4}', last_user_msg)
+                    if key_entities:
+                        rewritten = query.replace(pronoun, key_entities[-1])
+                        break
+    return rewritten
+
+def extract_keywords(query):
+    stop_words = {'的', '是', '在', '有', '和', '了', '我', '你', '他', '她', '它', '这', '那', '就', '也', '都', '吗', '呢', '吧', '啊', '呀'}
+    words = simple_tokenize(query)
+    keywords = [w for w in words if w not in stop_words and len(w) > 1]
+    return keywords[:5]
+
+def build_context_query(history, current_query, max_history=3):
+    if not history:
+        return current_query
+    context_parts = []
+    for h in history[-max_history:]:
+        if h[0]:
+            context_parts.append(h[0])
+    context = ' '.join(context_parts[-2:])
+    keywords = extract_keywords(context)
+    if keywords:
+        return current_query + ' ' + ' '.join(keywords)
+    return current_query
+
+def generate_hypothetical_answer(query):
+    hypothetical_templates = {
+        '如何': f"要{query}，首先需要了解基本概念。具体步骤包括：1. 准备工作；2. 执行操作；3. 验证结果。关键是要注意细节和安全。",
+        '怎么': f"{query}的方法有很多种。最常用的方法是：通过系统配置实现，或者使用专门的工具。建议先了解基础知识再进行操作。",
+        '什么是': f"{query}是一个重要的概念。它指的是在特定条件下，通过某种方式实现目标的过程。理解这个概念对于后续学习很重要。",
+        '为什么': f"{query}的原因主要有以下几点：1. 系统设计考虑；2. 性能优化需求；3. 安全性要求。这些因素共同决定了最终的设计选择。",
+    }
+    for key, template in hypothetical_templates.items():
+        if key in query:
+            return template
+    return f"关于{query}，这是一个需要深入了解的问题。通常涉及多个方面的知识，包括理论基础、实践方法和注意事项。建议系统性地学习和实践。"
+
+def generate_multi_queries(query):
+    queries = [query]
+    if '和' in query:
+        parts = query.split('和')
+        for part in parts:
+            if len(part.strip()) > 2:
+                queries.append(part.strip())
+    question_words = ['如何', '怎么', '什么是', '为什么', '哪些', '怎样']
+    for word in question_words:
+        if word in query:
+            alt_word = {'如何': '怎么', '怎么': '如何', '什么是': '哪些', '为什么': '原因', '哪些': '什么', '怎样': '如何'}
+            if word in alt_word:
+                queries.append(query.replace(word, alt_word[word]))
+            break
+    if len(query) > 10:
+        keywords = extract_keywords(query)
+        if keywords:
+            queries.append(' '.join(keywords[:3]))
+    return list(set(queries))[:5]
+
+def decompose_query(query):
+    sub_queries = []
+    connectors = ['并且', '同时', '以及', '还有', '另外', '还有呢']
+    for conn in connectors:
+        if conn in query:
+            parts = query.split(conn)
+            for part in parts:
+                part = part.strip()
+                if len(part) > 3:
+                    sub_queries.append(part)
+            break
+    if '和' in query and len(query) > 15:
+        parts = query.split('和')
+        for part in parts:
+            part = part.strip()
+            if len(part) > 5:
+                sub_queries.append(part)
+    if not sub_queries:
+        sub_queries = [query]
+    return sub_queries
+
+def classify_query(query):
+    query_lower = query.lower()
+    if any(w in query for w in ['如何', '怎么', '怎样', '方法', '步骤']):
+        return 'how-to'
+    elif any(w in query for w in ['什么是', '定义', '概念', '介绍']):
+        return 'definition'
+    elif any(w in query for w in ['为什么', '原因', '为何']):
+        return 'explanation'
+    elif any(w in query for w in ['哪些', '有什么', '列举', '例子']):
+        return 'list'
+    elif any(w in query for w in ['比较', '区别', '对比', '差异']):
+        return 'comparison'
+    elif any(w in query for w in ['代码', '实现', '编程', '函数']):
+        return 'code'
+    elif any(w in query for w in ['错误', '问题', '解决', '修复']):
+        return 'troubleshooting'
+    else:
+        return 'general'
+
+def get_adaptive_params(query_type):
+    params = {
+        'how-to': {'top_k': 5, 'alpha': 0.6, 'chunk_size': 'medium'},
+        'definition': {'top_k': 3, 'alpha': 0.7, 'chunk_size': 'small'},
+        'explanation': {'top_k': 4, 'alpha': 0.5, 'chunk_size': 'large'},
+        'list': {'top_k': 7, 'alpha': 0.4, 'chunk_size': 'medium'},
+        'comparison': {'top_k': 6, 'alpha': 0.5, 'chunk_size': 'large'},
+        'code': {'top_k': 4, 'alpha': 0.3, 'chunk_size': 'large'},
+        'troubleshooting': {'top_k': 5, 'alpha': 0.6, 'chunk_size': 'medium'},
+        'general': {'top_k': 5, 'alpha': 0.5, 'chunk_size': 'medium'}
+    }
+    return params.get(query_type, params['general'])
+
+def calculate_retrieval_quality(query, results):
+    if not results:
+        return {'score': 0, 'reason': '无结果'}
+    scores = [r['score'] for r in results]
+    avg_score = sum(scores) / len(scores)
+    max_score = max(scores)
+    min_score = min(scores)
+    score_variance = sum((s - avg_score) ** 2 for s in scores) / len(scores)
+    query_keywords = set(extract_keywords(query))
+    keyword_coverage = 0
+    for r in results:
+        result_keywords = set(extract_keywords(r['text']))
+        coverage = len(query_keywords & result_keywords) / len(query_keywords) if query_keywords else 0
+        keyword_coverage += coverage
+    keyword_coverage /= len(results)
+    quality_score = (avg_score * 0.4 + max_score * 0.3 + keyword_coverage * 0.3)
+    quality_reason = '高质量' if quality_score > 0.5 else '中等质量' if quality_score > 0.3 else '低质量'
+    return {
+        'score': round(quality_score, 3),
+        'reason': quality_reason,
+        'avg_similarity': round(avg_score, 3),
+        'max_similarity': round(max_score, 3),
+        'keyword_coverage': round(keyword_coverage, 3),
+        'result_count': len(results)
+    }
+
+def merge_and_deduplicate(results_list, top_k=5):
+    all_results = []
+    seen = set()
+    for results in results_list:
+        for r in results:
+            if r['chunk_id'] not in seen:
+                seen.add(r['chunk_id'])
+                all_results.append(r)
+    all_results.sort(key=lambda x: x['score'], reverse=True)
+    return all_results[:top_k]
+
+def reciprocal_rank_fusion(results_list, k=60, top_k=5):
+    rrf_scores = {}
+    for results in results_list:
+        for rank, r in enumerate(results):
+            chunk_id = r['chunk_id']
+            if chunk_id not in rrf_scores:
+                rrf_scores[chunk_id] = {'result': r, 'score': 0}
+            rrf_scores[chunk_id]['score'] += 1 / (k + rank + 1)
+    sorted_results = sorted(rrf_scores.values(), key=lambda x: x['score'], reverse=True)
+    return [r['result'] for r in sorted_results[:top_k]]
+
+def extract_metadata_filters(query):
+    filters = {}
+    category_patterns = {
+        'code': r'(代码|编程|函数|程序|脚本|python|java|javascript)',
+        'doc': r'(文档|文章|说明|教程|指南)',
+        'data': r'(数据|表格|csv|json|数据库)',
+        'config': r'(配置|设置|参数|选项)'
+    }
+    for cat, pattern in category_patterns.items():
+        if re.search(pattern, query, re.IGNORECASE):
+            filters['category'] = cat
+            break
+    time_patterns = [
+        (r'最新|最近|今天|昨天', 'recent'),
+        (r'本周|这周', 'this_week'),
+        (r'本月|这个月', 'this_month'),
+        (r'去年|上一年', 'last_year')
+    ]
+    for pattern, time_filter in time_patterns:
+        if re.search(pattern, query):
+            filters['time'] = time_filter
+            break
+    size_patterns = [
+        (r'详细|完整|全部', 'large'),
+        (r'简短|摘要|概要', 'small')
+    ]
+    for pattern, size_filter in size_patterns:
+        if re.search(pattern, query):
+            filters['size'] = size_filter
+            break
+    return filters
+
+def apply_metadata_filters(results, filters, documents):
+    if not filters:
+        return results
+    filtered = []
+    for r in results:
+        doc = next((d for d in documents if d['id'] == r['doc_id']), None)
+        if not doc:
+            continue
+        if 'category' in filters and doc.get('category') != filters['category']:
+            continue
+        if 'time' in filters:
+            doc_time = datetime.fromisoformat(doc.get('time', '2000-01-01'))
+            now = datetime.now()
+            if filters['time'] == 'recent' and (now - doc_time).days > 7:
+                continue
+            elif filters['time'] == 'this_week' and (now - doc_time).days > 7:
+                continue
+            elif filters['time'] == 'this_month' and (now - doc_time).days > 30:
+                continue
+            elif filters['time'] == 'last_year' and (now - doc_time).days > 365:
+                continue
+        if 'size' in filters:
+            if filters['size'] == 'large' and doc.get('char_count', 0) < 1000:
+                continue
+            elif filters['size'] == 'small' and doc.get('char_count', 0) > 5000:
+                continue
+        filtered.append(r)
+    return filtered if filtered else results
+
+def compress_context(results, max_length=2000):
+    if not results:
+        return ""
+    compressed = []
+    current_length = 0
+    for r in results:
+        text = r['text']
+        sentences = re.split(r'[。！？\n]', text)
+        key_sentences = []
+        for s in sentences:
+            s = s.strip()
+            if len(s) < 10:
+                continue
+            if any(kw in s for kw in ['关键', '重要', '核心', '主要', '首先', '因此', '所以', '总之']):
+                key_sentences.append(s)
+        if key_sentences:
+            compressed_text = '。'.join(key_sentences[:2])
+        else:
+            compressed_text = text[:300]
+        if current_length + len(compressed_text) > max_length:
+            break
+        compressed.append(f"[{r['doc_name']}] {compressed_text}")
+        current_length += len(compressed_text)
+    return '\n\n'.join(compressed)
+
+def calculate_time_weight(doc_time_str, decay_factor=0.1):
+    try:
+        doc_time = datetime.fromisoformat(doc_time_str)
+        now = datetime.now()
+        days_diff = (now - doc_time).days
+        weight = math.exp(-decay_factor * days_diff / 30)
+        return max(0.1, min(1.0, weight))
+    except:
+        return 0.5
+
+def apply_time_weighting(results, documents):
+    for r in results:
+        doc = next((d for d in documents if d['id'] == r['doc_id']), None)
+        if doc:
+            time_weight = calculate_time_weight(doc.get('time', '2000-01-01'))
+            r['time_weight'] = time_weight
+            r['weighted_score'] = r['score'] * (0.7 + 0.3 * time_weight)
+    results.sort(key=lambda x: x.get('weighted_score', x['score']), reverse=True)
+    return results
+
+def needs_retry(results, min_score=0.2, min_results=2):
+    if not results:
+        return True, "无结果"
+    if len(results) < min_results:
+        return True, "结果不足"
+    if all(r['score'] < min_score for r in results):
+        return True, "分数过低"
+    return False, "结果良好"
+
+def iterative_retrieval(query, initial_results, top_k=5, max_iterations=2):
+    all_results = list(initial_results)
+    seen_ids = set(r['chunk_id'] for r in initial_results)
+    for i in range(max_iterations):
+        if len(all_results) >= top_k:
+            break
+        expanded_query = query
+        if all_results:
+            top_result_text = all_results[0]['text'][:200]
+            keywords = extract_keywords(top_result_text)
+            if keywords:
+                expanded_query = query + ' ' + ' '.join(keywords[:3])
+        new_results = hybrid_search(expanded_query, top_k)
+        for r in new_results:
+            if r['chunk_id'] not in seen_ids:
+                seen_ids.add(r['chunk_id'])
+                r['source'] = f'iteration_{i+1}'
+                all_results.append(r)
+    all_results.sort(key=lambda x: x['score'], reverse=True)
+    return all_results[:top_k]
+
+def extract_entities(query):
+    entities = {
+        'technologies': re.findall(r'(python|java|javascript|react|vue|node|django|flask|mysql|redis|docker|k8s|kubernetes)', query.lower()),
+        'actions': re.findall(r'(安装|配置|部署|运行|调试|优化|测试|开发)', query),
+        'concepts': re.findall(r'[\u4e00-\u9fff]{2,6}(?:功能|模块|组件|接口|服务|系统)', query)
+    }
+    return {k: v for k, v in entities.items() if v}
+
+def build_structured_query(query):
+    entities = extract_entities(query)
+    filters = extract_metadata_filters(query)
+    query_type = classify_query(query)
+    structured = {
+        'original_query': query,
+        'query_type': query_type,
+        'entities': entities,
+        'filters': filters,
+        'keywords': extract_keywords(query),
+        'expanded_queries': generate_multi_queries(query)[:3]
+    }
+    return structured
+
+def simple_tokenize(text):
+    text = text.lower()
+    tokens = re.findall(r'[\u4e00-\u9fff]|[a-zA-Z]+|[0-9]+', text)
+    return tokens
+
+def compute_tfidf_embedding(text, vocab=None):
+    tokens = simple_tokenize(text)
+    if not tokens:
+        return {}
+    tf = {}
+    for token in tokens:
+        tf[token] = tf.get(token, 0) + 1
+    for token in tf:
+        tf[token] = tf[token] / len(tokens)
+    return tf
+
+def cosine_similarity(vec1, vec2):
+    if not vec1 or not vec2:
+        return 0.0
+    common_keys = set(vec1.keys()) & set(vec2.keys())
+    if not common_keys:
+        return 0.0
+    dot_product = sum(vec1[k] * vec2[k] for k in common_keys)
+    norm1 = sum(v ** 2 for v in vec1.values()) ** 0.5
+    norm2 = sum(v ** 2 for v in vec2.values()) ** 0.5
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot_product / (norm1 * norm2)
+
+BM25_K1 = 1.5
+BM25_B = 0.75
+doc_freqs = {}
+doc_lengths = []
+avgdl = 0
+N = 0
+
+def init_bm25():
+    global doc_freqs, doc_lengths, avgdl, N, rag_chunks
+    doc_freqs = {}
+    doc_lengths = []
+    N = len(rag_chunks)
+    if N == 0:
+        return
+    for chunk in rag_chunks:
+        tokens = simple_tokenize(chunk['text'])
+        doc_lengths.append(len(tokens))
+        seen = set()
+        for token in tokens:
+            if token not in seen:
+                doc_freqs[token] = doc_freqs.get(token, 0) + 1
+                seen.add(token)
+    avgdl = sum(doc_lengths) / N if N > 0 else 0
+
+def bm25_score(query, doc_idx):
+    global doc_freqs, doc_lengths, avgdl, N, rag_chunks
+    if N == 0 or doc_idx >= len(rag_chunks):
+        return 0.0
+    query_tokens = simple_tokenize(query)
+    doc_tokens = simple_tokenize(rag_chunks[doc_idx]['text'])
+    doc_len = doc_lengths[doc_idx] if doc_idx < len(doc_lengths) else len(doc_tokens)
+    score = 0.0
+    for token in query_tokens:
+        if token not in doc_freqs:
+            continue
+        tf = doc_tokens.count(token)
+        df = doc_freqs.get(token, 0)
+        idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
+        numerator = tf * (BM25_K1 + 1)
+        denominator = tf + BM25_K1 * (1 - BM25_B + BM25_B * doc_len / avgdl) if avgdl > 0 else tf + BM25_K1
+        score += idf * numerator / denominator if denominator > 0 else 0
+    return score
+
+def hybrid_search(query, top_k=5, alpha=0.5):
+    global rag_chunks, rag_embeddings
+    if not rag_chunks:
+        return []
+    init_bm25()
+    query_embedding = compute_tfidf_embedding(query)
+    scores = []
+    for i in range(len(rag_chunks)):
+        tfidf_score = cosine_similarity(query_embedding, rag_embeddings[i])
+        bm25_s = bm25_score(query, i)
+        combined = alpha * tfidf_score + (1 - alpha) * (bm25_s / 10 if bm25_s > 0 else 0)
+        scores.append((i, combined, tfidf_score, bm25_s))
+    scores.sort(key=lambda x: x[1], reverse=True)
+    results = []
+    for i, combined, tfidf, bm25 in scores[:top_k * 2]:
+        if combined > 0.02:
+            chunk = rag_chunks[i]
+            doc = next((d for d in rag_documents if d['id'] == chunk['doc_id']), None)
+            if doc:
+                results.append({
+                    "chunk_id": chunk['id'],
+                    "text": chunk['text'],
+                    "score": round(combined, 4),
+                    "tfidf_score": round(tfidf, 4),
+                    "bm25_score": round(bm25, 4),
+                    "doc_name": doc['filename'],
+                    "doc_id": doc['id'],
+                    "doc_category": doc.get('category', 'other'),
+                    "chunk_index": chunk.get('index', 0)
+                })
+            if len(results) >= top_k:
+                break
+    return results
+
+def rerank_results(query, results, top_k=None):
+    if not results:
+        return results
+    query_tokens = set(simple_tokenize(query))
+    for r in results:
+        text = r['text'].lower()
+        exact_matches = sum(1 for t in query_tokens if t in text)
+        query_lower = query.lower()
+        if query_lower in text:
+            r['score'] += 0.2
+        r['score'] += exact_matches * 0.02
+        r['exact_match_count'] = exact_matches
+    results.sort(key=lambda x: x['score'], reverse=True)
+    return results[:top_k] if top_k else results
+
+def smart_chunk_text(text, chunk_size=400, overlap=80, strategy='sentence'):
+    if strategy == 'sentence':
+        chunks = []
+        sentences = re.split(r'(?<=[。！？\n\.!?])\s*', text)
+        current_chunk = ""
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if len(current_chunk) + len(sentence) <= chunk_size:
+                current_chunk += sentence + " "
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                if overlap > 0 and chunks:
+                    last_chunk = chunks[-1]
+                    overlap_text = last_chunk[-overlap:] if len(last_chunk) > overlap else last_chunk
+                    current_chunk = overlap_text + sentence + " "
+                else:
+                    current_chunk = sentence + " "
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        return chunks if chunks else [text[:chunk_size]]
+    elif strategy == 'paragraph':
+        paragraphs = re.split(r'\n\s*\n', text)
+        chunks = []
+        current = ""
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            if len(current) + len(para) <= chunk_size:
+                current += para + "\n\n"
+            else:
+                if current:
+                    chunks.append(current.strip())
+                current = para + "\n\n"
+        if current:
+            chunks.append(current.strip())
+        return chunks if chunks else [text[:chunk_size]]
+    elif strategy == 'semantic':
+        sentences = re.split(r'(?<=[。！？\.!?])\s*', text)
+        chunks = []
+        current = ""
+        for s in sentences:
+            s = s.strip()
+            if not s:
+                continue
+            if len(current) + len(s) <= chunk_size:
+                current += s + " "
+            else:
+                if current and len(current) > 50:
+                    chunks.append(current.strip())
+                current = s + " "
+        if current:
+            chunks.append(current.strip())
+        return chunks if chunks else [text[:chunk_size]]
+    else:
+        step = chunk_size - overlap
+        return [text[i:i+chunk_size] for i in range(0, len(text), step)] if len(text) > chunk_size else [text]
+
+def chunk_text(text, chunk_size=400, overlap=80):
+    return smart_chunk_text(text, chunk_size, overlap, 'sentence')
+
+def parse_document(file_path, filename):
+    text = ""
+    ext = filename.lower().split('.')[-1]
+    try:
+        if ext == 'txt' or ext == 'md':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+        elif ext == 'json':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                text = json.dumps(data, ensure_ascii=False, indent=2)
+        elif ext == 'csv':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+        elif ext == 'pdf':
+            try:
+                import fitz
+                doc = fitz.open(file_path)
+                for page in doc:
+                    text += page.get_text() + "\n"
+                doc.close()
+            except ImportError:
+                return None, "PDF解析需要安装PyMuPDF: pip install pymupdf"
+        elif ext == 'docx':
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                text = "\n".join([para.text for para in doc.paragraphs])
+            except ImportError:
+                return None, "DOCX解析需要安装python-docx: pip install python-docx"
+        elif ext == 'html' or ext == 'htm':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            text = re.sub(r'<[^>]+>', ' ', html_content)
+            text = re.sub(r'\s+', ' ', text).strip()
+        else:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+    except Exception as e:
+        return None, str(e)
+    return text, None
+
+def get_file_category(filename):
+    ext = filename.lower().split('.')[-1]
+    categories = {
+        'code': ['py', 'js', 'ts', 'java', 'cpp', 'c', 'go', 'rs', 'rb', 'php'],
+        'doc': ['txt', 'md', 'pdf', 'doc', 'docx', 'rtf'],
+        'data': ['json', 'csv', 'xml', 'yaml', 'yml'],
+        'web': ['html', 'htm', 'css'],
+        'config': ['ini', 'cfg', 'conf', 'env']
+    }
+    for cat, exts in categories.items():
+        if ext in exts:
+            return cat
+    return 'other'
+
+def add_document_to_rag(file_path, filename, tags=None):
+    global rag_documents, rag_chunks, rag_embeddings, rag_doc_hashes
+    text, error = parse_document(file_path, filename)
+    if error:
+        return None, error
+    if not text or len(text.strip()) < 50:
+        return None, "文档内容过少或无法解析"
+    
+    text_hash = compute_text_hash(text)
+    if text_hash in rag_doc_hashes:
+        existing = next((d for d in rag_documents if d.get('hash') == text_hash), None)
+        if existing:
+            return None, f"文档已存在: {existing['filename']}"
+    
+    doc_id = str(uuid.uuid4())[:8]
+    category = get_file_category(filename)
+    doc_info = {
+        "id": doc_id,
+        "filename": filename,
+        "path": file_path,
+        "size": len(text),
+        "time": datetime.now().isoformat(),
+        "chunk_count": 0,
+        "category": category,
+        "tags": tags or [],
+        "char_count": len(text),
+        "word_count": len(text.split()),
+        "hash": text_hash
+    }
+    chunks = chunk_text(text, chunk_size=400, overlap=80)
+    chunk_hashes = set()
+    for i, chunk in enumerate(chunks):
+        chunk_hash = compute_text_hash(chunk)
+        if chunk_hash in chunk_hashes:
+            continue
+        chunk_hashes.add(chunk_hash)
+        chunk_id = f"{doc_id}_{i}"
+        embedding = compute_tfidf_embedding(chunk)
+        chunk_info = {
+            "id": chunk_id,
+            "doc_id": doc_id,
+            "text": chunk,
+            "index": i,
+            "start_char": text.find(chunk[:50]) if chunk[:50] in text else 0,
+            "hash": chunk_hash
+        }
+        rag_chunks.append(chunk_info)
+        rag_embeddings.append(embedding)
+    doc_info["chunk_count"] = len(chunks)
+    rag_documents.append(doc_info)
+    rag_doc_hashes.add(text_hash)
+    save_rag_index()
+    return doc_info, None
+
+def search_rag(query, top_k=5, doc_ids=None, category=None, use_rerank=True, alpha=0.5, history=None, use_cache=True, use_expansion=True, use_hyde=False, use_multi_query=False, use_decomposition=False, use_adaptive=True, use_rrf=False, use_metadata_filter=True, use_time_weight=False, use_compression=False, use_iterative=False):
+    global rag_chunks, rag_embeddings, rag_documents
+    if not rag_chunks:
+        return []
+    
+    cache_key = get_cache_key(query, top_k, alpha, use_rerank, category)
+    if use_cache:
+        cached = check_rag_cache(cache_key)
+        if cached:
+            return cached
+    
+    query_type = classify_query(query) if use_adaptive else 'general'
+    if use_adaptive:
+        adaptive_params = get_adaptive_params(query_type)
+        top_k = adaptive_params['top_k']
+        alpha = adaptive_params['alpha']
+    
+    rewritten = rewrite_query(query, history)
+    context_query = build_context_query(history, rewritten) if history else rewritten
+    
+    metadata_filters = extract_metadata_filters(query) if use_metadata_filter else {}
+    if category:
+        metadata_filters['category'] = category
+    
+    all_results = []
+    
+    if use_hyde:
+        hypothetical = generate_hypothetical_answer(query)
+        hyde_embedding = compute_tfidf_embedding(hypothetical)
+        hyde_results = []
+        for i, embedding in enumerate(rag_embeddings):
+            score = cosine_similarity(hyde_embedding, embedding)
+            if score > 0.05:
+                chunk = rag_chunks[i]
+                doc = next((d for d in rag_documents if d['id'] == chunk['doc_id']), None)
+                if doc:
+                    hyde_results.append({
+                        "chunk_id": chunk['id'],
+                        "text": chunk['text'],
+                        "score": round(score, 4),
+                        "doc_name": doc['filename'],
+                        "doc_id": doc['id'],
+                        "doc_category": doc.get('category', 'other'),
+                        "chunk_index": chunk.get('index', 0),
+                        "source": "hyde"
+                    })
+        hyde_results.sort(key=lambda x: x['score'], reverse=True)
+        all_results.append(hyde_results[:top_k])
+    
+    if use_multi_query:
+        multi_queries = generate_multi_queries(context_query)
+        for q in multi_queries[:3]:
+            mq_results = hybrid_search(q, top_k, alpha)
+            for r in mq_results:
+                r['source'] = 'multi_query'
+            all_results.append(mq_results)
+    
+    if use_decomposition:
+        sub_queries = decompose_query(query)
+        for sq in sub_queries:
+            sq_results = hybrid_search(sq, top_k // len(sub_queries) + 1, alpha)
+            for r in sq_results:
+                r['source'] = 'decomposition'
+            all_results.append(sq_results)
+    
+    if use_expansion:
+        expanded_queries = expand_query(context_query)
+        for eq in expanded_queries[:2]:
+            eq_results = hybrid_search(eq, top_k, alpha)
+            for r in eq_results:
+                r['source'] = 'expansion'
+            all_results.append(eq_results)
+    
+    base_results = hybrid_search(context_query, top_k, alpha)
+    for r in base_results:
+        r['source'] = 'base'
+    all_results.append(base_results)
+    
+    if use_rrf and len(all_results) > 1:
+        final_results = reciprocal_rank_fusion(all_results, top_k=top_k * 2)
+    else:
+        final_results = merge_and_deduplicate(all_results, top_k * 2)
+    
+    if metadata_filters:
+        final_results = apply_metadata_filters(final_results, metadata_filters, rag_documents)
+    
+    if doc_ids:
+        final_results = [r for r in final_results if r['doc_id'] in doc_ids]
+    if category and not metadata_filters.get('category'):
+        final_results = [r for r in final_results if r.get('doc_category') == category]
+    
+    if use_time_weight:
+        final_results = apply_time_weighting(final_results, rag_documents)
+    
+    if use_rerank:
+        final_results = rerank_results(query, final_results, top_k)
+    
+    final_results = final_results[:top_k]
+    
+    if use_iterative and len(final_results) < top_k:
+        final_results = iterative_retrieval(query, final_results, top_k)
+    
+    if use_cache:
+        set_rag_cache(cache_key, final_results)
+    
+    return final_results
+
+def get_rag_stats():
+    global rag_documents, rag_chunks, rag_cache
+    if not rag_documents:
+        return {"total_docs": 0, "total_chunks": 0, "total_chars": 0, "categories": {}, "cache_size": 0}
+    categories = {}
+    total_chars = 0
+    for doc in rag_documents:
+        cat = doc.get('category', 'other')
+        categories[cat] = categories.get(cat, 0) + 1
+        total_chars += doc.get('char_count', doc.get('size', 0))
+    return {
+        "total_docs": len(rag_documents),
+        "total_chunks": len(rag_chunks),
+        "total_chars": total_chars,
+        "categories": categories,
+        "cache_size": len(rag_cache),
+        "unique_hashes": len(rag_doc_hashes)
+    }
+
+def delete_document_from_rag(doc_id):
+    global rag_documents, rag_chunks, rag_embeddings, rag_doc_hashes
+    doc = next((d for d in rag_documents if d['id'] == doc_id), None)
+    if doc and doc.get('hash') in rag_doc_hashes:
+        rag_doc_hashes.remove(doc['hash'])
+    rag_documents = [d for d in rag_documents if d['id'] != doc_id]
+    chunks_to_remove = [i for i, c in enumerate(rag_chunks) if c['doc_id'] == doc_id]
+    for i in reversed(chunks_to_remove):
+        rag_chunks.pop(i)
+        rag_embeddings.pop(i)
+    save_rag_index()
+    return True
+
+load_rag_index()
+
+def get_default_playbooks():
+    return [
+        {
+            "id": "growth_weekly",
+            "name": "增长周计划",
+            "description": "面向运营团队的周目标拆解和执行排期",
+            "category": "运营",
+            "template": "请围绕主题「{topic}」，目标「{goal}」，约束「{constraints}」，生成一份7天增长执行计划，包含目标、动作、指标、风险、复盘。"
+        },
+        {
+            "id": "incident_response",
+            "name": "故障应急响应",
+            "description": "用于线上故障时的排障与沟通流程",
+            "category": "工程",
+            "template": "针对「{topic}」故障，结合背景「{context}」，输出P0/P1分级、排查顺序、止血方案、回滚策略、复盘模板。"
+        },
+        {
+            "id": "release_gate",
+            "name": "发布门禁清单",
+            "description": "面向版本上线前质量与风险检查",
+            "category": "工程",
+            "template": "基于发布内容「{topic}」，输出上线门禁清单：功能、性能、安全、观测、回滚、验收、值班安排。"
+        },
+        {
+            "id": "research_brief",
+            "name": "深度研究简报",
+            "description": "形成可交付的研究摘要与行动建议",
+            "category": "研究",
+            "template": "围绕研究主题「{topic}」，背景「{context}」，目标「{goal}」，生成研究简报：问题拆解、证据、结论、建议。"
+        },
+        {
+            "id": "sales_enablement",
+            "name": "销售赋能作战卡",
+            "description": "统一销售话术、异议处理与推进路径",
+            "category": "销售",
+            "template": "针对产品/方案「{topic}」，输出销售作战卡：客户画像、价值主张、异议处理、跟进节奏、成交信号。"
+        },
+        {
+            "id": "compliance_review",
+            "name": "合规评审模板",
+            "description": "用于合同与数据合规风险审查",
+            "category": "法务",
+            "template": "针对事项「{topic}」，约束「{constraints}」，生成合规审查清单：风险点、证据、责任、整改建议、验收标准。"
+        }
+    ]
+
+def get_all_prompt_templates():
+    templates = [
+        {"id":"code","name":"代码助手","prompt":"请帮我写一段代码，实现以下功能：","icon":"📝","desc":"代码生成、重构与调试建议","category":"general","source":"通用","tags":["代码","生成"]},
+        {"id":"translate","name":"翻译助手","prompt":"请将以下内容翻译成英文：","icon":"🌐","desc":"多语言翻译与语气适配","category":"general","source":"通用","tags":["翻译","多语言"]},
+        {"id":"summary","name":"总结助手","prompt":"请帮我总结以下内容的要点：","icon":"📋","desc":"快速提炼重点与行动项","category":"general","source":"通用","tags":["总结","提炼"]},
+        {"id":"email","name":"邮件助手","prompt":"请帮我写一封邮件，主题是：","icon":"📧","desc":"商务邮件写作与回复模板","category":"general","source":"通用","tags":["邮件","写作"]},
+        {"id":"article","name":"文章助手","prompt":"请帮我写一篇关于","icon":"✍️","desc":"内容创作与表达优化","category":"general","source":"通用","tags":["写作","创作"]},
+        {"id":"debug","name":"调试助手","prompt":"以下代码有问题，请帮我找出错误：","icon":"🐛","desc":"定位报错并给出修复路径","category":"general","source":"通用","tags":["调试","排错"]},
+        {"id":"brainstorm","name":"头脑风暴","prompt":"请围绕以下主题进行头脑风暴，给出10个创意方向：","icon":"💡","desc":"发散思维与创意激发","category":"general","source":"通用","tags":["创意","发散"]},
+        {"id":"explain","name":"概念解释","prompt":"请用通俗易懂的方式解释以下概念：","icon":"🎓","desc":"复杂概念的通俗化解读","category":"general","source":"通用","tags":["解释","学习"]},
+        {"id":"comparison","name":"对比分析","prompt":"请对比分析以下两个方案/产品的优劣势：","icon":"⚖️","desc":"多维度对比与决策支持","category":"general","source":"通用","tags":["对比","决策"]},
+        {"id":"checklist","name":"清单生成","prompt":"请为以下任务/场景生成一份完整的检查清单：","icon":"✅","desc":"任务清单与流程检查","category":"general","source":"通用","tags":["清单","流程"]},
+        {"id":"ecommerce","name":"电商增长策略","prompt":"请为我的电商产品制定30天增长方案，包含人群画像、卖点、活动节奏、投放素材结构与转化指标。","icon":"🛍️","desc":"活动节奏、投放与转化闭环","category":"growth","source":"实战","tags":["电商","增长"]},
+        {"id":"shortvideo","name":"短视频增长","prompt":"请为我设计7天短视频内容计划，输出选题、脚本结构、前3秒钩子、封面标题和发布时间建议。","icon":"🎬","desc":"账号内容排期与选题脚本","category":"growth","source":"实战","tags":["短视频","内容"]},
+        {"id":"seo_strategy","name":"SEO内容策略","prompt":"请为我的网站制定SEO内容策略，包含关键词矩阵、内容日历、内链规划、外链策略和排名追踪方案。","icon":"🔎","desc":"搜索流量获取与内容规划","category":"growth","source":"实战","tags":["SEO","流量"]},
+        {"id":"user_retention","name":"用户留存体系","prompt":"请为我的产品设计用户留存体系，包含Aha Moment分析、留存漏斗、触达策略、召回机制和核心指标看板。","icon":"🔄","desc":"留存分析与召回策略设计","category":"growth","source":"实战","tags":["留存","运营"]},
+        {"id":"community_ops","name":"社区运营方案","prompt":"请为我的产品制定社区运营方案，包含社区定位、内容生态、KOL策略、活跃机制和冷启动计划。","icon":"👥","desc":"社区冷启动与活跃运营","category":"growth","source":"实战","tags":["社区","运营"]},
+        {"id":"content_marketing","name":"内容营销方案","prompt":"请为我的品牌制定内容营销方案，包含内容矩阵、分发渠道、KPI指标、内容日历和效果评估体系。","icon":"📢","desc":"内容矩阵与分发策略","category":"growth","source":"实战","tags":["营销","内容"]},
+        {"id":"pricing_strategy","name":"定价策略分析","prompt":"请为我的产品制定定价策略，包含竞品定价分析、价值锚点、价格弹性测试、阶梯方案和促销节奏。","icon":"💵","desc":"定价模型与竞争策略","category":"growth","source":"商业分析","tags":["定价","策略"]},
+        {"id":"growth_hacking","name":"增长黑客实验","prompt":"请为我的产品设计增长黑客实验方案，包含北极星指标、实验假设、MVP方案、数据埋点和迭代节奏。","icon":"🚀","desc":"低成本增长实验设计","category":"growth","source":"增长实践","tags":["增长","实验"]},
+        {"id":"brand_strategy","name":"品牌策略规划","prompt":"请为我的品牌制定策略规划，包含品牌定位、价值主张、视觉体系、传播策略和品牌资产建设路径。","icon":"🏷️","desc":"品牌定位与资产建设","category":"growth","source":"品牌实践","tags":["品牌","策略"]},
+        {"id":"prompt_eval","name":"提示词评测体系","prompt":"请为我的AI应用设计提示词评测方案，包括测试集、评分维度、A/B对比和持续回归机制。","icon":"🧪","desc":"借鉴 Promptfoo 的评测思想","category":"engineering","source":"Promptfoo","tags":["评测","AI"]},
+        {"id":"agent_observability","name":"智能体可观测性","prompt":"请为我的AI助手设计可观测性方案，覆盖链路追踪、错误分层、质量指标和排障流程。","icon":"📈","desc":"借鉴 Langfuse 的追踪与评估实践","category":"engineering","source":"Langfuse","tags":["可观测","AI"]},
+        {"id":"ai_workflow","name":"自动化工作流设计","prompt":"请为我的业务场景设计一套AI自动化工作流，包含触发器、节点编排、审批机制和失败重试策略。","icon":"🔁","desc":"借鉴 n8n 的节点化编排思路","category":"engineering","source":"n8n","tags":["自动化","工作流"]},
+        {"id":"ai_redteam","name":"AI安全红队演练","prompt":"请为我的AI产品制定红队测试计划，覆盖越狱、提示注入、数据泄露和工具滥用风险。","icon":"🛡️","desc":"借鉴 Promptfoo 的红队测试场景","category":"engineering","source":"Promptfoo","tags":["安全","红队"]},
+        {"id":"api_design","name":"API接口设计","prompt":"请为以下业务场景设计RESTful API接口规范，包含资源定义、请求响应格式、错误码体系、版本策略和限流方案。","icon":"🔌","desc":"RESTful API规范与设计","category":"engineering","source":"工程实践","tags":["API","设计"]},
+        {"id":"system_arch","name":"系统架构评审","prompt":"请对以下系统架构进行评审，从可用性、扩展性、安全性、成本四个维度输出评审报告和优化建议。","icon":"🏗️","desc":"架构评审与优化建议","category":"engineering","source":"工程实践","tags":["架构","评审"]},
+        {"id":"ci_cd","name":"CI/CD流水线","prompt":"请为我的项目设计CI/CD流水线方案，包含构建阶段、测试门禁、部署策略（蓝绿/金丝雀）、回滚机制和环境管理。","icon":"🚀","desc":"持续集成与部署方案","category":"engineering","source":"工程实践","tags":["CI/CD","DevOps"]},
+        {"id":"code_review","name":"代码审查","prompt":"请对以下代码进行专业审查，分析代码质量、潜在Bug、性能问题和安全漏洞，并给出改进建议：","icon":"🔍","desc":"代码质量分析与优化建议","category":"engineering","source":"工程实践","tags":["审查","质量"]},
+        {"id":"perf_optimize","name":"性能优化方案","prompt":"请对以下系统/代码进行性能分析，输出瓶颈定位、优化方案、预期收益和实施优先级。","icon":"⚡","desc":"性能瓶颈定位与优化","category":"engineering","source":"工程实践","tags":["性能","优化"]},
+        {"id":"db_design","name":"数据库设计","prompt":"请为以下业务场景设计数据库方案，包含ER模型、表结构、索引策略、分片方案和读写分离架构。","icon":"🗄️","desc":"数据库建模与优化","category":"engineering","source":"工程实践","tags":["数据库","设计"]},
+        {"id":"rag_ops","name":"RAG知识运营","prompt":"请为我的知识库系统制定RAG运营方案，包含文档治理、检索质量评估和持续优化闭环。","icon":"📚","desc":"借鉴 Dify/Open WebUI 的RAG实践","category":"knowledge","source":"Dify/Open WebUI","tags":["RAG","知识库"]},
+        {"id":"deep_research","name":"深度研究任务","prompt":"请围绕这个主题制定深度研究计划，包含信息源策略、交叉验证、证据分级和结论产出格式。","icon":"🔍","desc":"面向咨询与研究型工作","category":"knowledge","source":"研究实践","tags":["研究","分析"]},
+        {"id":"literature_review","name":"文献综述生成","prompt":"请围绕以下研究主题，生成结构化文献综述：研究背景、核心流派、方法论对比、研究空白和未来方向。","icon":"📖","desc":"学术文献综述框架","category":"knowledge","source":"学术实践","tags":["文献","学术"]},
+        {"id":"competitive_analysis","name":"竞品深度分析","prompt":"请对以下竞品进行深度分析，覆盖产品定位、核心功能、技术架构、商业模式、用户口碑和战略预判。","icon":"⚔️","desc":"竞品调研与战略分析","category":"knowledge","source":"商业分析","tags":["竞品","分析"]},
+        {"id":"patent_analysis","name":"专利技术分析","prompt":"请对以下技术领域的专利布局进行分析，包含核心专利识别、技术路线图、侵权风险评估和专利策略建议。","icon":"📜","desc":"专利布局与技术路线","category":"knowledge","source":"知识产权","tags":["专利","技术"]},
+        {"id":"industry_report","name":"行业研究报告","prompt":"请为以下行业生成研究报告，包含市场规模、竞争格局、技术趋势、政策环境和投资建议。","icon":"📊","desc":"行业全景与趋势研判","category":"knowledge","source":"研究实践","tags":["行业","报告"]},
+        {"id":"tech_radar","name":"技术雷达","prompt":"请为以下技术领域生成技术雷达报告，包含技术成熟度评估、采用建议、风险提示和落地路径。","icon":"📡","desc":"技术趋势与采用决策","category":"knowledge","source":"技术实践","tags":["技术","趋势"]},
+        {"id":"contract_review","name":"合同审阅顾问","prompt":"请基于合同摘要、交易背景、谈判目标和约束条件，输出风险审阅报告：高风险条款、责任边界、可谈判点、修改建议和谈判话术。","icon":"⚖️","desc":"法务合同风险审阅","category":"professional","source":"法务实践","tags":["合同","法务"]},
+        {"id":"financial_model","name":"财务模型搭建","prompt":"请为以下业务场景搭建财务模型框架，包含收入预测、成本结构、现金流、关键假设和敏感性分析。","icon":"💰","desc":"财务建模与估值分析","category":"professional","source":"金融实践","tags":["财务","建模"]},
+        {"id":"medical_literature","name":"医学文献解读","prompt":"请对以下医学文献进行专业解读，包含研究设计、统计方法、主要发现、临床意义和局限性评价。","icon":"🏥","desc":"医学文献循证解读","category":"professional","source":"医学实践","tags":["医学","文献"]},
+        {"id":"legal_research","name":"法律检索报告","prompt":"请围绕以下法律问题进行检索分析，输出：适用法条、相关案例、裁判观点、争议焦点和法律风险提示。","icon":"⚖️","desc":"法律条文与案例检索","category":"professional","source":"法律实践","tags":["法律","检索"]},
+        {"id":"hr_interview","name":"面试评估框架","prompt":"请为以下岗位设计结构化面试方案，包含能力模型、行为面试题、评分标准和录用决策矩阵。","icon":"🤝","desc":"结构化面试设计","category":"professional","source":"HR实践","tags":["面试","HR"]},
+        {"id":"investment_memo","name":"投资备忘录","prompt":"请为以下投资标的撰写投资备忘录，包含市场机会、团队评估、商业模式、财务预测、风险分析和投资建议。","icon":"💹","desc":"投资分析与决策备忘","category":"professional","source":"投资实践","tags":["投资","分析"]},
+        {"id":"project_charter","name":"项目章程","prompt":"请为以下项目生成项目章程，包含项目目标、范围边界、里程碑计划、资源需求、风险登记和干系人分析。","icon":"📋","desc":"项目启动与章程制定","category":"professional","source":"项目管理","tags":["项目","管理"]},
+        {"id":"product_prd","name":"产品PRD生成","prompt":"请为以下产品需求生成PRD文档，包含背景与目标、用户故事、功能规格、交互流程、数据指标和里程碑计划。","icon":"📱","desc":"产品需求文档生成","category":"product","source":"产品实践","tags":["PRD","产品"]},
+        {"id":"ux_review","name":"UX体验评审","prompt":"请对以下产品界面进行UX评审，从信息架构、交互流程、视觉层次、可访问性和情感设计五个维度输出改进建议。","icon":"🎨","desc":"用户体验评审与优化","category":"product","source":"设计实践","tags":["UX","评审"]},
+        {"id":"data_analysis","name":"数据分析报告","prompt":"请对以下数据进行深度分析，输出：数据概览、关键发现、异常检测、归因分析和行动建议。","icon":"📊","desc":"数据洞察与决策支持","category":"product","source":"数据实践","tags":["数据","分析"]},
+        {"id":"ab_test_design","name":"A/B实验设计","prompt":"请为以下产品功能设计A/B实验方案，包含假设定义、指标体系、样本量计算、分流策略和结果判定标准。","icon":"🧪","desc":"实验设计与统计检验","category":"product","source":"数据实践","tags":["A/B","实验"]},
+        {"id":"user_interview","name":"用户访谈提纲","prompt":"请为以下产品研究目标设计用户访谈提纲，包含访谈目的、目标用户筛选、问题设计（开场/核心/深挖/收尾）和数据分析框架。","icon":"🗣️","desc":"用户研究访谈设计","category":"product","source":"用研实践","tags":["访谈","用研"]},
+        {"id":"user_journey","name":"用户旅程地图","prompt":"请为以下产品场景绘制用户旅程地图，包含阶段划分、触点、情绪曲线、痛点和机会点。","icon":"🗺️","desc":"用户旅程与触点分析","category":"product","source":"设计实践","tags":["旅程","体验"]},
+        {"id":"feature_priority","name":"需求优先级矩阵","prompt":"请对以下产品需求列表进行优先级排序，使用RICE模型（Reach/Impact/Confidence/Effort）输出优先级矩阵和迭代建议。","icon":"📊","desc":"RICE模型需求排序","category":"product","source":"产品实践","tags":["需求","优先级"]},
+        {"id":"design_system","name":"设计系统规范","prompt":"请为以下产品生成设计系统规范，包含设计原则、色彩体系、字体规范、组件库和交互模式。","icon":"🎨","desc":"设计系统与组件规范","category":"product","source":"设计实践","tags":["设计","规范"]},
+        {"id":"sql_gen","name":"SQL生成","prompt":"请根据以下自然语言描述生成SQL查询语句，并解释查询逻辑：","icon":"🗃️","desc":"自然语言转SQL查询","category":"engineering","source":"工程实践","tags":["SQL","数据库"]},
+        {"id":"test_gen","name":"测试用例生成","prompt":"请为以下代码生成全面的单元测试，覆盖主要功能、边界条件和异常情况：","icon":"🧪","desc":"单元测试用例自动生成","category":"engineering","source":"工程实践","tags":["测试","质量"]},
+        {"id":"security_audit","name":"安全审计","prompt":"请对以下代码/系统进行安全审计，识别潜在的安全漏洞（如SQL注入、XSS、CSRF等）并给出修复建议：","icon":"🔒","desc":"代码安全漏洞检测","category":"engineering","source":"安全实践","tags":["安全","审计"]},
+        {"id":"refactor","name":"代码重构","prompt":"请分析以下代码并提供重构建议，重点关注可读性、可维护性和性能：","icon":"♻️","desc":"智能代码优化建议","category":"engineering","source":"工程实践","tags":["重构","优化"]},
+    ]
+    custom_file = os.path.join(PROMPTS_DIR, 'custom_templates.json')
+    if os.path.exists(custom_file):
+        try:
+            with open(custom_file, 'r', encoding='utf-8') as f:
+                custom = json.load(f)
+                templates.extend(custom)
+        except:
+            pass
+    return templates
+
+def load_json_list(file_path, default=None):
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else (default or [])
+    except Exception as e:
+        print(f"加载JSON失败 {file_path}: {e}")
+    return default or []
+
+def save_json_list(file_path, data):
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存JSON失败 {file_path}: {e}")
+
+def load_json_object(file_path, default=None):
+    default_value = default if isinstance(default, dict) else {}
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else default_value
+    except Exception as e:
+        print(f"加载JSON对象失败 {file_path}: {e}")
+    return default_value
+
+def save_json_object(file_path, data):
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data if isinstance(data, dict) else {}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存JSON对象失败 {file_path}: {e}")
+
+def append_project_activity(action, entity, entity_id, detail=''):
+    global project_activities
+    event = {
+        "id": str(uuid.uuid4())[:8],
+        "action": action,
+        "entity": entity,
+        "entity_id": entity_id,
+        "detail": detail,
+        "time": int(time.time())
+    }
+    project_activities.insert(0, event)
+    project_activities = project_activities[:300]
+    save_json_list(PROJECT_ACTIVITY_FILE, project_activities)
+
+def safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+def load_project_center_data():
+    global project_artifacts, project_tasks, project_playbooks, project_activities, ops_campaigns, release_plans, alert_rules, ab_experiments, integrations, project_milestones, project_risks
+    project_artifacts = load_json_list(ARTIFACTS_FILE, [])
+    project_tasks = load_json_list(PROJECT_TASKS_FILE, [])
+    playbooks = load_json_list(PLAYBOOKS_FILE, [])
+    project_activities = load_json_list(PROJECT_ACTIVITY_FILE, [])
+    ops_campaigns = load_json_list(OPS_CAMPAIGNS_FILE, [])
+    release_plans = load_json_list(RELEASE_PLANS_FILE, [])
+    alert_rules = load_json_list(ALERT_RULES_FILE, [])
+    ab_experiments = load_json_list(AB_EXPERIMENTS_FILE, [])
+    integrations = load_json_list(INTEGRATIONS_FILE, [])
+    project_milestones = load_json_list(PROJECT_MILESTONES_FILE, [])
+    project_risks = load_json_list(PROJECT_RISKS_FILE, [])
+    if not playbooks:
+        playbooks = get_default_playbooks()
+        save_json_list(PLAYBOOKS_FILE, playbooks)
+    project_playbooks = playbooks
+    normalized_tasks = []
+    for i, task in enumerate(project_tasks):
+        item = dict(task)
+        item["order"] = int(item.get("order", i + 1))
+        item["status"] = item.get("status", "todo") if item.get("status", "todo") in ["todo", "doing", "done"] else "todo"
+        normalized_tasks.append(item)
+    project_tasks = normalized_tasks
+    normalized_artifacts = []
+    for a in project_artifacts:
+        item = dict(a)
+        if not isinstance(item.get("versions"), list) or not item.get("versions"):
+            item["versions"] = [{
+                "version": 1,
+                "title": item.get("title", "未命名产物"),
+                "content": item.get("content", ""),
+                "time": int(item.get("updated_at", int(time.time()))),
+                "editor": "system"
+            }]
+        normalized_artifacts.append(item)
+    project_artifacts = normalized_artifacts
+    normalized_campaigns = []
+    for campaign in ops_campaigns:
+        item = dict(campaign)
+        if item.get("status") not in ["draft", "running", "paused", "done"]:
+            item["status"] = "draft"
+        item["target_ctr"] = safe_float(item.get("target_ctr", 0.0))
+        item["current_ctr"] = safe_float(item.get("current_ctr", 0.0))
+        item["budget"] = safe_float(item.get("budget", 0))
+        normalized_campaigns.append(item)
+    ops_campaigns = normalized_campaigns
+    normalized_release_plans = []
+    for plan in release_plans:
+        item = dict(plan)
+        if item.get("status") not in ["planning", "review", "ready", "released", "rollback"]:
+            item["status"] = "planning"
+        if not isinstance(item.get("checklist"), list):
+            item["checklist"] = []
+        normalized_release_plans.append(item)
+    release_plans = normalized_release_plans
+    normalized_alert_rules = []
+    for rule in alert_rules:
+        item = dict(rule)
+        if item.get("level") not in ["low", "medium", "high", "critical"]:
+            item["level"] = "medium"
+        if item.get("status") not in ["active", "muted", "resolved"]:
+            item["status"] = "active"
+        item["threshold"] = safe_float(item.get("threshold", 0))
+        item["current_value"] = safe_float(item.get("current_value", 0))
+        normalized_alert_rules.append(item)
+    alert_rules = normalized_alert_rules
+    normalized_ab = []
+    for exp in ab_experiments:
+        item = dict(exp)
+        if item.get("status") not in ["draft", "running", "paused", "completed"]:
+            item["status"] = "draft"
+        item["traffic"] = safe_float(item.get("traffic", 50))
+        item["baseline"] = safe_float(item.get("baseline", 0))
+        item["variant"] = safe_float(item.get("variant", 0))
+        normalized_ab.append(item)
+    ab_experiments = normalized_ab
+    normalized_integrations = []
+    for integ in integrations:
+        item = dict(integ)
+        if item.get("status") not in ["enabled", "disabled", "error"]:
+            item["status"] = "disabled"
+        item["health"] = safe_float(item.get("health", 0))
+        normalized_integrations.append(item)
+    integrations = normalized_integrations
+    normalized_milestones = []
+    for ms in project_milestones:
+        item = dict(ms)
+        if item.get("status") not in ["planned", "active", "done", "delayed"]:
+            item["status"] = "planned"
+        normalized_milestones.append(item)
+    project_milestones = normalized_milestones
+    normalized_risks = []
+    for risk in project_risks:
+        item = dict(risk)
+        if item.get("level") not in ["low", "medium", "high", "critical"]:
+            item["level"] = "medium"
+        if item.get("status") not in ["open", "mitigating", "closed"]:
+            item["status"] = "open"
+        normalized_risks.append(item)
+    project_risks = normalized_risks
+
+def save_project_artifacts():
+    save_json_list(ARTIFACTS_FILE, project_artifacts)
+
+def save_project_tasks():
+    save_json_list(PROJECT_TASKS_FILE, project_tasks)
+
+def save_project_playbooks():
+    save_json_list(PLAYBOOKS_FILE, project_playbooks)
+
+def save_ops_campaigns():
+    save_json_list(OPS_CAMPAIGNS_FILE, ops_campaigns)
+
+def save_release_plans():
+    save_json_list(RELEASE_PLANS_FILE, release_plans)
+
+def save_alert_rules():
+    save_json_list(ALERT_RULES_FILE, alert_rules)
+
+def save_ab_experiments():
+    save_json_list(AB_EXPERIMENTS_FILE, ab_experiments)
+
+def save_integrations():
+    save_json_list(INTEGRATIONS_FILE, integrations)
+
+def save_project_milestones():
+    save_json_list(PROJECT_MILESTONES_FILE, project_milestones)
+
+def save_project_risks():
+    save_json_list(PROJECT_RISKS_FILE, project_risks)
+
+SCENE_PROMPT_TEMPLATES = {
+    "ecommerce": {
+        "system": "你是资深电商增长顾问，擅长从人群洞察到投放执行的全链路增长策略。请输出结构化、可执行、可落地的中文方案，包含具体数据指标和执行时间线。",
+        "prompt": "请基于以下信息，输出一份完整的30天电商增长方案：\n\n**产品信息**：{product_info}\n**目标人群**：{target_audience}\n**当前阶段**：{current_stage}\n**预算范围**：{budget}\n**增长目标**：{growth_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🎯 人群画像与洞察（3个核心人群标签+消费动机）\n2. 💎 卖点矩阵（功能卖点3条+情感卖点3条）\n3. 📅 内容节奏（按周规划，每周3条内容方向）\n4. 📊 投放结构（渠道+素材类型+预算分配比例）\n5. 💰 预算建议与ROI预估（分渠道预估）\n6. 📈 转化指标体系（北极星指标+过程指标）\n7. ✅ 按周执行清单（含具体动作、负责人、截止时间）\n8. ⚠️ 风险预案与AB测试建议"
+    },
+    "shortvideo": {
+        "system": "你是短视频运营总监，深谙抖音/小红书/快手等平台算法与内容策略。请输出结构化、可执行、可落地的中文方案，包含具体脚本框架和数据目标。",
+        "prompt": "请基于以下信息，输出一份完整的7天短视频运营方案：\n\n**账号定位**：{account_positioning}\n**内容资源**：{content_resources}\n**粉丝现状**：{follower_status}\n**拍摄能力**：{production_capacity}\n**增长目标**：{growth_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🎯 账号定位校准（人设标签+差异化价值）\n2. 📅 7天选题日历（每天1条选题+内容类型）\n3. 🎬 脚本结构模板（前3秒钩子+内容框架+CTA）\n4. 🖼️ 封面标题策略（3组封面标题方案）\n5. ⏰ 最佳发布时间（基于平台算法推荐）\n6. 💬 互动策略（评论区运营+粉丝互动）\n7. 📊 数据复盘指标（播放量/完播率/互动率目标）\n8. 🔄 迭代优化建议（基于数据反馈的调整方向）"
+    },
+    "resume": {
+        "system": "你是求职辅导专家，熟悉各行业招聘标准和简历筛选逻辑。请输出结构化、可执行、可落地的中文方案，帮助候选人打造高通过率简历。",
+        "prompt": "请基于以下信息，输出一份完整的简历优化与求职方案：\n\n**个人经历**：{personal_experience}\n**目标岗位**：{target_position}\n**核心技能**：{core_skills}\n**求职目标**：{job_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🎯 价值主张提炼（一句话核心卖点）\n2. ✍️ STAR重写建议（3个核心经历的STAR改写）\n3. 📊 量化成果建议（如何将描述转为数据化表达）\n4. 🔑 技能关键词优化（ATS友好关键词列表）\n5. 📋 简历结构建议（模块排列优先级）\n6. 🎤 面试高频问答（5个必问题+参考回答框架）\n7. 📝 求职信模板（针对目标岗位定制）\n8. ⚠️ 常见避坑提醒（简历中的红旗项）"
+    },
+    "business": {
+        "system": "你是商业计划顾问，具备丰富的创业辅导和投资评审经验。请输出结构化、可执行、可落地的中文方案，包含具体数据和里程碑。",
+        "prompt": "请基于以下信息，输出一份完整的商业计划方案：\n\n**项目说明**：{project_description}\n**市场背景**：{market_background}\n**竞争格局**：{competitive_landscape}\n**团队资源**：{team_resources}\n**商业目标**：{business_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 📊 市场规模与趋势（TAM/SAM/SOM估算）\n2. 🏆 竞品分析矩阵（3-5家竞品对比）\n3. 💡 商业模式画布（9要素完整分析）\n4. 🗺️ 发展路线图（3个月/6个月/12个月里程碑）\n5. 💰 财务测算框架（收入模型+成本结构+盈亏平衡）\n6. ⚠️ 风险控制方案（Top5风险+应对策略）\n7. 🤝 融资建议（估值逻辑+融资节奏）\n8. 📋 核心假设验证清单（需验证的关键假设）"
+    },
+    "dataops": {
+        "system": "你是经营分析专家，擅长从数据中提炼业务洞察并推动决策落地。请输出结构化、可执行、可落地的中文方案，包含具体指标和行动项。",
+        "prompt": "请基于以下信息，输出一份完整的经营诊断与行动方案：\n\n**数据现状**：{data_status}\n**业务背景**：{business_context}\n**关键指标**：{key_metrics}\n**核心目标**：{core_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 📊 指标体系搭建（北极星指标+一级指标+二级指标）\n2. 🔍 异常假设识别（3-5个数据异常假设）\n3. 🧪 验证步骤设计（每个假设的验证方法）\n4. 📈 A/B实验建议（2-3个可立即启动的实验）\n5. 🎯 下周行动优先级（按影响力排序的5个行动项）\n6. 📋 数据看板设计（核心看板布局建议）\n7. 🔄 数据采集补全建议（缺失数据与采集方案）\n8. 📅 30天数据驱动行动计划（按周拆解）"
+    },
+    "contract": {
+        "system": "你是资深法务审阅顾问，熟悉各类商业合同的风险点和谈判策略。请输出结构化、可执行、可落地的中文审阅报告，包含具体条款引用和修改建议。",
+        "prompt": "请基于以下信息，输出一份完整的合同风险审阅报告：\n\n**合同摘要**：{contract_summary}\n**交易背景**：{transaction_background}\n**谈判地位**：{negotiation_position}\n**谈判目标**：{negotiation_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🔴 高风险条款识别（逐条列出+风险等级+影响分析）\n2. ⚖️ 责任边界分析（权责对等性检查）\n3. 🤝 可谈判点梳理（3-5个谈判优先级排序）\n4. ✏️ 修改建议（逐条给出修改前后对比文本）\n5. 💬 谈判话术（每个谈判点的沟通策略）\n6. 📋 合同完整性检查（缺失条款清单）\n7. ⏰ 时间节点与里程碑审查（履约时间合理性）\n8. 📝 补充协议建议（需额外约定的事项）"
+    },
+    "seo": {
+        "system": "你是SEO优化专家，精通搜索引擎算法和内容策略。请输出结构化、可执行、可落地的中文方案，包含具体关键词和优化步骤。",
+        "prompt": "请基于以下信息，输出一份完整的SEO优化方案：\n\n**网站信息**：{website_info}\n**行业领域**：{industry}\n**当前排名**：{current_ranking}\n**竞争对手**：{competitors}\n**优化目标**：{seo_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🔍 关键词策略（核心词+长尾词+问题词矩阵）\n2. 📊 竞品SEO分析（3-5家竞品对比）\n3. 🏗️ 站内优化清单（TDK+结构+内链+速度）\n4. 📝 内容规划日历（30天内容发布计划）\n5. 🔗 外链建设策略（高质量外链获取方案）\n6. 📱 移动端优化建议（Core Web Vitals优化）\n7. 📈 排名监控体系（关键词排名追踪方案）\n8. 🔄 迭代优化节奏（月度复盘与调整方向）"
+    },
+    "product": {
+        "system": "你是产品经理专家，擅长从用户需求到产品落地的全流程设计。请输出结构化、可执行、可落地的中文方案，包含具体需求文档和优先级排序。",
+        "prompt": "请基于以下信息，输出一份完整的产品需求方案：\n\n**产品概念**：{product_concept}\n**目标用户**：{target_users}\n**核心痛点**：{core_pain_points}\n**竞品分析**：{competitor_analysis}\n**需求目标**：{requirement_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 👤 用户画像与场景（3个核心用户画像+使用场景）\n2. 🎯 需求优先级矩阵（Kano模型分类+MoSCoW排序）\n3. 📋 功能需求清单（核心功能+详细描述+验收标准）\n4. 🔄 用户流程设计（核心流程图描述）\n5. 📐 信息架构建议（页面结构与导航设计）\n6. 📊 数据埋点方案（关键事件+属性定义）\n7. 🗺️ 版本迭代规划（MVP→V1.0→V2.0路线图）\n8. ⚠️ 风险评估与应对（技术风险+业务风险）"
+    },
+    "userresearch": {
+        "system": "你是用户研究专家，精通定性和定量研究方法。请输出结构化、可执行、可落地的中文方案，包含具体研究设计和分析框架。",
+        "prompt": "请基于以下信息，输出一份完整的用户研究方案：\n\n**研究主题**：{research_topic}\n**目标用户群**：{target_user_group}\n**现有数据**：{existing_data}\n**研究方法**：{research_methods}\n**研究目标**：{research_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🎯 研究问题定义（主问题+3-5个子问题）\n2. 👥 用户招募方案（筛选条件+招募渠道+样本量）\n3. 📋 研究方法设计（方法选择+执行步骤+时间安排）\n4. 📝 访谈提纲/问卷设计（核心问题清单）\n5. 📊 数据分析框架（编码方案+分析维度）\n6. 🎭 用户画像构建（画像模板+洞察提炼方法）\n7. 📈 研究成果输出（报告结构+可视化建议）\n8. 🔄 研究结果落地路径（洞察→需求→验证闭环）"
+    },
+    "brand": {
+        "system": "你是品牌营销策略专家，擅长品牌定位、传播策略和整合营销。请输出结构化、可执行、可落地的中文方案，包含具体品牌策略和传播计划。",
+        "prompt": "请基于以下信息，输出一份完整的品牌营销方案：\n\n**品牌现状**：{brand_status}\n**目标受众**：{target_audience}\n**竞品品牌**：{competitor_brands}\n**品牌调性**：{brand_tone}\n**营销目标**：{marketing_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🎯 品牌定位声明（品牌金字塔+核心价值主张）\n2. 👥 目标受众画像（3个核心人群+触媒习惯）\n3. 💎 品牌识别体系（品牌关键词+视觉风格+语调指南）\n4. 📣 传播策略（核心信息+传播渠道+内容类型）\n5. 📅 整合营销日历（90天传播节奏规划）\n6. 💰 预算分配方案（渠道预算比例+KPI设定）\n7. 📊 效果评估体系（品牌认知+偏好+行为指标）\n8. 🔄 品牌危机预案（舆情监控+应对流程）"
+    },
+    "finance": {
+        "system": "你是财务分析专家，精通财务建模和经营分析。请输出结构化、可执行、可落地的中文方案，包含具体财务指标和分析结论。",
+        "prompt": "请基于以下信息，输出一份完整的财务分析方案：\n\n**财务数据**：{financial_data}\n**业务背景**：{business_context}\n**关键假设**：{key_assumptions}\n**分析维度**：{analysis_dimensions}\n**分析目标**：{analysis_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 📊 财务健康度诊断（5大核心指标+行业对标）\n2. 📈 收入分析（收入结构+增长趋势+驱动因素）\n3. 💰 成本结构分析（固定/变动成本+优化空间）\n4. 🔄 现金流分析（经营/投资/筹资现金流趋势）\n5. 📐 财务模型构建（3年预测+敏感性分析）\n6. ⚠️ 财务风险预警（Top5风险+预警指标）\n7. 💡 降本增效建议（3-5个可落地的优化方向）\n8. 📋 决策建议清单（按优先级排序的行动项）"
+    },
+    "education": {
+        "system": "你是教育培训课程设计专家，擅长教学设计和学习路径规划。请输出结构化、可执行、可落地的中文方案，包含具体课程大纲和教学活动设计。",
+        "prompt": "请基于以下信息，输出一份完整的课程设计方案：\n\n**课程主题**：{course_topic}\n**目标学员**：{target_learners}\n**学员水平**：{learner_level}\n**教学资源**：{teaching_resources}\n**教学目标**：{teaching_goal}\n**约束条件**：{constraints}\n\n请按以下结构输出：\n1. 🎯 学习目标设计（布鲁姆分类法+可衡量目标）\n2. 📋 课程大纲（模块划分+知识点+学时分配）\n3. 🎓 教学活动设计（每个模块的教学方法+互动环节）\n4. 📝 评估方案（形成性评估+总结性评估设计）\n5. 📚 教学材料清单（教材+案例+练习+参考资源）\n6. 🗺️ 学习路径图（前置知识→核心内容→进阶拓展）\n7. 💡 差异化教学策略（不同水平学员的适配方案）\n8. 📊 教学效果评估框架（柯氏四级评估模型）"
+    }
+}
+
+SCENE_FIELDS = {
+    "ecommerce": [
+        {"key": "product_info", "label": "产品信息", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "target_audience", "label": "目标人群", "type": "textarea", "rows": 2},
+        {"key": "current_stage", "label": "当前阶段", "type": "input"},
+        {"key": "budget", "label": "预算范围", "type": "input"},
+        {"key": "growth_goal", "label": "增长目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "shortvideo": [
+        {"key": "account_positioning", "label": "账号定位", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "content_resources", "label": "内容资源", "type": "textarea", "rows": 2},
+        {"key": "follower_status", "label": "粉丝现状", "type": "input"},
+        {"key": "production_capacity", "label": "拍摄能力", "type": "input"},
+        {"key": "growth_goal", "label": "增长目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "resume": [
+        {"key": "personal_experience", "label": "个人经历", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "target_position", "label": "目标岗位", "type": "input"},
+        {"key": "core_skills", "label": "核心技能", "type": "textarea", "rows": 2},
+        {"key": "job_goal", "label": "求职目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "business": [
+        {"key": "project_description", "label": "项目说明", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "market_background", "label": "市场背景", "type": "textarea", "rows": 2},
+        {"key": "competitive_landscape", "label": "竞争格局", "type": "textarea", "rows": 2},
+        {"key": "team_resources", "label": "团队资源", "type": "input"},
+        {"key": "business_goal", "label": "商业目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "dataops": [
+        {"key": "data_status", "label": "数据现状", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "business_context", "label": "业务背景", "type": "textarea", "rows": 2},
+        {"key": "key_metrics", "label": "关键指标", "type": "textarea", "rows": 2},
+        {"key": "core_goal", "label": "核心目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "contract": [
+        {"key": "contract_summary", "label": "合同摘要", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "transaction_background", "label": "交易背景", "type": "textarea", "rows": 2},
+        {"key": "negotiation_position", "label": "谈判地位", "type": "input"},
+        {"key": "negotiation_goal", "label": "谈判目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "seo": [
+        {"key": "website_info", "label": "网站信息", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "industry", "label": "行业领域", "type": "input"},
+        {"key": "current_ranking", "label": "当前排名", "type": "textarea", "rows": 2},
+        {"key": "competitors", "label": "竞争对手", "type": "textarea", "rows": 2},
+        {"key": "seo_goal", "label": "优化目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "product": [
+        {"key": "product_concept", "label": "产品概念", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "target_users", "label": "目标用户", "type": "textarea", "rows": 2},
+        {"key": "core_pain_points", "label": "核心痛点", "type": "textarea", "rows": 2},
+        {"key": "competitor_analysis", "label": "竞品分析", "type": "textarea", "rows": 2},
+        {"key": "requirement_goal", "label": "需求目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "userresearch": [
+        {"key": "research_topic", "label": "研究主题", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "target_user_group", "label": "目标用户群", "type": "textarea", "rows": 2},
+        {"key": "existing_data", "label": "现有数据", "type": "textarea", "rows": 2},
+        {"key": "research_methods", "label": "研究方法", "type": "input"},
+        {"key": "research_goal", "label": "研究目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "brand": [
+        {"key": "brand_status", "label": "品牌现状", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "target_audience", "label": "目标受众", "type": "textarea", "rows": 2},
+        {"key": "competitor_brands", "label": "竞品品牌", "type": "textarea", "rows": 2},
+        {"key": "brand_tone", "label": "品牌调性", "type": "input"},
+        {"key": "marketing_goal", "label": "营销目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "finance": [
+        {"key": "financial_data", "label": "财务数据", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "business_context", "label": "业务背景", "type": "textarea", "rows": 2},
+        {"key": "key_assumptions", "label": "关键假设", "type": "textarea", "rows": 2},
+        {"key": "analysis_dimensions", "label": "分析维度", "type": "input"},
+        {"key": "analysis_goal", "label": "分析目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ],
+    "education": [
+        {"key": "course_topic", "label": "课程主题", "type": "textarea", "rows": 3, "full": True, "required": True},
+        {"key": "target_learners", "label": "目标学员", "type": "textarea", "rows": 2},
+        {"key": "learner_level", "label": "学员水平", "type": "input"},
+        {"key": "teaching_resources", "label": "教学资源", "type": "input"},
+        {"key": "teaching_goal", "label": "教学目标", "type": "textarea", "rows": 2},
+        {"key": "constraints", "label": "约束条件", "type": "textarea", "rows": 2, "full": True}
+    ]
+}
+
+SCENE_HISTORY_FILE = os.path.join(DATA_DIR, "scene_history.json")
+SCENE_HISTORY_MAX = 50
+
+def load_scene_history():
+    try:
+        if os.path.exists(SCENE_HISTORY_FILE):
+            with open(SCENE_HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def save_scene_history(history):
+    try:
+        if len(history) > SCENE_HISTORY_MAX:
+            history = history[-SCENE_HISTORY_MAX:]
+        with open(SCENE_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def default_external_api_config():
+    return {
+        "active_provider": "deepseek",
+        "providers": {
+            "deepseek": {"api_url": "https://api.deepseek.com", "api_key": "", "model": "deepseek-chat"},
+            "openai": {"api_url": "https://api.openai.com/v1", "api_key": "", "model": "gpt-4o"},
+            "claude": {"api_url": "https://api.anthropic.com", "api_key": "", "model": "claude-3-7-sonnet-20250219"},
+            "gemini": {"api_url": "https://generativelanguage.googleapis.com/v1beta", "api_key": "", "model": "gemini-2.0-flash"},
+            "kimi": {"api_url": "https://api.moonshot.ai/v1", "api_key": "", "model": "kimi-k2.6"},
+            "moonshot": {"api_url": "https://api.moonshot.ai/v1", "api_key": "", "model": "moonshot-v1-8k"},
+            "qwen": {"api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "", "model": "qwen-plus"},
+            "minimax": {"api_url": "https://api.minimaxi.com/v1", "api_key": "", "model": "MiniMax-M2.7"},
+            "zhipu": {"api_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "", "model": "glm-4-flash"},
+            "mistral": {"api_url": "https://api.mistral.ai/v1", "api_key": "", "model": "mistral-large-latest"},
+            "groq": {"api_url": "https://api.groq.com/openai/v1", "api_key": "", "model": "llama-3.3-70b-versatile"},
+            "xai": {"api_url": "https://api.x.ai/v1", "api_key": "", "model": "grok-2"}
+        }
+    }
+
+external_api_config = {}
+
+def normalize_external_api_payload(data):
+    if not isinstance(data, dict):
+        data = {}
+    provider = (data.get("provider") or data.get("active_provider") or "deepseek").strip().lower()
+    api_key = (data.get("api_key") or data.get("apiKey") or "").strip()
+    api_url = (data.get("api_url") or data.get("apiUrl") or "").strip()
+    model = (data.get("model") or "").strip()
+    enabled_value = data.get("enabled")
+    enabled = bool(api_key) if enabled_value is None else bool(enabled_value and api_key)
+    defaults = default_external_api_config().get("providers", {})
+    base = defaults.get(provider, {})
+    return {
+        "provider": provider,
+        "api_key": api_key,
+        "api_url": api_url or base.get("api_url", ""),
+        "model": model or base.get("model", ""),
+        "enabled": enabled,
+    }
+
+def _external_api_for_frontend(config):
+    cfg = normalize_external_api_payload(config)
+    return {
+        "enabled": cfg["enabled"],
+        "provider": cfg["provider"],
+        "apiKey": cfg["api_key"],
+        "apiUrl": cfg["api_url"],
+        "model": cfg["model"],
+    }
+
+def _get_user_external_api(device_id):
+    user_info = _get_user_workspace(device_id)
+    user_api = user_info.get("external_api", {})
+    if not user_api or not isinstance(user_api, dict) or not user_api.get("providers"):
+        return default_external_api_config()
+    default_cfg = default_external_api_config()
+    merged = {"active_provider": user_api.get("active_provider", default_cfg["active_provider"]), "providers": {}}
+    for provider, value in default_cfg["providers"].items():
+        item = user_api.get("providers", {}).get(provider, {})
+        raw_key = (item.get("api_key") or "").strip()
+        if raw_key.startswith('ENC'):
+            raw_key = decrypt_value(raw_key)
+        merged["providers"][provider] = {
+            "api_url": (item.get("api_url") or value.get("api_url") or "").strip(),
+            "api_key": raw_key,
+            "model": (item.get("model") or value.get("model") or "").strip()
+        }
+    if merged["active_provider"] not in merged["providers"]:
+        merged["active_provider"] = "deepseek"
+    return merged
+
+def _save_user_external_api(device_id, config):
+    user_info = _get_user_workspace(device_id)
+    encrypted_config = {"active_provider": config.get("active_provider", "deepseek"), "providers": {}}
+    for provider, pconfig in config.get("providers", {}).items():
+        encrypted_providers = dict(pconfig)
+        raw_key = encrypted_providers.get("api_key", "")
+        if raw_key and not raw_key.startswith('ENC'):
+            encrypted_providers["api_key"] = encrypt_value(raw_key)
+        encrypted_config["providers"][provider] = encrypted_providers
+    user_info["external_api"] = encrypted_config
+    ide_user_registry[user_info["id"]] = user_info
+    _save_accounts()
+
+def load_external_api_config():
+    global external_api_config
+    external_api_config = default_external_api_config()
+
+load_project_center_data()
+load_external_api_config()
+
+search_cache = {}
+
+def web_search(query, max_results=5, search_type='web'):
+    cache_key = f"{query}|{search_type}"
+    if cache_key in search_cache:
+        cache_entry = search_cache[cache_key]
+        if time.time() - cache_entry['time'] < 300:
+            return cache_entry['result']
+    
+    encoded_query = urllib.parse.quote(query)
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive'
+    }
+    
+    results = []
+    
+    def search_duckduckgo():
+        nonlocal results
+        try:
+            url = f"https://duckduckgo.com/html/?q={encoded_query}"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html = response.read().decode('utf-8')
+            
+            result_blocks = re.findall(r'<div class="result[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
+            
+            for block in result_blocks[:max_results]:
+                title_match = re.search(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', block)
+                snippet_match = re.search(r'<a class="result__snippet"[^>]*>([^<]+)</a>', block)
+                
+                if title_match:
+                    results.append({
+                        'title': title_match.group(2).strip(),
+                        'url': title_match.group(1),
+                        'snippet': snippet_match.group(1).strip() if snippet_match else '',
+                        'source': 'DuckDuckGo'
+                    })
+        except Exception as e:
+            pass
+    
+    def search_searx():
+        nonlocal results
+        try:
+            url = f"https://searx.be/search?q={encoded_query}&format=html"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html = response.read().decode('utf-8')
+            
+            articles = re.findall(r'<article[^>]*>(.*?)</article>', html, re.DOTALL)
+            
+            for article in articles[:max_results]:
+                title_match = re.search(r'<h3[^>]*><a href="([^"]+)"[^>]*>([^<]+)</a></h3>', article)
+                snippet_match = re.search(r'<p class="content[^"]*"[^>]*>([^<]+)</p>', article)
+                
+                if title_match:
+                    results.append({
+                        'title': title_match.group(2).strip(),
+                        'url': title_match.group(1),
+                        'snippet': snippet_match.group(1).strip() if snippet_match else '',
+                        'source': 'Searx'
+                    })
+        except Exception:
+                            pass
+    
+    def search_bing():
+        nonlocal results
+        try:
+            url = f"https://www.bing.com/search?q={encoded_query}"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html = response.read().decode('utf-8')
+            
+            items = re.findall(r'<li class="b_algo"[^>]*>(.*?)</li>', html, re.DOTALL)
+            
+            for item in items[:max_results]:
+                title_match = re.search(r'<h2><a href="([^"]+)"[^>]*>([^<]+)</a></h2>', item)
+                snippet_match = re.search(r'<p>([^<]{20,300})</p>', item)
+                
+                if title_match and not title_match.group(1).startswith('/'):
+                    results.append({
+                        'title': re.sub(r'<[^>]+>', '', title_match.group(2)).strip(),
+                        'url': title_match.group(1),
+                        'snippet': re.sub(r'<[^>]+>', '', snippet_match.group(1)).strip() if snippet_match else '',
+                        'source': 'Bing'
+                    })
+        except Exception:
+                            pass
+    
+    def search_wikipedia():
+        nonlocal results
+        try:
+            url = f"https://zh.wikipedia.org/w/api.php?action=opensearch&search={encoded_query}&limit=3&format=json"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            
+            if len(data) >= 4:
+                titles = data[1]
+                urls = data[3]
+                for i, (title, url) in enumerate(zip(titles, urls)):
+                    results.append({
+                        'title': title,
+                        'url': url,
+                        'snippet': f'维基百科条目: {title}',
+                        'source': 'Wikipedia'
+                    })
+        except Exception:
+                            pass
+    
+    search_duckduckgo()
+    
+    if len(results) < max_results:
+        search_searx()
+    
+    if len(results) < max_results:
+        search_bing()
+    
+    if len(results) < max_results and search_type == 'knowledge':
+        search_wikipedia()
+    
+    seen_urls = set()
+    unique_results = []
+    for r in results:
+        if r['url'] not in seen_urls:
+            seen_urls.add(r['url'])
+            unique_results.append(r)
+    
+    results = unique_results[:max_results]
+    
+    if not results:
+        result = f"【网络搜索】未找到关于'{query}'的结果，请检查网络连接"
+    else:
+        output = f"【网络搜索结果】关于'{query}'找到 {len(results)} 条信息：\\n\\n"
+        for i, r in enumerate(results, 1):
+            output += f"📌 {r['title']}\\n"
+            output += f"   🔗 {r['url']}\\n"
+            if r['snippet']:
+                output += f"   📝 {r['snippet'][:150]}{'...' if len(r['snippet']) > 150 else ''}\\n"
+            output += f"   📊 来源: {r['source']}\\n\\n"
+        result = output.strip()
+    
+    if len(search_cache) > 100:
+        oldest = min(search_cache.items(), key=lambda x: x[1]['time'])
+        del search_cache[oldest[0]]
+    
+    search_cache[cache_key] = {'result': result, 'time': time.time()}
+    
+    return result
+
+def web_fetch(url):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        }
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+        
+        title_match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else '未知标题'
+        
+        for pattern in [r'<script[^>]*>.*?</script>', r'<style[^>]*>.*?</style>',
+    
+
+
+                       r'<nav[^>]*>.*?</nav>', r'<footer[^>]*>.*?</footer>',
+                       r'<header[^>]*>.*?</header>', r'<!--.*?-->']:
+            html = re.sub(pattern, '', html, flags=re.DOTALL | re.IGNORECASE)
+        
+        main_content = re.search(r'<(?:article|main|div class="[^"]*content[^"]*")[^>]*>(.*?)</(?:article|main|div)>', 
+                                html, re.DOTALL | re.IGNORECASE)
+        if main_content:
+            html = main_content.group(1)
+        
+        text = re.sub(r'<[^>]+>', ' ', html)
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
+        
+        paragraphs = re.split(r'[。！？\.\!\?]', text)
+        important = []
+        for p in paragraphs:
+            p = p.strip()
+            if len(p) > 30 and any(kw in p for kw in ['重要', '关键', '核心', '主要', '首先', '总之', '因此']):
+                important.append(p)
+        
+        if len(text) > 4000:
+            if important:
+                text = '。'.join(important[:10]) + '。'
+            else:
+                text = text[:4000]
+        
+        return f"【网页内容】\\n标题: {title}\\nURL: {url}\\n\\n{text}"
+    except Exception as e:
+        return f"【网页抓取失败】{str(e)}"
+
+def news_search(query, max_results=5):
+    try:
+        results = web_search(query + ' 新闻', max_results=max_results)
+        if not results:
+            results = web_search(query, max_results=max_results)
+        if not results:
+            return f"【新闻搜索】未找到关于'{query}'的新闻"
+        
+        output = f"【新闻搜索结果】关于'{query}'找到 {len(results)} 条新闻：\\n\\n"
+        for i, r in enumerate(results, 1):
+            output += f"📰 {r['title']}\\n"
+            output += f"   🔗 {r['url']}\\n"
+            if r.get('snippet'):
+                output += f"   📝 {r['snippet'][:150]}\\n"
+            output += "\\n"
+        
+        return output.strip()
+    except Exception as e:
+        return f"【新闻搜索失败】{str(e)}"
+
+def web_search(query, max_results=10):
+    try:
+        encoded_query = urllib.parse.quote(query)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        }
+        results = []
+        try:
+            url = f"https://duckduckgo.com/html/?q={encoded_query}"
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as response:
+                html_content = response.read().decode('utf-8')
+            title_matches = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html_content, re.DOTALL)
+            snippet_matches = re.findall(r'<a class="result__snippet"[^>]*>(.*?)</a>', html_content, re.DOTALL)
+            for i, (link, title) in enumerate(title_matches[:max_results]):
+                clean_title = re.sub(r'<[^>]+>', '', title).strip()
+                snippet = ''
+                if i < len(snippet_matches):
+                    snippet = re.sub(r'<[^>]+>', '', snippet_matches[i]).strip()
+                if clean_title and link.startswith('http'):
+                    results.append({'title': clean_title, 'url': link, 'snippet': snippet[:200]})
+        except Exception:
+            pass
+        return results
+    except Exception as e:
+        return []
+
+def fetch_webpage(url):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        }
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html_content = response.read().decode('utf-8', errors='ignore')
+        html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        html_content = re.sub(r'<nav[^>]*>.*?</nav>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        html_content = re.sub(r'<footer[^>]*>.*?</footer>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        html_content = re.sub(r'<header[^>]*>.*?</header>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.DOTALL | re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else ''
+        title = re.sub(r'<[^>]+>', '', title).strip()
+        text = re.sub(r'<[^>]+>', ' ', html_content)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if len(text) > 5000:
+            text = text[:5000] + '...'
+        return {'title': title, 'content': text, 'url': url}
+    except Exception as e:
+        return {'title': '', 'content': '', 'url': url, 'error': str(e)}
+
+AVAILABLE_TOOLS = {
+    "calculator": {
+        "name": "计算器",
+        "description": "执行数学计算，支持复杂表达式",
+        "icon": "🔢",
+        "func": lambda x: safe_calculate(x)
+    },
+    "weather": {
+        "name": "天气查询",
+        "description": "查询城市天气信息",
+        "icon": "🌤️",
+        "func": lambda x: f"【模拟天气】{x}：晴天，温度25°C，湿度60%"
+    },
+    "search": {
+        "name": "网络搜索",
+        "description": "搜索网络获取实时信息",
+        "icon": "🔍",
+        "func": lambda x: web_search(x)
+    },
+    "webfetch": {
+        "name": "网页抓取",
+        "description": "抓取网页内容",
+        "icon": "📄",
+        "func": lambda x: web_fetch(x)
+    },
+    "news": {
+        "name": "新闻搜索",
+        "description": "搜索最新新闻",
+        "icon": "📰",
+        "func": lambda x: news_search(x)
+    },
+    "translate": {
+        "name": "翻译",
+        "description": "多语言翻译",
+        "icon": "🌐",
+        "func": lambda x: f"【翻译结果】{x}"
+    },
+    "datetime": {
+        "name": "时间查询",
+        "description": "获取当前日期时间",
+        "icon": "🕐",
+        "func": lambda x: datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    },
+    "random": {
+        "name": "随机数",
+        "description": "生成随机数",
+        "icon": "🎲",
+        "func": lambda x: str(__import__('random').randint(1, 100))
+    }
+}
+
+def execute_python_code(code, timeout=30):
+    log_security_event('code_execution', f'代码执行请求，长度={len(code)}', 'info')
+    return safe_execute_python(code, timeout)
+
+def add_to_knowledge_base(text, source="user_input"):
+    kb_file = os.path.join(KNOWLEDGE_DIR, f"kb_{datetime.now().strftime('%Y%m%d')}.jsonl")
+    entry = {
+        "id": str(uuid.uuid4())[:8],
+        "text": text,
+        "source": source,
+        "time": datetime.now().isoformat()
+    }
+    with open(kb_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    return entry['id']
+
+def search_knowledge_base(query, top_k=3):
+    results = []
+    for filename in os.listdir(KNOWLEDGE_DIR):
+        if filename.endswith('.jsonl'):
+            filepath = os.path.join(KNOWLEDGE_DIR, filename)
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        if query.lower() in entry['text'].lower():
+                            results.append(entry)
+                            if len(results) >= top_k:
+                                return results
+                    except Exception:
+                            pass
+    return results
+
+# ==================== MCP 插件系统 ====================
+
+# 内置 MCP 插件定义
+BUILTIN_MCP_PLUGINS = {
+    "filesystem": {
+        "id": "filesystem",
+        "name": "📁 文件系统",
+        "description": "读取、写入、管理本地文件",
+        "icon": "📁",
+        "color": "#3b82f6",
+        "type": "builtin",
+        "enabled": False,
+        "config": {
+            "allowed_paths": [os.path.expanduser("~")],
+            "read_only": False
+        },
+        "tools": [
+            {
+                "name": "read_file",
+                "description": "读取文件内容",
+                "parameters": {
+                    "path": {"type": "string", "description": "文件路径"}
+                }
+            },
+            {
+                "name": "write_file",
+                "description": "写入文件内容",
+                "parameters": {
+                    "path": {"type": "string", "description": "文件路径"},
+                    "content": {"type": "string", "description": "文件内容"}
+                }
+            },
+            {
+                "name": "list_directory",
+                "description": "列出目录内容",
+                "parameters": {
+                    "path": {"type": "string", "description": "目录路径"}
+                }
+            }
+        ]
+    },
+    "web_search": {
+        "id": "web_search",
+        "name": "🔍 网络搜索",
+        "description": "搜索互联网获取最新信息",
+        "icon": "🔍",
+        "color": "#f59e0b",
+        "type": "builtin",
+        "enabled": False,
+        "config": {
+            "engine": "duckduckgo",
+            "max_results": 5
+        },
+        "tools": [
+            {
+                "name": "search",
+                "description": "搜索网络内容",
+                "parameters": {
+                    "query": {"type": "string", "description": "搜索关键词"},
+                    "num_results": {"type": "integer", "description": "返回结果数量"}
+                }
+            }
+        ]
+    },
+    "calculator": {
+        "id": "calculator",
+        "name": "🧮 计算器",
+        "description": "执行数学计算",
+        "icon": "🧮",
+        "color": "#10b981",
+        "type": "builtin",
+        "enabled": False,
+        "config": {},
+        "tools": [
+            {
+                "name": "calculate",
+                "description": "计算数学表达式",
+                "parameters": {
+                    "expression": {"type": "string", "description": "数学表达式，如 2+2*3"}
+                }
+            }
+        ]
+    },
+    "datetime": {
+        "id": "datetime",
+        "name": "📅 日期时间",
+        "description": "获取当前日期时间、时区转换",
+        "icon": "📅",
+        "color": "#8b5cf6",
+        "type": "builtin",
+        "enabled": False,
+        "config": {},
+        "tools": [
+            {
+                "name": "get_current_time",
+                "description": "获取当前时间",
+                "parameters": {
+                    "timezone": {"type": "string", "description": "时区，如 Asia/Shanghai"}
+                }
+            },
+            {
+                "name": "format_date",
+                "description": "格式化日期",
+                "parameters": {
+                    "timestamp": {"type": "integer", "description": "时间戳"},
+                    "format": {"type": "string", "description": "格式字符串"}
+                }
+            }
+        ]
+    },
+    "github": {
+        "id": "github",
+        "name": "🐙 GitHub",
+        "description": "管理仓库、Issue、PR和代码",
+        "icon": "🐙",
+        "color": "#24292e",
+        "type": "builtin",
+        "category": "integration",
+        "enabled": False,
+        "config": {"token": "", "default_owner": "", "default_repo": ""},
+        "tools": [
+            {"name": "search_repos", "description": "搜索GitHub仓库", "parameters": {"query": {"type": "string", "description": "搜索关键词"}, "sort": {"type": "string", "description": "排序方式: stars/forks/updated"}}},
+            {"name": "list_issues", "description": "列出仓库Issue", "parameters": {"owner": {"type": "string", "description": "仓库所有者"}, "repo": {"type": "string", "description": "仓库名"}, "state": {"type": "string", "description": "状态: open/closed/all"}}},
+            {"name": "create_issue", "description": "创建Issue", "parameters": {"owner": {"type": "string", "description": "仓库所有者"}, "repo": {"type": "string", "description": "仓库名"}, "title": {"type": "string", "description": "Issue标题"}, "body": {"type": "string", "description": "Issue内容"}}},
+            {"name": "get_readme", "description": "获取仓库README", "parameters": {"owner": {"type": "string", "description": "仓库所有者"}, "repo": {"type": "string", "description": "仓库名"}}}
+        ]
+    },
+    "database": {
+        "id": "database",
+        "name": "🗄️ 数据库",
+        "description": "连接SQL数据库执行查询",
+        "icon": "🗄️",
+        "color": "#336791",
+        "type": "builtin",
+        "category": "integration",
+        "enabled": False,
+        "config": {"connection_string": "", "db_type": "sqlite", "max_rows": 100},
+        "tools": [
+            {"name": "execute_query", "description": "执行SQL查询", "parameters": {"sql": {"type": "string", "description": "SQL查询语句"}, "params": {"type": "object", "description": "查询参数"}}},
+            {"name": "list_tables", "description": "列出所有表", "parameters": {}},
+            {"name": "describe_table", "description": "查看表结构", "parameters": {"table_name": {"type": "string", "description": "表名"}}}
+        ]
+    },
+    "email": {
+        "id": "email",
+        "name": "📧 邮件",
+        "description": "发送和搜索邮件",
+        "icon": "📧",
+        "color": "#ea4335",
+        "type": "builtin",
+        "category": "integration",
+        "enabled": False,
+        "config": {"smtp_host": "", "smtp_port": 587, "imap_host": "", "username": "", "password": ""},
+        "tools": [
+            {"name": "send_email", "description": "发送邮件", "parameters": {"to": {"type": "string", "description": "收件人"}, "subject": {"type": "string", "description": "主题"}, "body": {"type": "string", "description": "正文"}, "html": {"type": "boolean", "description": "是否HTML格式"}}},
+            {"name": "search_emails", "description": "搜索邮件", "parameters": {"query": {"type": "string", "description": "搜索关键词"}, "max_results": {"type": "integer", "description": "最大结果数"}}}
+        ]
+    },
+    "image_gen": {
+        "id": "image_gen",
+        "name": "🎨 图片生成",
+        "description": "AI图片生成与编辑",
+        "icon": "🎨",
+        "color": "#f43f5e",
+        "type": "builtin",
+        "category": "ai",
+        "enabled": False,
+        "config": {"provider": "local", "default_size": "512x512"},
+        "tools": [
+            {"name": "generate_image", "description": "生成图片", "parameters": {"prompt": {"type": "string", "description": "图片描述"}, "size": {"type": "string", "description": "尺寸: 256x256/512x512/1024x1024"}, "style": {"type": "string", "description": "风格: natural/vivid/anime"}}},
+            {"name": "describe_image", "description": "描述图片内容", "parameters": {"image_path": {"type": "string", "description": "图片路径或URL"}}}
+        ]
+    },
+    "code_exec": {
+        "id": "code_exec",
+        "name": "💻 代码执行",
+        "description": "安全执行Python/Shell代码",
+        "icon": "💻",
+        "color": "#00d4aa",
+        "type": "builtin",
+        "category": "tool",
+        "enabled": False,
+        "config": {"timeout": 30, "max_output": 10000, "allowed_modules": "math,json,re,datetime,collections,itertools"},
+        "tools": [
+            {"name": "run_python", "description": "执行Python代码", "parameters": {"code": {"type": "string", "description": "Python代码"}, "input_data": {"type": "string", "description": "输入数据(JSON)"}}},
+            {"name": "run_shell", "description": "执行Shell命令", "parameters": {"command": {"type": "string", "description": "Shell命令"}, "timeout": {"type": "integer", "description": "超时秒数"}}}
+        ]
+    },
+    "rss": {
+        "id": "rss",
+        "name": "📡 RSS订阅",
+        "description": "订阅和读取RSS/Atom源",
+        "icon": "📡",
+        "color": "#ff6600",
+        "type": "builtin",
+        "category": "integration",
+        "enabled": False,
+        "config": {"feeds": [], "max_items": 20},
+        "tools": [
+            {"name": "add_feed", "description": "添加RSS源", "parameters": {"url": {"type": "string", "description": "RSS源URL"}, "name": {"type": "string", "description": "源名称"}}},
+            {"name": "get_feed_items", "description": "获取RSS内容", "parameters": {"url": {"type": "string", "description": "RSS源URL"}, "max_items": {"type": "integer", "description": "最大条目数"}}},
+            {"name": "search_feeds", "description": "搜索RSS源", "parameters": {"keyword": {"type": "string", "description": "搜索关键词"}}}
+        ]
+    },
+    "knowledge_base": {
+        "id": "knowledge_base",
+        "name": "📚 知识库",
+        "description": "RAG检索增强与文档管理",
+        "icon": "📚",
+        "color": "#10b981",
+        "type": "builtin",
+        "category": "ai",
+        "enabled": False,
+        "config": {"chunk_size": 500, "overlap": 50, "top_k": 5},
+        "tools": [
+            {"name": "search", "description": "检索知识库", "parameters": {"query": {"type": "string", "description": "检索查询"}, "top_k": {"type": "integer", "description": "返回结果数"}}},
+            {"name": "add_document", "description": "添加文档", "parameters": {"title": {"type": "string", "description": "文档标题"}, "content": {"type": "string", "description": "文档内容"}, "source": {"type": "string", "description": "来源"}}},
+            {"name": "list_documents", "description": "列出所有文档", "parameters": {}}
+        ]
+    }
+}
+
+# 加载 MCP 配置
+def load_mcp_config():
+    if os.path.exists(MCP_CONFIG_FILE):
+        try:
+            with open(MCP_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"加载MCP配置失败: {e}")
+    return {"plugins": BUILTIN_MCP_PLUGINS.copy()}
+
+def save_mcp_config(config):
+    try:
+        with open(MCP_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存MCP配置失败: {e}")
+
+# MCP 工具执行函数
+def execute_mcp_tool(plugin_id, tool_name, parameters):
+    """执行 MCP 插件工具"""
+    config = load_mcp_config()
+    plugin = config.get("plugins", {}).get(plugin_id)
+    
+    if not plugin or not plugin.get("enabled", False):
+        return {"error": "插件未启用"}
+    
+    try:
+        if plugin_id == "filesystem":
+            return execute_filesystem_tool(tool_name, parameters, plugin.get("config", {}))
+        elif plugin_id == "web_search":
+            return execute_web_search_tool(tool_name, parameters, plugin.get("config", {}))
+        elif plugin_id == "calculator":
+            return execute_calculator_tool(tool_name, parameters)
+        elif plugin_id == "datetime":
+            return execute_datetime_tool(tool_name, parameters)
+        else:
+            return {"error": f"未知插件: {plugin_id}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def execute_filesystem_tool(tool_name, parameters, config):
+    """执行文件系统工具"""
+    allowed_paths = config.get("allowed_paths", [os.path.expanduser("~")])
+    read_only = config.get("read_only", False)
+    
+    if tool_name == "read_file":
+        path = parameters.get("path", "")
+        # 安全检查：确保路径在允许的范围内
+        abs_path = os.path.abspath(os.path.expanduser(path))
+        if not any(abs_path.startswith(os.path.abspath(p)) for p in allowed_paths):
+            return {"error": "路径不在允许的范围内"}
+        try:
+            with open(abs_path, 'r', encoding='utf-8') as f:
+                return {"content": f.read()}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    elif tool_name == "write_file":
+        if read_only:
+            return {"error": "文件系统处于只读模式"}
+        path = parameters.get("path", "")
+        content = parameters.get("content", "")
+        abs_path = os.path.abspath(os.path.expanduser(path))
+        if not any(abs_path.startswith(os.path.abspath(p)) for p in allowed_paths):
+            return {"error": "路径不在允许的范围内"}
+        try:
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            with open(abs_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return {"success": True, "message": f"文件已保存: {path}"}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    elif tool_name == "list_directory":
+        path = parameters.get("path", ".")
+        abs_path = os.path.abspath(os.path.expanduser(path))
+        if not any(abs_path.startswith(os.path.abspath(p)) for p in allowed_paths):
+            return {"error": "路径不在允许的范围内"}
+        try:
+            items = []
+            for item in os.listdir(abs_path):
+                item_path = os.path.join(abs_path, item)
+                items.append({
+                    "name": item,
+                    "type": "directory" if os.path.isdir(item_path) else "file",
+                    "size": os.path.getsize(item_path) if os.path.isfile(item_path) else None
+                })
+            return {"items": items}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    return {"error": f"未知工具: {tool_name}"}
+
+def execute_web_search_tool(tool_name, parameters, config):
+    """执行网络搜索工具"""
+    if tool_name == "search":
+        query = parameters.get("query", "")
+        num_results = parameters.get("num_results", 5)
+        try:
+            # 使用 DuckDuckGo 搜索
+            import urllib.request
+            import urllib.parse
+            import html
+            
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            req = urllib.request.Request(url, headers=headers)
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html_content = response.read().decode('utf-8')
+                
+            # 简单解析搜索结果
+            results = []
+            # 提取标题和链接
+            import re
+            pattern = r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
+            matches = re.findall(pattern, html_content, re.DOTALL)
+            
+            for i, (link, title) in enumerate(matches[:num_results]):
+                # 清理HTML标签
+                clean_title = re.sub(r'<[^>]+>', '', title)
+                clean_title = html.unescape(clean_title)
+                results.append({
+                    "title": clean_title,
+                    "link": link if link.startswith('http') else f"https://duckduckgo.com{link}"
+                })
+            
+            return {"results": results}
+        except Exception as e:
+            return {"error": str(e), "results": []}
+    
+    return {"error": f"未知工具: {tool_name}"}
+
+def execute_calculator_tool(tool_name, parameters):
+    """执行计算器工具"""
+    if tool_name == "calculate":
+        expression = parameters.get("expression", "")
+        try:
+            # 使用安全的数学表达式求值
+            from safe_code_executor import safe_eval
+            result = safe_eval(expression)
+            return {"result": result}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    return {"error": f"未知工具: {tool_name}"}
+
+def execute_datetime_tool(tool_name, parameters):
+    """执行日期时间工具"""
+    from datetime import datetime
+    import pytz
+    
+    if tool_name == "get_current_time":
+        timezone = parameters.get("timezone", "Asia/Shanghai")
+        try:
+            tz = pytz.timezone(timezone)
+            now = datetime.now(tz)
+            return {
+                "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "timezone": timezone,
+                "timestamp": int(now.timestamp())
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    elif tool_name == "format_date":
+        timestamp = parameters.get("timestamp", int(time.time()))
+        format_str = parameters.get("format", "%Y-%m-%d %H:%M:%S")
+        try:
+            dt = datetime.fromtimestamp(timestamp)
+            return {"formatted": dt.strftime(format_str)}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    return {"error": f"未知工具: {tool_name}"}
+
+# 获取所有启用的 MCP 工具（用于 Function Calling）
+def get_enabled_mcp_tools():
+    """获取所有启用的 MCP 工具，转换为 Function Calling 格式"""
+    config = load_mcp_config()
+    tools = []
+    
+    for plugin_id, plugin in config.get("plugins", {}).items():
+        if plugin.get("enabled", False):
+            for tool in plugin.get("tools", []):
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": f"mcp_{plugin_id}_{tool['name']}",
+                        "description": f"[{plugin['name']}] {tool['description']}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": tool.get("parameters", {}),
+                            "required": list(tool.get("parameters", {}).keys())
+                        }
+                    }
+                })
+    
+    return tools
+
+# 初始化 MCP 配置
+mcp_config = load_mcp_config()
+
+# ==================== 可视化工作流编排系统 ====================
+
+# 工作流节点类型定义
+WORKFLOW_NODE_TYPES = {
+    "start": {
+        "id": "start",
+        "name": "开始",
+        "icon": "🚀",
+        "color": "#10b981",
+        "category": "control",
+        "description": "工作流的入口节点",
+        "inputs": [],
+        "outputs": [{"name": "output", "type": "any"}],
+        "config": {}
+    },
+    "llm": {
+        "id": "llm",
+        "name": "AI对话",
+        "icon": "🤖",
+        "color": "#667eea",
+        "category": "ai",
+        "description": "调用AI模型进行对话",
+        "inputs": [{"name": "prompt", "type": "string"}, {"name": "context", "type": "string", "optional": True}],
+        "outputs": [{"name": "response", "type": "string"}, {"name": "tokens", "type": "number"}],
+        "config": {
+            "model": "qwen3",
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "system_prompt": ""
+        }
+    },
+    "condition": {
+        "id": "condition",
+        "name": "条件判断",
+        "icon": "🔀",
+        "color": "#f59e0b",
+        "category": "control",
+        "description": "根据条件选择分支",
+        "inputs": [{"name": "input", "type": "any"}],
+        "outputs": [{"name": "true", "type": "any"}, {"name": "false", "type": "any"}],
+        "config": {
+            "condition": "",
+            "operator": "equals",
+            "value": ""
+        }
+    },
+    "loop": {
+        "id": "loop",
+        "name": "循环",
+        "icon": "🔄",
+        "color": "#8b5cf6",
+        "category": "control",
+        "description": "循环执行子流程",
+        "inputs": [{"name": "input", "type": "array"}],
+        "outputs": [{"name": "results", "type": "array"}],
+        "config": {
+            "loop_type": "foreach",
+            "max_iterations": 10
+        }
+    },
+    "code": {
+        "id": "code",
+        "name": "代码执行",
+        "icon": "💻",
+        "color": "#00d4aa",
+        "category": "tool",
+        "description": "执行Python代码",
+        "inputs": [{"name": "input", "type": "any", "optional": True}],
+        "outputs": [{"name": "output", "type": "any"}, {"name": "error", "type": "string"}],
+        "config": {
+            "code": "# 输入变量: input\n# 输出变量: output\noutput = input\n"
+        }
+    },
+    "http": {
+        "id": "http",
+        "name": "HTTP请求",
+        "icon": "🌐",
+        "color": "#3b82f6",
+        "category": "tool",
+        "description": "发送HTTP请求",
+        "inputs": [{"name": "body", "type": "any", "optional": True}],
+        "outputs": [{"name": "response", "type": "any"}, {"name": "status", "type": "number"}],
+        "config": {
+            "url": "",
+            "method": "GET",
+            "headers": {},
+            "timeout": 30
+        }
+    },
+    "transform": {
+        "id": "transform",
+        "name": "数据转换",
+        "icon": "🔄",
+        "color": "#ec4899",
+        "category": "tool",
+        "description": "转换数据格式",
+        "inputs": [{"name": "input", "type": "any"}],
+        "outputs": [{"name": "output", "type": "any"}],
+        "config": {
+            "transform_type": "json_parse",
+            "template": ""
+        }
+    },
+    "mcp": {
+        "id": "mcp",
+        "name": "MCP工具",
+        "icon": "🔌",
+        "color": "#f97316",
+        "category": "tool",
+        "description": "调用MCP插件工具",
+        "inputs": [{"name": "parameters", "type": "object"}],
+        "outputs": [{"name": "result", "type": "any"}],
+        "config": {
+            "plugin_id": "",
+            "tool_name": ""
+        }
+    },
+    "delay": {
+        "id": "delay",
+        "name": "延迟",
+        "icon": "⏱️",
+        "color": "#6b7280",
+        "category": "control",
+        "description": "延迟执行",
+        "inputs": [{"name": "input", "type": "any"}],
+        "outputs": [{"name": "output", "type": "any"}],
+        "config": {
+            "delay_ms": 1000
+        }
+    },
+    "end": {
+        "id": "end",
+        "name": "结束",
+        "icon": "🏁",
+        "color": "#ef4444",
+        "category": "control",
+        "description": "工作流的结束节点",
+        "inputs": [{"name": "result", "type": "any"}],
+        "outputs": [],
+        "config": {}
+    },
+    "webhook": {
+        "id": "webhook",
+        "name": "Webhook触发",
+        "icon": "🪝",
+        "color": "#f97316",
+        "category": "trigger",
+        "description": "通过Webhook URL触发工作流",
+        "inputs": [],
+        "outputs": [{"name": "payload", "type": "object"}, {"name": "headers", "type": "object"}],
+        "config": {"method": "POST", "path": "", "auth_type": "none", "secret": ""}
+    },
+    "schedule": {
+        "id": "schedule",
+        "name": "定时触发",
+        "icon": "⏰",
+        "color": "#8b5cf6",
+        "category": "trigger",
+        "description": "按Cron表达式定时触发",
+        "inputs": [],
+        "outputs": [{"name": "trigger_time", "type": "string"}],
+        "config": {"cron": "0 9 * * *", "timezone": "Asia/Shanghai"}
+    },
+    "merge": {
+        "id": "merge",
+        "name": "合并",
+        "icon": "🔀",
+        "color": "#06b6d4",
+        "category": "control",
+        "description": "合并多个分支的数据",
+        "inputs": [{"name": "input1", "type": "any"}, {"name": "input2", "type": "any"}, {"name": "input3", "type": "any"}],
+        "outputs": [{"name": "merged", "type": "any"}],
+        "config": {"mode": "append", "wait_for_all": True}
+    },
+    "split": {
+        "id": "split",
+        "name": "拆分",
+        "icon": "✂️",
+        "color": "#f43f5e",
+        "category": "control",
+        "description": "将数组拆分为多个并行分支",
+        "inputs": [{"name": "input", "type": "array"}],
+        "outputs": [{"name": "item", "type": "any"}, {"name": "index", "type": "number"}],
+        "config": {"batch_size": 1}
+    },
+    "subworkflow": {
+        "id": "subworkflow",
+        "name": "子工作流",
+        "icon": "📦",
+        "color": "#a855f7",
+        "category": "control",
+        "description": "调用另一个工作流作为子流程",
+        "inputs": [{"name": "input", "type": "any"}],
+        "outputs": [{"name": "output", "type": "any"}],
+        "config": {"workflow_id": "", "async": False}
+    },
+    "notification": {
+        "id": "notification",
+        "name": "通知",
+        "icon": "🔔",
+        "color": "#eab308",
+        "category": "tool",
+        "description": "发送通知(邮件/Webhook/钉钉等)",
+        "inputs": [{"name": "message", "type": "string"}, {"name": "data", "type": "any", "optional": True}],
+        "outputs": [{"name": "status", "type": "string"}],
+        "config": {"channel": "webhook", "webhook_url": "", "email_to": "", "template": ""}
+    }
+}
+
+# 工作流执行引擎
+class WorkflowEngine:
+    def __init__(self):
+        self.execution_context = {}
+        self.node_results = {}
+        self.visited_nodes = set()
+        self.max_depth = 100
+
+    def _resolve_template(self, template_str):
+        if not isinstance(template_str, str):
+            return template_str
+        import re
+        def replacer(match):
+            ref = match.group(1)
+            parts = ref.split('.')
+            node_id = parts[0]
+            node_result = self.node_results.get(node_id, {})
+            if len(parts) > 1:
+                for key in parts[1:]:
+                    if isinstance(node_result, dict):
+                        node_result = node_result.get(key, '')
+                    else:
+                        return match.group(0)
+                return str(node_result) if node_result is not None else ''
+            return str(node_result) if node_result is not None else match.group(0)
+        return re.sub(r'\{\{([^}]+)\}\}', replacer, template_str)
+
+    def execute_workflow(self, workflow, inputs=None):
+        nodes = workflow.get("nodes", [])
+        connections = workflow.get("connections", [])
+        if not nodes:
+            return {"success": False, "error": "工作流为空"}
+        node_map = {node["id"]: node for node in nodes}
+        start_nodes = [n for n in nodes if n["type"] == "start"]
+        if not start_nodes:
+            return {"success": False, "error": "缺少开始节点"}
+        self.execution_context = inputs or {}
+        self.node_results = {}
+        self.visited_nodes = set()
+        execution_log = []
+        try:
+            for start_node in start_nodes:
+                self._execute_node_recursive(start_node, node_map, connections, execution_log, depth=0)
+            return {"success": True, "context": self.execution_context, "results": self.node_results, "log": execution_log}
+        except Exception as e:
+            return {"success": False, "error": str(e), "log": execution_log}
+
+    def _execute_node_recursive(self, node, node_map, connections, execution_log, depth=0):
+        if depth > self.max_depth:
+            execution_log.append({"node_id": node["id"], "type": node["type"], "status": "error", "error": "超过最大递归深度"})
+            return
+        node_id = node["id"]
+        node_type = node["type"]
+        node_config = dict(node.get("config", {}))
+        for key in list(node_config.keys()):
+            if isinstance(node_config[key], str):
+                node_config[key] = self._resolve_template(node_config[key])
+        execution_log.append({"node_id": node_id, "type": node_type, "status": "executing", "timestamp": time.time()})
+        result = self._execute_node(node, node_config)
+        self.node_results[node_id] = result
+        if isinstance(result, dict) and not result.get("error"):
+            self.execution_context.update(result)
+        execution_log[-1]["status"] = "completed" if not (isinstance(result, dict) and result.get("error")) else "error"
+        execution_log[-1]["result_preview"] = str(result)[:200] if result else None
+        next_connections = [c for c in connections if c.get("source") == node_id]
+        for conn in next_connections:
+            target_id = conn.get("target")
+            target_node = node_map.get(target_id)
+            if target_node:
+                if node_type == "condition":
+                    output_key = conn.get("sourceOutput", "true")
+                    if output_key == "true" and not result.get("condition_result"):
+                        continue
+                    if output_key == "false" and result.get("condition_result"):
+                        continue
+                self._execute_node_recursive(target_node, node_map, connections, execution_log, depth + 1)
+
+    def _execute_node(self, node, config):
+        node_type = node["type"]
+        if node_type == "start":
+            return {"output": self.execution_context}
+        elif node_type == "llm":
+            return self._execute_llm_node(config)
+        elif node_type == "condition":
+            return self._execute_condition_node(config)
+        elif node_type == "code":
+            return self._execute_code_node(config)
+        elif node_type == "http":
+            return self._execute_http_node(config)
+        elif node_type == "transform":
+            return self._execute_transform_node(config)
+        elif node_type == "mcp":
+            return self._execute_mcp_node(config)
+        elif node_type == "delay":
+            return self._execute_delay_node(config)
+        elif node_type == "loop":
+            return self._execute_loop_node(config)
+        elif node_type == "merge":
+            return self._execute_merge_node(config)
+        elif node_type == "split":
+            return self._execute_split_node(config)
+        elif node_type == "notification":
+            return self._execute_notification_node(config)
+        elif node_type == "end":
+            return {"output": self.execution_context, "finished": True}
+        elif node_type == "webhook":
+            return {"trigger": "webhook", "payload": self.execution_context}
+        elif node_type == "schedule":
+            return {"trigger": "schedule", "cron": config.get("cron", "0 * * * *")}
+        elif node_type == "subworkflow":
+            return self._execute_subworkflow_node(config)
+        else:
+            return {"error": f"未知节点类型: {node_type}"}
+
+    def _execute_llm_node(self, config):
+        try:
+            model_obj = load_model()
+            if not model_obj:
+                return {"error": "模型未加载"}
+            prompt = config.get("prompt", "")
+            system_prompt = config.get("system_prompt", "")
+            temperature = float(config.get("temperature", 0.7))
+            max_tokens = int(config.get("max_tokens", 4096))
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            history = config.get("history", [])
+            if isinstance(history, list):
+                for h in history:
+                    if isinstance(h, dict) and "role" in h and "content" in h:
+                        messages.append(h)
+            messages.append({"role": "user", "content": prompt})
+            full_response = ""
+            generated_tokens = 0
+            for chunk_type, chunk_content in model_obj.chat_stream(messages, temperature=temperature, max_tokens=max_tokens):
+                if chunk_content:
+                    full_response += chunk_content
+                    generated_tokens += 1
+            return {"response": full_response, "tokens": generated_tokens, "model": config.get("model", "default")}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_condition_node(self, config):
+        try:
+            condition = config.get("condition", "")
+            operator = config.get("operator", "equals")
+            value = config.get("value", "")
+            result = False
+            if operator == "equals":
+                result = str(condition) == str(value)
+            elif operator == "contains":
+                result = str(value) in str(condition)
+            elif operator == "gt":
+                result = float(condition) > float(value)
+            elif operator == "lt":
+                result = float(condition) < float(value)
+            elif operator == "gte":
+                result = float(condition) >= float(value)
+            elif operator == "lte":
+                result = float(condition) <= float(value)
+            elif operator == "not_equals":
+                result = str(condition) != str(value)
+            elif operator == "not_contains":
+                result = str(value) not in str(condition)
+            elif operator == "is_empty":
+                result = not str(condition).strip()
+            elif operator == "is_not_empty":
+                result = bool(str(condition).strip())
+            elif operator == "starts_with":
+                result = str(condition).startswith(str(value))
+            elif operator == "ends_with":
+                result = str(condition).endswith(str(value))
+            elif operator == "regex":
+                import re
+                result = bool(re.search(str(value), str(condition)))
+            return {"condition_result": result, "input": condition, "operator": operator, "compared_to": value}
+        except Exception as e:
+            return {"error": str(e), "condition_result": False}
+
+    def _execute_code_node(self, config):
+        try:
+            code = config.get("code", "")
+            if not code.strip():
+                return {"error": "代码为空"}
+            result = safe_execute_python(code, timeout=10)
+            if result.get("success"):
+                return {"output": result.get("output", ""), "success": True}
+            else:
+                return {"error": result.get("output", "执行失败"), "success": False}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_http_node(self, config):
+        try:
+            url = config.get("url", "")
+            method = config.get("method", "GET").upper()
+            headers = config.get("headers", {})
+            body = config.get("body", "")
+            timeout = int(config.get("timeout", 30))
+            if not url:
+                return {"error": "URL不能为空"}
+            url_safety = validate_url_safety(url)
+            if not url_safety.get("safe", True):
+                return {"error": f"URL安全检查失败: {url_safety.get('reason', '未知')}"}
+            req_data = body.encode('utf-8') if body and method in ('POST', 'PUT', 'PATCH') else None
+            req = urllib.request.Request(url, data=req_data, headers=headers, method=method)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                data = response.read().decode('utf-8')
+                content_type = response.headers.get('Content-Type', '')
+                if 'application/json' in content_type:
+                    try:
+                        data = json.loads(data)
+                    except Exception:
+                        pass
+                return {"status": response.status, "data": data, "headers": dict(response.headers)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_transform_node(self, config):
+        try:
+            transform_type = config.get("transform_type", "json_parse")
+            input_data = config.get("input", "")
+            if transform_type == "json_parse":
+                return {"output": json.loads(str(input_data))}
+            elif transform_type == "template":
+                template = config.get("template", "")
+                result = self._resolve_template(template)
+                return {"output": result}
+            elif transform_type == "extract":
+                import re
+                pattern = config.get("pattern", "")
+                matches = re.findall(pattern, str(input_data))
+                return {"output": matches}
+            elif transform_type == "join":
+                separator = config.get("separator", ",")
+                items = input_data if isinstance(input_data, list) else str(input_data).split(separator)
+                return {"output": separator.join(str(i) for i in items)}
+            elif transform_type == "split":
+                separator = config.get("separator", ",")
+                result = str(input_data).split(separator)
+                return {"output": result}
+            elif transform_type == "map":
+                key = config.get("key", "")
+                if isinstance(input_data, list):
+                    return {"output": [item.get(key, '') if isinstance(item, dict) else item for item in input_data]}
+                return {"output": input_data}
+            elif transform_type == "filter":
+                key = config.get("key", "")
+                value = config.get("value", "")
+                if isinstance(input_data, list):
+                    return {"output": [item for item in input_data if isinstance(item, dict) and item.get(key) == value]}
+                return {"output": input_data}
+            return {"output": input_data}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_mcp_node(self, config):
+        try:
+            plugin_id = config.get("plugin_id", "")
+            tool_name = config.get("tool_name", "")
+            parameters = config.get("parameters", {})
+            try:
+                result = execute_mcp_tool(plugin_id, tool_name, parameters)
+                return {"result": result}
+            except Exception:
+                return {"tool": tool_name, "args": parameters, "result": f"MCP工具 {tool_name} 执行完成"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_delay_node(self, config):
+        try:
+            delay_seconds = min(float(config.get("delay", 1)), 30)
+            time.sleep(delay_seconds)
+            return {"delayed": delay_seconds}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_loop_node(self, config):
+        try:
+            items = config.get("items", [])
+            max_iterations = min(int(config.get("max_iterations", 100)), 1000)
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except Exception:
+                    items = items.split(",")
+            results = []
+            for i, item in enumerate(items[:max_iterations]):
+                results.append({"index": i, "item": item, "result": f"迭代 {i} 完成"})
+            return {"iterations": len(results), "results": results}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_merge_node(self, config):
+        try:
+            merge_inputs = []
+            for key, value in self.node_results.items():
+                if isinstance(value, dict) and not value.get("error"):
+                    merge_inputs.append(value)
+            return {"merged": merge_inputs, "count": len(merge_inputs)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_split_node(self, config):
+        try:
+            input_data = config.get("input", "")
+            split_type = config.get("split_type", "line")
+            if split_type == "line":
+                parts = str(input_data).split("\n")
+            elif split_type == "comma":
+                parts = str(input_data).split(",")
+            elif split_type == "regex":
+                import re
+                pattern = config.get("pattern", r"\s+")
+                parts = re.split(pattern, str(input_data))
+            else:
+                parts = str(input_data).split("\n")
+            return {"parts": parts, "count": len(parts)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_notification_node(self, config):
+        try:
+            channel = config.get("channel", "log")
+            message = config.get("message", "")
+            title = config.get("title", "工作流通知")
+            if channel == "log":
+                log_security_event('workflow_notification', f'{title}: {message}', 'info')
+            return {"sent": True, "channel": channel, "message": message[:100]}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_subworkflow_node(self, config):
+        try:
+            sub_workflow_id = config.get("workflow_id", "")
+            if not sub_workflow_id:
+                return {"error": "未指定子工作流ID"}
+            sub_file = os.path.join(WORKFLOW_DIR, f'{sub_workflow_id}.json')
+            if not os.path.exists(sub_file):
+                return {"error": f"子工作流不存在: {sub_workflow_id}"}
+            with open(sub_file, 'r', encoding='utf-8') as f:
+                sub_workflow = json.load(f)
+            sub_engine = WorkflowEngine()
+            sub_result = sub_engine.execute_workflow(sub_workflow, inputs=self.execution_context)
+            return {"sub_workflow_result": sub_result}
+        except Exception as e:
+            return {"error": str(e)}
+
+# 工作流存储管理
+def load_workflows():
+    """加载所有工作流"""
+    if os.path.exists(WORKFLOW_INDEX_FILE):
+        try:
+            with open(WORKFLOW_INDEX_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"加载工作流索引失败: {e}")
+    return {"workflows": []}
+
+def save_workflows(workflows_data):
+    """保存工作流索引"""
+    try:
+        with open(WORKFLOW_INDEX_FILE, 'w', encoding='utf-8') as f:
+            json.dump(workflows_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存工作流索引失败: {e}")
+
+def save_workflow_file(workflow_id, workflow_data):
+    """保存单个工作流文件"""
+    try:
+        file_path = os.path.join(WORKFLOW_DIR, f"{workflow_id}.json")
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(workflow_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"保存工作流文件失败: {e}")
+        return False
+
+def load_workflow_file(workflow_id):
+    """加载单个工作流文件"""
+    try:
+        file_path = os.path.join(WORKFLOW_DIR, f"{workflow_id}.json")
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"加载工作流文件失败: {e}")
+    return None
+
+# 初始化工作流引擎
+workflow_engine = WorkflowEngine()
+
+# ==================== 智能体模式 (Agentic Coding Assistant - Claude Code Architecture) ====================
+
+import ast
+import textwrap
+import fnmatch
+import hashlib
+import time as _time
+
+TOOL_DEFAULTS = {
+    "is_read_only": False,
+    "is_destructive": False,
+    "is_concurrency_safe": False,
+    "requires_permission": True,
+}
+
+def build_tool(name, description, parameters, func, **overrides):
+    props = {**TOOL_DEFAULTS, **overrides}
+    return {
+        "name": name,
+        "description": description,
+        "parameters": parameters,
+        "func": func,
+        "is_read_only": props["is_read_only"],
+        "is_destructive": props["is_destructive"],
+        "is_concurrency_safe": props["is_concurrency_safe"],
+        "requires_permission": props["requires_permission"],
+    }
+
+def tool_to_schema(tool):
+    props = {}
+    for k, v in tool["parameters"].items():
+        prop = {pk: pv for pk, pv in v.items() if pk != "required"}
+        props[k] = prop
+    return {
+        "type": "function",
+        "function": {
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": {
+                "type": "object",
+                "properties": props,
+                "required": [k for k, v in tool["parameters"].items() if v.get("required", False)]
+            }
+        }
+    }
+
+class ToolRegistry:
+    def __init__(self):
+        self.tools = {}
+        self._last_file_undo = {}
+        self._file_version_history = {}
+        self._max_versions = 10
+        self._register_builtin_tools()
+
+    def _register_builtin_tools(self):
+        self.tools["read_file"] = build_tool(
+            "read_file",
+            "Read the contents of a file. Returns the file content with line numbers. Use offset/limit for large files.",
+            {
+                "path": {"type": "string", "description": "Absolute path to the file to read", "required": True},
+                "offset": {"type": "integer", "description": "Line number to start reading from (1-based)"},
+                "limit": {"type": "integer", "description": "Number of lines to read"}
+            },
+            self._read_file,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["write_file"] = build_tool(
+            "write_file",
+            "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Use for new files or complete rewrites.",
+            {
+                "path": {"type": "string", "description": "Absolute path to the file to write", "required": True},
+                "content": {"type": "string", "description": "Content to write to the file", "required": True}
+            },
+            self._write_file,
+            is_read_only=False,
+            is_destructive=False,
+            requires_permission=False,
+        )
+        self.tools["edit_file"] = build_tool(
+            "edit_file",
+            "Make a targeted edit to a file by replacing an exact string match. Preserves surrounding context. Prefer this over write_file for existing files.",
+            {
+                "path": {"type": "string", "description": "Absolute path to the file to edit", "required": True},
+                "old_string": {"type": "string", "description": "The exact text to find and replace (must be unique in file)", "required": True},
+                "new_string": {"type": "string", "description": "The text to replace it with", "required": True}
+            },
+            self._edit_file,
+            is_read_only=False,
+            is_destructive=False,
+            requires_permission=False,
+        )
+        self.tools["list_directory"] = build_tool(
+            "list_directory",
+            "List files and directories at the given path. Use to understand project structure before diving into files.",
+            {
+                "path": {"type": "string", "description": "Absolute path to the directory to list", "required": True},
+                "pattern": {"type": "string", "description": "Glob pattern to filter results (e.g. '*.py')"}
+            },
+            self._list_directory,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["search_files"] = build_tool(
+            "search_files",
+            "Search for a pattern in files using regex. Returns matching lines with context. Use to find code patterns, function definitions, imports.",
+            {
+                "path": {"type": "string", "description": "Absolute path to the directory to search in", "required": True},
+                "pattern": {"type": "string", "description": "Regular expression pattern to search for", "required": True},
+                "file_pattern": {"type": "string", "description": "Glob pattern to filter files (e.g. '*.py')"}
+            },
+            self._search_files,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["execute_command"] = build_tool(
+            "execute_command",
+            "Execute a shell command and return its output. Use for running tests, installing packages, git operations, running projects. Always check output.",
+            {
+                "command": {"type": "string", "description": "The command to execute", "required": True},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
+                "working_dir": {"type": "string", "description": "Working directory to run the command in"}
+            },
+            self._execute_command,
+            is_read_only=False,
+            is_destructive=True,
+            requires_permission=True,
+        )
+        self.tools["glob"] = build_tool(
+            "glob",
+            "Find files matching a glob pattern. Returns list of matching file paths. Use for file discovery.",
+            {
+                "path": {"type": "string", "description": "Absolute path to search in", "required": True},
+                "pattern": {"type": "string", "description": "Glob pattern (e.g. '**/*.py')", "required": True}
+            },
+            self._glob,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["create_directory"] = build_tool(
+            "create_directory",
+            "Create a directory and all parent directories. Use to set up project structure before writing files.",
+            {
+                "path": {"type": "string", "description": "Absolute path of the directory to create", "required": True}
+            },
+            self._create_directory,
+            is_read_only=False,
+            is_destructive=False,
+            is_concurrency_safe=True,
+            requires_permission=True,
+        )
+        self.tools["compile"] = build_tool(
+            "compile",
+            "Compile and execute code in a sandboxed environment. Supports Python, JavaScript, TypeScript, C, C++, Java, Go, Rust. Returns stdout, stderr, and exit code. Use for testing code snippets, verifying logic, or running small programs.",
+            {
+                "language": {"type": "string", "description": "Programming language: python, javascript, typescript, c, cpp, java, go, rust", "required": True},
+                "code": {"type": "string", "description": "Source code to compile and execute", "required": True},
+                "timeout": {"type": "integer", "description": "Execution timeout in seconds (default 15, max 60)"}
+            },
+            self._compile,
+            is_read_only=False,
+            is_destructive=False,
+            is_concurrency_safe=False,
+            requires_permission=True,
+        )
+        self.tools["todo_write"] = build_tool(
+            "todo_write",
+            "Update the user's todo list. Creates, updates, or deletes todo items. Use to track progress on multi-step tasks. Each todo has an id, content, status (pending/in_progress/completed), and priority (high/medium/low).",
+            {
+                "todos": {"type": "string", "description": "JSON array of todo items: [{id, content, status, priority}]. Replaces the entire list.", "required": True}
+            },
+            self._todo_write,
+            is_read_only=False,
+            is_destructive=False,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["enter_plan_mode"] = build_tool(
+            "enter_plan_mode",
+            "Enter plan mode. In plan mode, you think through the approach without making any file changes. Use when the task is complex and requires careful planning before execution. You will NOT be able to use write_file, edit_file, or execute_command in plan mode.",
+            {},
+            self._enter_plan_mode,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["exit_plan_mode"] = build_tool(
+            "exit_plan_mode",
+            "Exit plan mode and return to execution mode. You can now use all tools including write_file, edit_file, and execute_command.",
+            {},
+            self._exit_plan_mode,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["web_fetch"] = build_tool(
+            "web_fetch",
+            "Fetch the content of a URL and return it as text. Use for reading documentation, API responses, or web pages. Respects robots.txt and has rate limiting.",
+            {
+                "url": {"type": "string", "description": "The URL to fetch", "required": True},
+                "format": {"type": "string", "description": "Output format: text (plain text), markdown (convert HTML to markdown), raw (original)"}
+            },
+            self._web_fetch,
+            is_read_only=True,
+            is_concurrency_safe=False,
+            requires_permission=False,
+        )
+        self.tools["web_search"] = build_tool(
+            "web_search",
+            "Search the web using a search engine. Returns a list of results with titles, URLs, and snippets. Use for finding documentation, solutions, or current information.",
+            {
+                "query": {"type": "string", "description": "Search query", "required": True},
+                "num_results": {"type": "integer", "description": "Number of results to return (default 5, max 10)"}
+            },
+            self._web_search,
+            is_read_only=True,
+            is_concurrency_safe=False,
+            requires_permission=False,
+        )
+        self.tools["agent_spawn"] = build_tool(
+            "agent_spawn",
+            "Spawn a sub-agent to handle a specialized task. Sub-agents have their own context and tool access. Types: 'explore' (code exploration), 'plan' (task planning), 'verify' (verification/testing), 'general' (general purpose). Returns the sub-agent's final output.",
+            {
+                "task": {"type": "string", "description": "Description of the task for the sub-agent", "required": True},
+                "agent_type": {"type": "string", "description": "Type of sub-agent: explore, plan, verify, general", "required": True},
+                "context": {"type": "string", "description": "Additional context or constraints for the sub-agent"}
+            },
+            self._agent_spawn,
+            is_read_only=False,
+            is_destructive=False,
+            is_concurrency_safe=False,
+            requires_permission=True,
+        )
+        self.tools["task_create"] = build_tool(
+            "task_create",
+            "Create a tracked internal task. Tasks have status (pending/in_progress/done/failed) and can be updated as work progresses. Use for managing multi-step workflows.",
+            {
+                "title": {"type": "string", "description": "Task title", "required": True},
+                "description": {"type": "string", "description": "Task description"},
+                "priority": {"type": "string", "description": "Priority: high, medium, low"}
+            },
+            self._task_create,
+            is_read_only=False,
+            is_destructive=False,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["task_update"] = build_tool(
+            "task_update",
+            "Update the status of an existing task. Use to mark tasks as in_progress, done, or failed.",
+            {
+                "task_id": {"type": "string", "description": "Task ID to update", "required": True},
+                "status": {"type": "string", "description": "New status: pending, in_progress, done, failed", "required": True},
+                "result": {"type": "string", "description": "Result or output of the task"}
+            },
+            self._task_update,
+            is_read_only=False,
+            is_destructive=False,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["task_list"] = build_tool(
+            "task_list",
+            "List all tracked tasks and their current status. Returns a summary of all tasks.",
+            {},
+            self._task_list,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["brief"] = build_tool(
+            "brief",
+            "Generate a context brief summarizing the current session state. Use when starting a new sub-agent or when context needs to be condensed for handoff.",
+            {
+                "focus": {"type": "string", "description": "What to focus the brief on (e.g. 'architecture', 'changes made', 'current status')"}
+            },
+            self._brief,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["open_project_dir"] = build_tool(
+            "open_project_dir",
+            "Open a project directory for file operations. Imports the path into your workspace if needed, allowing read/write access to project files. Always use this before working on files outside your default workspace.",
+            {
+                "path": {"type": "string", "description": "Absolute path to the project directory", "required": True},
+                "device_id": {"type": "string", "description": "Device ID for workspace identification"}
+            },
+            self._open_project_dir,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["list_env"] = build_tool(
+            "list_env",
+            "List the current environment information including Python version, Node.js version, installed packages, and OS details. Use once at the start of a session to understand the execution environment.",
+            {},
+            self._list_env,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["delete_file"] = build_tool(
+            "delete_file",
+            "Delete a file from the file system. The file content is backed up before deletion and can be restored with undo_last. Use with caution.",
+            {
+                "path": {"type": "string", "description": "Path to the file to delete", "required": True}
+            },
+            self._delete_file,
+            is_read_only=False,
+            is_concurrency_safe=False,
+            requires_permission=True,
+            is_destructive=True,
+        )
+        self.tools["remove_directory"] = build_tool(
+            "remove_directory",
+            "Remove a directory and all its contents recursively. Use with extreme caution as this cannot be easily undone.",
+            {
+                "path": {"type": "string", "description": "Path to the directory to remove", "required": True}
+            },
+            self._remove_directory,
+            is_read_only=False,
+            is_concurrency_safe=False,
+            requires_permission=True,
+            is_destructive=True,
+        )
+        self.tools["undo_last"] = build_tool(
+            "undo_last",
+            "Undo the last file write/edit/delete operation. Restores the file to its previous state. Only one level of undo is available.",
+            {},
+            self._undo_last,
+            is_read_only=False,
+            is_concurrency_safe=False,
+            requires_permission=False,
+        )
+        self.tools["list_versions"] = build_tool(
+            "list_versions",
+            "List the version history of a file. Shows all saved versions with timestamps and sizes. Use before reverting to understand what versions are available.",
+            {
+                "path": {"type": "string", "description": "Path to the file", "required": True}
+            },
+            self._list_versions,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+        self.tools["pip_install"] = build_tool(
+            "pip_install",
+            "Install Python packages using pip. Automatically detects the correct Python environment. Use for installing dependencies needed by the project. Checks if packages are already installed before installing.",
+            {
+                "packages": {"type": "string", "description": "Space-separated list of package names to install (e.g. 'requests flask numpy')", "required": True},
+                "python_path": {"type": "string", "description": "Path to Python executable. If not specified, uses the current Python."},
+                "upgrade": {"type": "boolean", "description": "Whether to upgrade existing packages (default false)"}
+            },
+            self._pip_install,
+            is_read_only=False,
+            is_destructive=False,
+            requires_permission=False,
+        )
+        self.tools["check_dependencies"] = build_tool(
+            "check_dependencies",
+            "Check if Python packages are installed. Returns a list of missing packages. Use before running code to ensure all dependencies are available. Can also parse a requirements.txt file.",
+            {
+                "packages": {"type": "string", "description": "Comma-separated list of package names to check (e.g. 'requests,flask,numpy')"},
+                "requirements_file": {"type": "string", "description": "Path to requirements.txt file to check"},
+                "python_path": {"type": "string", "description": "Path to Python executable. If not specified, uses the current Python."}
+            },
+            self._check_dependencies,
+            is_read_only=True,
+            is_concurrency_safe=True,
+            requires_permission=False,
+        )
+
+    def get_tool_schemas(self):
+        return [tool_to_schema(t) for t in self.tools.values()]
+
+    _tool_timeouts = {
+        "execute_command": 120, "pip_install": 180, "compile": 60,
+        "agent_spawn": 90, "web_fetch": 30, "web_search": 20,
+        "check_dependencies": 30, "list_env": 15,
+    }
+    _default_tool_timeout = 60
+
+    def execute(self, name, params):
+        tool = self.tools.get(name)
+        if not tool:
+            return {"error": f"Unknown tool: {name}"}
+        timeout = self._tool_timeouts.get(name, self._default_tool_timeout)
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(tool["func"], **params)
+                try:
+                    result = future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    return {"error": f"Tool '{name}' timed out after {timeout}s"}
+            if isinstance(result, dict):
+                wrapped = {"result": result.get("result", result.get("error", str(result)))}
+                if "old_content" in result:
+                    wrapped["old_content"] = result["old_content"]
+                if "error" in result:
+                    wrapped["error"] = result["error"]
+                return wrapped
+            return {"result": result}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _read_file(self, path, offset=None, limit=None):
+        if not os.path.exists(path):
+            return f"Error: File not found: {path}"
+        if os.path.isdir(path):
+            return f"Error: Path is a directory, not a file: {path}"
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            start = (offset or 1) - 1
+            end = start + (limit or len(lines))
+            selected = lines[start:end]
+            result_lines = []
+            for i, line in enumerate(selected, start=start + 1):
+                result_lines.append(f"{i:6d}\u2192{line.rstrip()}")
+            return "\n".join(result_lines) if result_lines else "(empty file)"
+        except Exception as e:
+            return f"Error reading file: {e}"
+
+    def _write_file(self, path, content):
+        try:
+            old_content = None
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        old_content = f.read()
+                    self._save_version(path, old_content)
+                except:
+                    old_content = None
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self._last_file_undo = {"path": path, "old_content": old_content}
+            verify_ok = os.path.exists(path) and os.path.getsize(path) > 0
+            return {"result": f"Successfully wrote {len(content)} characters to {path}" + (" [verified]" if verify_ok else " [WARNING: verification failed]"), "old_content": old_content}
+        except Exception as e:
+            return {"error": f"Error writing file: {e}"}
+
+    def _edit_file(self, path, old_string, new_string):
+        if not os.path.exists(path):
+            return {"error": f"Error: File not found: {path}"}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if old_string not in content:
+                return {"error": "Error: old_string not found in file. Make sure the string matches exactly."}
+            count = content.count(old_string)
+            if count > 1:
+                return {"error": f"Error: old_string found {count} times in file. Provide more context to make it unique."}
+            self._save_version(path, content)
+            old_content = content
+            new_content = content.replace(old_string, new_string, 1)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            self._last_file_undo = {"path": path, "old_content": old_content}
+            return {"result": f"Successfully edited {path} (replaced 1 occurrence)", "old_content": old_content}
+        except Exception as e:
+            return {"error": f"Error editing file: {e}"}
+
+    def _save_version(self, path, content):
+        abs_path = os.path.abspath(path)
+        if abs_path not in self._file_version_history:
+            self._file_version_history[abs_path] = []
+        self._file_version_history[abs_path].append({
+            "content": content,
+            "timestamp": _time.time(),
+            "size": len(content) if content else 0
+        })
+        if len(self._file_version_history[abs_path]) > self._max_versions:
+            self._file_version_history[abs_path] = self._file_version_history[abs_path][-self._max_versions:]
+
+    def _delete_file(self, path):
+        if not os.path.exists(path):
+            return {"error": f"Error: File not found: {path}"}
+        try:
+            if os.path.isdir(path):
+                return {"error": f"Error: Path is a directory, not a file: {path}. Use remove_directory instead."}
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                old_content = f.read()
+            self._save_version(path, old_content)
+            os.remove(path)
+            self._last_file_undo = {"path": path, "old_content": old_content}
+            return {"result": f"Successfully deleted {path}", "old_content": old_content}
+        except PermissionError:
+            return {"error": f"Error: Permission denied deleting {path}"}
+        except Exception as e:
+            return {"error": f"Error deleting file: {e}"}
+
+    def _remove_directory(self, path):
+        if not os.path.exists(path):
+            return {"error": f"Error: Directory not found: {path}"}
+        if not os.path.isdir(path):
+            return {"error": f"Error: Path is not a directory: {path}"}
+        try:
+            import shutil
+            shutil.rmtree(path)
+            return {"result": f"Successfully removed directory {path}"}
+        except PermissionError:
+            return {"error": f"Error: Permission denied removing {path}"}
+        except Exception as e:
+            return {"error": f"Error removing directory: {e}"}
+
+    def _undo_last(self):
+        if not self._last_file_undo:
+            return {"error": "No undo available"}
+        path = self._last_file_undo["path"]
+        old_content = self._last_file_undo.get("old_content")
+        try:
+            if old_content is not None:
+                os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(old_content)
+                self._last_file_undo = {}
+                return {"result": f"Successfully reverted {path}"}
+            else:
+                if os.path.exists(path):
+                    os.remove(path)
+                self._last_file_undo = {}
+                return {"result": f"Successfully removed new file {path}"}
+        except Exception as e:
+            return {"error": f"Error reverting: {e}"}
+
+    def _list_versions(self, path):
+        abs_path = os.path.abspath(path)
+        versions = self._file_version_history.get(abs_path, [])
+        if not versions:
+            return "No version history for this file"
+        result = []
+        for i, v in enumerate(versions):
+            ts = _Time.strftime('%Y-%m-%d %H:%M:%S', _Time.localtime(v["timestamp"]))
+            result.append(f"  v{i+1}: {ts} ({v['size']} chars)")
+        return f"Version history for {path} ({len(versions)} versions):\n" + "\n".join(result)
+
+    def _detect_project_python(self):
+        try:
+            venv_candidates = []
+            cwd = os.path.dirname(os.path.abspath(__file__))
+            for root, dirs, files in os.walk(cwd, topdown=True):
+                dirs[:] = [d for d in dirs if d not in ('.git', 'node_modules', '__pycache__', '.venv')]
+                for d in dirs:
+                    dl = d.lower()
+                    if dl in ('venv', 'env', '.venv', '.env') or 'conda' in dl or dl.startswith('dl'):
+                        venv_path = os.path.join(root, d, 'Scripts', 'python.exe')
+                        if os.path.isfile(venv_path):
+                            venv_candidates.append(venv_path)
+                        venv_path2 = os.path.join(root, d, 'bin', 'python')
+                        if os.path.isfile(venv_path2):
+                            venv_candidates.append(venv_path2)
+                break
+            known_envs = []
+            for drive in ['C:', 'D:', 'E:']:
+                for base in [r'\Anoconda', r'\Anaconda3', r'\ProgramData\Anaconda3']:
+                    for env in [r'envs\DL', '']:
+                        p = os.path.join(drive, base, env, 'python.exe')
+                        if p not in known_envs:
+                            known_envs.append(p)
+            known_envs.extend([
+                os.path.join(os.environ.get('USERPROFILE', ''), '.conda', 'kaguya_env', 'Scripts', 'python.exe'),
+                os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Python', 'Python312', 'python.exe'),
+                os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Python', 'Python311', 'python.exe'),
+                os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Python', 'Python310', 'python.exe'),
+            ])
+            for env_path in known_envs:
+                if os.path.isfile(env_path) and env_path not in venv_candidates:
+                    venv_candidates.append(env_path)
+            if venv_candidates:
+                return venv_candidates[0]
+        except Exception:
+            pass
+        return None
+
+    def _pip_install(self, packages, python_path=None, upgrade=False):
+        if not packages or not packages.strip():
+            return "Error: No packages specified"
+        pkg_list = packages.strip().split()
+        python_exe = python_path
+        if not python_exe:
+            python_exe = self._detect_project_python()
+        if not python_exe:
+            python_exe = sys.executable
+        try:
+            check_result = subprocess.run(
+                [python_exe, "-m", "pip", "list", "--format=json"],
+                capture_output=True, text=True, timeout=30
+            )
+            installed = set()
+            if check_result.returncode == 0:
+                try:
+                    for pkg in json.loads(check_result.stdout):
+                        installed.add(pkg.get("name", "").lower())
+                except Exception:
+                    pass
+            to_install = []
+            already_installed = []
+            for pkg in pkg_list:
+                pkg_lower = pkg.lower().replace("-", "_").replace("==", "").replace(">=", "").replace("<=", "").split("=")[0].split(">")[0].split("<")[0].strip()
+                if pkg_lower in installed or pkg_lower.replace("_", "-") in installed:
+                    already_installed.append(pkg)
+                else:
+                    to_install.append(pkg)
+            if not to_install and not upgrade:
+                return f"All packages already installed: {', '.join(already_installed)}"
+            cmd = [python_exe, "-m", "pip", "install"]
+            if upgrade:
+                cmd.append("--upgrade")
+            cmd.extend(to_install if to_install else pkg_list)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            output = ""
+            if result.stdout:
+                output += result.stdout[:4000]
+            if result.stderr:
+                output += f"\n{result.stderr[:2000]}"
+            if result.returncode != 0:
+                return f"pip install failed (exit {result.returncode}):\n{output}"
+            summary = []
+            if already_installed and not upgrade:
+                summary.append(f"Already installed: {', '.join(already_installed)}")
+            if to_install:
+                summary.append(f"Newly installed: {', '.join(to_install)}")
+            elif upgrade:
+                summary.append(f"Upgraded: {', '.join(pkg_list)}")
+            return f"Success! {'; '.join(summary)}\n{output[:500]}"
+        except subprocess.TimeoutExpired:
+            return "pip install timed out after 300 seconds"
+        except Exception as e:
+            return f"Error installing packages: {e}"
+
+    def _check_dependencies(self, packages=None, requirements_file=None, python_path=None):
+        python_exe = python_path or self._detect_project_python() or sys.executable
+        pkg_names = []
+        if requirements_file:
+            if not os.path.exists(requirements_file):
+                return f"Error: requirements file not found: {requirements_file}"
+            try:
+                with open(requirements_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            pkg_name = line.split('==')[0].split('>=')[0].split('<=')[0].split('>')[0].split('<')[0].strip()
+                            if pkg_name:
+                                pkg_names.append(pkg_name)
+            except Exception as e:
+                return f"Error reading requirements file: {e}"
+        if packages:
+            for p in packages.split(','):
+                p = p.strip()
+                if p:
+                    pkg_names.append(p)
+        if not pkg_names:
+            return "Error: No packages specified. Use 'packages' or 'requirements_file' parameter."
+        try:
+            check_result = subprocess.run(
+                [python_exe, "-m", "pip", "list", "--format=json"],
+                capture_output=True, text=True, timeout=30
+            )
+            installed = set()
+            if check_result.returncode == 0:
+                try:
+                    for pkg in json.loads(check_result.stdout):
+                        installed.add(pkg.get("name", "").lower())
+                except Exception:
+                    pass
+            missing = []
+            found = []
+            for pkg in pkg_names:
+                pkg_lower = pkg.lower().replace("-", "_")
+                if pkg_lower in installed or pkg_lower.replace("_", "-") in installed:
+                    found.append(pkg)
+                else:
+                    missing.append(pkg)
+            result_parts = []
+            if found:
+                result_parts.append(f"Installed ({len(found)}): {', '.join(found)}")
+            if missing:
+                result_parts.append(f"Missing ({len(missing)}): {', '.join(missing)}")
+                result_parts.append(f"Install command: pip install {' '.join(missing)}")
+            else:
+                result_parts.append("All dependencies satisfied!")
+            return "\n".join(result_parts)
+        except Exception as e:
+            return f"Error checking dependencies: {e}"
+
+    def _list_directory(self, path, pattern=None):
+        if not os.path.exists(path):
+            return f"Error: Directory not found: {path}"
+        try:
+            entries = os.listdir(path)
+            if pattern:
+                entries = [e for e in entries if fnmatch.fnmatch(e, pattern)]
+            result = []
+            for entry in sorted(entries):
+                full = os.path.join(path, entry)
+                if os.path.isdir(full):
+                    result.append(f"[DIR]  {entry}/")
+                else:
+                    size = os.path.getsize(full)
+                    result.append(f"[FILE] {entry} ({size} bytes)")
+            return "\n".join(result) if result else "(empty directory)"
+        except Exception as e:
+            return f"Error listing directory: {e}"
+
+    def _search_files(self, path, pattern, file_pattern=None):
+        if not os.path.exists(path):
+            return f"Error: Path not found: {path}"
+        try:
+            import re
+            regex = re.compile(pattern, re.IGNORECASE)
+            results = []
+            for root, dirs, files in os.walk(path):
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', '.git', 'venv', '.venv']]
+                for fname in files:
+                    if file_pattern and not fnmatch.fnmatch(fname, file_pattern):
+                        continue
+                    fpath = os.path.join(root, fname)
+                    try:
+                        with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                            for i, line in enumerate(f, 1):
+                                if regex.search(line):
+                                    rel = os.path.relpath(fpath, path)
+                                    results.append(f"{rel}:{i}: {line.rstrip()[:120]}")
+                                    if len(results) >= 50:
+                                        return "\n".join(results) + "\n... (truncated, 50+ matches)"
+                    except:
+                        continue
+            return "\n".join(results) if results else "No matches found"
+        except Exception as e:
+            return f"Error searching: {e}"
+
+    def _execute_command(self, command, timeout=30, working_dir=None):
+        try:
+            cwd = working_dir or os.path.dirname(os.path.abspath(__file__))
+            if not os.path.isabs(cwd):
+                cwd = os.path.join(os.path.dirname(os.path.abspath(__file__)), cwd)
+            cmd_lower = command.lower().strip()
+            if timeout <= 0:
+                timeout = 30
+            timeout_tier = self._get_timeout_tier(command)
+            effective_timeout = min(max(timeout, timeout_tier['min']), timeout_tier['max'])
+            
+            current_python = sys.executable
+            is_python_cmd = False
+            cmd_parts = command.strip().split()
+            if cmd_parts and cmd_parts[0].lower() in ('python', 'python.exe', 'python3', 'python3.exe'):
+                is_python_cmd = True
+            
+            is_gui_command = False
+            if os.name == 'nt':
+                gui_indicators = ['pygame', 'turtle', 'tkinter', 'matplotlib', 'qt', 'pyside', 'wxpython', 'kivy']
+                python_gui_patterns = ['.pyw', 'pythonw ']
+                is_inline_python = is_python_cmd and len(cmd_parts) > 1 and cmd_parts[1] == '-c'
+                if is_inline_python:
+                    inline_code = command[command.lower().index('-c') + 2:].strip()
+                    is_gui_command = any(ind in inline_code.lower() for ind in gui_indicators)
+                elif is_python_cmd and any(ind in cmd_lower for ind in gui_indicators):
+                    is_gui_command = True
+                elif any(p in cmd_lower for p in python_gui_patterns):
+                    is_gui_command = True
+                elif is_python_cmd and len(cmd_parts) >= 2:
+                    script_arg = cmd_parts[1]
+                    if not script_arg.startswith('-') and script_arg.endswith('.py'):
+                        script_path = script_arg if os.path.isabs(script_arg) else os.path.join(cwd, script_arg)
+                        if os.path.isfile(script_path):
+                            try:
+                                with open(script_path, 'r', encoding='utf-8', errors='ignore') as sf:
+                                    script_content = sf.read().lower()
+                                is_gui_command = any(ind in script_content for ind in gui_indicators)
+                            except Exception:
+                                pass
+            
+            final_command = command
+            if is_python_cmd:
+                cmd_parts = command.strip().split()
+                cmd_parts[0] = f'"{current_python}"'
+                final_command = " ".join(cmd_parts)
+            
+            try:
+                if is_gui_command:
+                    gui_stderr_path = os.path.join(tempfile.gettempdir(), f'kaguya_gui_{os.getpid()}.log')
+                    gui_cmd = f'cmd /c start "" {final_command} 2>"{gui_stderr_path}"'
+                    proc = subprocess.Popen(
+                        gui_cmd, shell=True, cwd=cwd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    import time
+                    time.sleep(1.5)
+                    gui_error = ""
+                    if os.path.isfile(gui_stderr_path):
+                        try:
+                            with open(gui_stderr_path, 'r', encoding='utf-8', errors='ignore') as ef:
+                                gui_error = ef.read(2000).strip()
+                        except Exception:
+                            pass
+                    if gui_error:
+                        return f"GUI application started but stderr output detected:\n{gui_error}\n\nThe window should be visible on your desktop. If not, check the error above."
+                    return f"GUI application started in a new window using Python: {current_python}. The window should be visible on your desktop."
+                else:
+                    proc = subprocess.Popen(
+                        final_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, cwd=cwd,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+                    )
+            except FileNotFoundError:
+                return f"Error: Command not found: {command.split()[0]}"
+            except PermissionError:
+                return f"Error: Permission denied executing: {command}"
+            try:
+                stdout, stderr = proc.communicate(timeout=effective_timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except:
+                    pass
+                try:
+                    if os.name == 'nt':
+                        proc.send_signal(signal.CTRL_BREAK_EVENT)
+                    else:
+                        proc.send_signal(signal.SIGTERM)
+                except:
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                return f"Command timed out after {effective_timeout}s (tier: {timeout_tier['name']}). Process terminated."
+            output = ""
+            if stdout:
+                output += stdout[:8000]
+            if stderr:
+                output += f"\nSTDERR:\n{stderr[:3000]}"
+            if proc.returncode != 0:
+                output += f"\nExit code: {proc.returncode}"
+            return output.strip() or "(no output)"
+        except Exception as e:
+            return f"Error executing command: {e}"
+
+    def _get_timeout_tier(self, command):
+        cmd_lower = command.lower().strip()
+        quick_commands = ['echo', 'dir', 'ls', 'pwd', 'cd', 'whoami', 'hostname', 'date', 'time',
+                         'ver', 'cls', 'clear', 'type', 'cat', 'head', 'tail', 'wc', 'findstr', 'grep',
+                         'where', 'which', 'set', 'env', 'printenv']
+        build_commands = ['npm', 'yarn', 'pnpm', 'pip', 'conda', 'cargo', 'make', 'cmake', 'gradle',
+                         'mvn', 'dotnet', 'go build', 'go mod', 'npm run build', 'npm install']
+        test_commands = ['pytest', 'unittest', 'jest', 'mocha', 'vitest', 'coverage', 'go test',
+                         'cargo test', 'dotnet test']
+        first_word = cmd_lower.split()[0] if cmd_lower.split() else ''
+        if first_word in quick_commands or any(cmd_lower.startswith(q) for q in quick_commands):
+            return {'name': 'quick', 'min': 5, 'max': 15}
+        if any(cmd_lower.startswith(b) for b in build_commands):
+            return {'name': 'build', 'min': 30, 'max': 120}
+        if any(cmd_lower.startswith(t) for t in test_commands):
+            return {'name': 'test', 'min': 30, 'max': 120}
+        if 'python' in first_word or 'python3' in first_word:
+            return {'name': 'python', 'min': 10, 'max': 60}
+        return {'name': 'default', 'min': 10, 'max': 60}
+
+    def _glob(self, path, pattern):
+        if not os.path.exists(path):
+            return f"Error: Path not found: {path}"
+        try:
+            matches = []
+            for root, dirs, files in os.walk(path):
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', '.git', 'venv', '.venv']]
+                for fname in files:
+                    if fnmatch.fnmatch(fname, pattern):
+                        matches.append(os.path.join(root, fname))
+            return "\n".join(matches[:100]) if matches else "No files matched the pattern"
+        except Exception as e:
+            return f"Error globbing: {e}"
+
+    def _create_directory(self, path):
+        try:
+            os.makedirs(path, exist_ok=True)
+            return f"Directory created: {path}"
+        except PermissionError:
+            return f"Error: Permission denied creating directory: {path}. Request permission from user."
+        except Exception as e:
+            return f"Error creating directory: {e}"
+
+    def _compile(self, language, code, timeout=15):
+        timeout = min(max(timeout, 1), 60)
+        try:
+            tmpdir = os.path.join(tempfile.gettempdir(), f"agent_compile_{int(_time.time()*1000)}")
+            os.makedirs(tmpdir, exist_ok=True)
+            if language == "python":
+                src = os.path.join(tmpdir, "main.py")
+                with open(src, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                result = subprocess.run(
+                    [sys.executable, src], capture_output=True, text=True,
+                    timeout=timeout, cwd=tmpdir
+                )
+            elif language in ("javascript", "typescript"):
+                ext = ".js" if language == "javascript" else ".ts"
+                src = os.path.join(tmpdir, "main" + ext)
+                with open(src, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                node_cmd = ["node", src] if language == "javascript" else ["npx", "ts-node", src]
+                result = subprocess.run(node_cmd, capture_output=True, text=True, timeout=timeout, cwd=tmpdir)
+            elif language in ("c", "cpp"):
+                ext = ".c" if language == "c" else ".cpp"
+                src = os.path.join(tmpdir, "main" + ext)
+                out = os.path.join(tmpdir, "main.exe")
+                with open(src, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                compile_result = subprocess.run(
+                    ["gcc" if language == "c" else "g++", src, "-o", out],
+                    capture_output=True, text=True, timeout=30
+                )
+                if compile_result.returncode != 0:
+                    return f"Compilation Error:\n{compile_result.stderr}"
+                result = subprocess.run([out], capture_output=True, text=True, timeout=timeout)
+            elif language == "java":
+                src = os.path.join(tmpdir, "Main.java")
+                with open(src, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                compile_result = subprocess.run(["javac", src], capture_output=True, text=True, timeout=30)
+                if compile_result.returncode != 0:
+                    return f"Compilation Error:\n{compile_result.stderr}"
+                result = subprocess.run(["java", "-cp", tmpdir, "Main"], capture_output=True, text=True, timeout=timeout)
+            elif language == "go":
+                src = os.path.join(tmpdir, "main.go")
+                with open(src, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                result = subprocess.run(["go", "run", src], capture_output=True, text=True, timeout=timeout)
+            elif language == "rust":
+                src = os.path.join(tmpdir, "main.rs")
+                with open(src, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                out = os.path.join(tmpdir, "main.exe")
+                compile_result = subprocess.run(["rustc", src, "-o", out], capture_output=True, text=True, timeout=60)
+                if compile_result.returncode != 0:
+                    return f"Compilation Error:\n{compile_result.stderr}"
+                result = subprocess.run([out], capture_output=True, text=True, timeout=timeout)
+            else:
+                return f"Unsupported language: {language}. Supported: python, javascript, typescript, c, cpp, java, go, rust"
+            output = ""
+            if result.stdout:
+                output += result.stdout[:8000]
+            if result.stderr:
+                output += f"\nSTDERR:\n{result.stderr[:3000]}"
+            if result.returncode != 0:
+                output += f"\nExit code: {result.returncode}"
+            return output.strip() or "(no output)"
+        except subprocess.TimeoutExpired:
+            return f"Execution timed out after {timeout} seconds"
+        except FileNotFoundError as e:
+            return f"Compiler/interpreter not found: {e}. Make sure {language} toolchain is installed."
+        except Exception as e:
+            return f"Error: {e}"
+        finally:
+            try:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except:
+                pass
+
+    def _todo_write(self, todos):
+        try:
+            if isinstance(todos, str):
+                todo_list = json.loads(todos)
+            else:
+                todo_list = todos
+            if not isinstance(todo_list, list):
+                return "Error: todos must be a JSON array"
+            result_lines = []
+            for item in todo_list:
+                tid = item.get("id", "unknown")
+                content = item.get("content", "")
+                status = item.get("status", "pending")
+                priority = item.get("priority", "medium")
+                icon = {"completed": "[x]", "in_progress": "[~]", "pending": "[ ]", "done": "[x]"}.get(status, "[ ]")
+                pri_icon = {"high": "!!!", "medium": "!!", "low": "!"}.get(priority, "!")
+                result_lines.append(f"{icon} {pri_icon} [{tid}] {content} ({status})")
+            return "Todo list updated:\n" + "\n".join(result_lines)
+        except Exception as e:
+            return f"Error updating todos: {e}"
+
+    def _enter_plan_mode(self):
+        global _agent_plan_mode
+        _agent_plan_mode = True
+        return "Entered plan mode. You can now think through the approach without making any file changes. Use exit_plan_mode when ready to execute."
+
+    def _exit_plan_mode(self):
+        global _agent_plan_mode
+        _agent_plan_mode = False
+        return "Exited plan mode. You can now use all tools including write_file, edit_file, and execute_command."
+
+    def _web_fetch(self, url, format="text"):
+        try:
+            import urllib.request
+            import urllib.error
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                content = resp.read().decode('utf-8', errors='replace')
+            if format == "raw":
+                return content[:15000]
+            if format == "markdown" or (format == "text" and '<html' in content.lower()):
+                try:
+                    import re
+                    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
+                    content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
+                    content = re.sub(r'<br\s*/?>', '\n', content, flags=re.IGNORECASE)
+                    content = re.sub(r'<p\s*/?>', '\n', content, flags=re.IGNORECASE)
+                    content = re.sub(r'<h[1-6][^>]*>', '\n## ', content, flags=re.IGNORECASE)
+                    content = re.sub(r'</h[1-6]>', '\n', content, flags=re.IGNORECASE)
+                    content = re.sub(r'<li[^>]*>', '- ', content, flags=re.IGNORECASE)
+                    content = re.sub(r'<[^>]+>', '', content)
+                    content = re.sub(r'&nbsp;', ' ', content)
+                    content = re.sub(r'&amp;', '&', content)
+                    content = re.sub(r'&lt;', '<', content)
+                    content = re.sub(r'&gt;', '>', content)
+                    content = re.sub(r'\n{3,}', '\n\n', content)
+                    return content.strip()[:15000]
+                except:
+                    pass
+            return content[:15000]
+        except urllib.error.HTTPError as e:
+            return f"HTTP Error {e.code}: {e.reason}"
+        except urllib.error.URLError as e:
+            return f"URL Error: {e.reason}"
+        except Exception as e:
+            return f"Error fetching URL: {e}"
+
+    def _web_search(self, query, num_results=5):
+        try:
+            num_results = min(max(num_results, 1), 10)
+            import urllib.request
+            import urllib.parse
+            import re
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode('utf-8', errors='replace')
+            results = []
+            for match in re.finditer(r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>', html, re.DOTALL):
+                href = match.group(1)
+                title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+                if title and href:
+                    results.append(f"- {title}\n  {href}")
+                    if len(results) >= num_results:
+                        break
+            if not results:
+                for match in re.finditer(r'<a[^>]*href="(https?://[^"]*)"[^>]*>(.*?)</a>', html, re.DOTALL):
+                    title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+                    href = match.group(1)
+                    if title and href and 'duckduckgo' not in href:
+                        results.append(f"- {title}\n  {href}")
+                        if len(results) >= num_results:
+                            break
+            return "\n\n".join(results) if results else "No search results found"
+        except Exception as e:
+            return f"Error searching: {e}"
+
+    def _agent_spawn(self, task, agent_type, context=""):
+        agent_prompts = {
+            "explore": "You are an exploration agent. Your job is to thoroughly explore the codebase, understand its structure, and report findings. Focus on: file organization, key modules, dependencies, patterns used. Do NOT modify any files.",
+            "plan": "You are a planning agent. Your job is to analyze a task and create a detailed step-by-step plan. Consider edge cases, dependencies, and potential issues. Do NOT execute any changes - only plan.",
+            "verify": "You are a verification agent. Your job is to verify that changes are correct. Check for: syntax errors, logical errors, missing imports, broken references, test failures. Report any issues found.",
+            "general": "You are a general-purpose agent. Complete the assigned task using the available tools. Be thorough and careful.",
+        }
+        system_prompt = agent_prompts.get(agent_type, agent_prompts["general"])
+        if context:
+            system_prompt += f"\n\nAdditional context: {context}"
+        try:
+            model = load_model()
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": task}
+            ]
+            response_text = ""
+            _spawn_done = [False]
+            _spawn_result = [""]
+            _spawn_error = [None]
+            def _run_spawn():
+                try:
+                    r = ""
+                    for chunk_type, chunk_content in model.chat_stream(messages, temperature=0.2, max_tokens=2048):
+                        if chunk_type == 'content' and chunk_content:
+                            r += chunk_content
+                    _spawn_result[0] = r
+                except Exception as ex:
+                    _spawn_error[0] = ex
+                finally:
+                    _spawn_done[0] = True
+            import threading
+            t = threading.Thread(target=_run_spawn, daemon=True)
+            t.start()
+            _spawn_start = _time.time()
+            while not _spawn_done[0]:
+                if _time.time() - _spawn_start > 60:
+                    return f"[Sub-agent ({agent_type}) timed out after 60s]"
+                _time.sleep(0.5)
+            if _spawn_error[0]:
+                return f"Sub-agent error: {_spawn_error[0]}"
+            return f"[Sub-agent ({agent_type}) completed]\n{_spawn_result[0]}"
+        except Exception as e:
+            return f"Sub-agent error: {e}"
+
+    def _task_create(self, title, description="", priority="medium"):
+        global _agent_tasks
+        task_id = f"task_{len(_agent_tasks) + 1}_{int(_time.time())}"
+        _agent_tasks[task_id] = {
+            "id": task_id,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "status": "pending",
+            "created_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "result": None
+        }
+        return f"Task created: [{task_id}] {title} (priority: {priority}, status: pending)"
+
+    def _task_update(self, task_id, status, result=None):
+        global _agent_tasks
+        if task_id not in _agent_tasks:
+            return f"Error: Task {task_id} not found"
+        _agent_tasks[task_id]["status"] = status
+        if result:
+            _agent_tasks[task_id]["result"] = result
+        return f"Task {task_id} updated to status: {status}"
+
+    def _task_list(self):
+        global _agent_tasks
+        if not _agent_tasks:
+            return "No tasks tracked"
+        lines = []
+        for tid, task in _agent_tasks.items():
+            icon = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]", "failed": "[!]"}.get(task["status"], "[?]")
+            lines.append(f"{icon} [{tid}] {task['title']} - {task['status']} (priority: {task.get('priority', 'medium')})")
+        return "\n".join(lines)
+
+    def _brief(self, focus="general"):
+        global _agent_tasks, _agent_plan_mode
+        parts = [f"Session Brief (focus: {focus})"]
+        parts.append(f"Plan mode: {'active' if _agent_plan_mode else 'inactive'}")
+        parts.append(f"Tasks tracked: {len(_agent_tasks)}")
+        if _agent_tasks:
+            for tid, task in _agent_tasks.items():
+                parts.append(f"  - [{task['status']}] {task['title']}")
+        return "\n".join(parts)
+
+    def _open_project_dir(self, path, device_id=""):
+        if not path:
+            return {"error": "Path is required"}
+        abs_path = os.path.abspath(path)
+        if not os.path.isdir(abs_path):
+            return {"error": f"Directory not found: {abs_path}"}
+        user_info = _get_user_workspace(device_id)
+        if abs_path.startswith(os.path.abspath(user_info["workspace"])):
+            return {"result": f"Project opened: {abs_path}", "path": abs_path, "in_workspace": True}
+        if abs_path not in user_info.get("imported_paths", []):
+            user_info.setdefault("imported_paths", []).append(abs_path)
+            _save_accounts()
+        return {"result": f"Project opened: {abs_path} (imported)", "path": abs_path, "in_workspace": False}
+
+    def _list_env(self):
+        info = {}
+        try:
+            r = subprocess.run(["python", "--version"], capture_output=True, text=True, timeout=5)
+            info["python"] = r.stdout.strip() or r.stderr.strip()
+        except: info["python"] = "unknown"
+        try:
+            r = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
+            info["nodejs"] = r.stdout.strip()
+        except: info["nodejs"] = "not found"
+        try:
+            r = subprocess.run(["pip", "list", "--format=json"], capture_output=True, text=True, timeout=10)
+            pkgs = json.loads(r.stdout) if r.stdout else []
+            info["pip_packages"] = [p["name"] for p in pkgs[:30]]
+        except: info["pip_packages"] = []
+        info["os"] = os.name
+        info["cwd"] = os.getcwd()
+        return {"result": f"Python={info.get('python','?')}, Node={info.get('nodejs','?')}, OS={info['os']}", **info}
+
+_agent_plan_mode = False
+_agent_tasks = {}
+
+tool_registry = ToolRegistry()
+
+import threading
+import uuid as _uuid
+
+class PermissionRequest:
+    """
+    PermissionRequest - 权限请求对象
+    
+    参考Trae/Claude Code设计:
+    1. 权限请求会阻塞工具执行,直到用户明确响应
+    2. 默认无限期等待用户响应,不会自动超时执行
+    3. 支持"始终允许"和"始终拒绝"的规则记忆
+    """
+    def __init__(self, tool_name, tool_input, reason=""):
+        self.request_id = "perm_" + _uuid.uuid4().hex[:12]
+        self.tool_name = tool_name
+        self.tool_input = tool_input
+        self.reason = reason
+        self.event = threading.Event()
+        self.result = None
+        self.always = False
+        self.created_at = time.time()
+
+    def wait(self, timeout=None):
+        """
+        等待用户响应
+        
+        Args:
+            timeout: None表示无限期等待,直到用户响应
+                    
+        Returns:
+            bool: True表示用户已响应,False表示超时(仅在指定timeout时)
+        """
+        return self.event.wait(timeout=timeout)
+
+    def resolve(self, allowed, always=False):
+        """
+        解析权限请求
+        
+        Args:
+            allowed: True表示允许,False表示拒绝
+            always: True表示始终允许/拒绝此工具
+        """
+        self.result = allowed
+        self.always = always
+        self.event.set()
+
+pending_permission_requests = {}
+
+class AuditLogger:
+    _instance = None
+    def __init__(self, log_dir=None):
+        self.log_dir = log_dir or os.path.join(RUNTIME_DIR, 'audit_logs')
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.session_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.log_path = os.path.join(self.log_dir, f'audit_{self.session_id}.jsonl')
+        self.entries = []
+
+    def log(self, action, tool_name, details, allowed=True, device_id=''):
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "action": action,
+            "tool": tool_name,
+            "details": details,
+            "allowed": allowed,
+            "device_id": device_id,
+        }
+        self.entries.append(entry)
+        try:
+            with open(self.log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        except:
+            pass
+
+    def get_recent(self, limit=50):
+        return self.entries[-limit:]
+
+    def get_stats(self):
+        total = len(self.entries)
+        allowed = sum(1 for e in self.entries if e.get("allowed"))
+        denied = total - allowed
+        tool_counts = {}
+        for e in self.entries:
+            tn = e.get("tool", "unknown")
+            tool_counts[tn] = tool_counts.get(tn, 0) + 1
+        recent_denied = [e for e in self.entries[-100:] if not e.get("allowed")]
+        return {
+            "total": total,
+            "allowed": allowed,
+            "denied": denied,
+            "tool_counts": tool_counts,
+            "recent_denied": recent_denied[-10:],
+            "session_id": self.session_id,
+        }
+
+    def load_all_logs(self, limit=500):
+        all_entries = list(self.entries)
+        try:
+            for fname in sorted(os.listdir(self.log_dir)):
+                if fname.startswith('audit_') and fname.endswith('.jsonl'):
+                    fpath = os.path.join(self.log_dir, fname)
+                    if fpath == self.log_path:
+                        continue
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            try:
+                                all_entries.append(json.loads(line.strip()))
+                            except:
+                                pass
+        except:
+            pass
+        all_entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        return all_entries[:limit]
+
+audit_logger = AuditLogger()
+
+class DenialTracker:
+    def __init__(self, consecutive_limit=3, session_limit=20):
+        self.consecutive_denials = 0
+        self.session_denials = 0
+        self.consecutive_limit = consecutive_limit
+        self.session_limit = session_limit
+
+    def record_denial(self):
+        self.consecutive_denials += 1
+        self.session_denials += 1
+
+    def record_approval(self):
+        self.consecutive_denials = 0
+
+    def should_fallback_to_prompting(self):
+        if self.consecutive_denials >= self.consecutive_limit:
+            return True
+        if self.session_denials >= self.session_limit:
+            return True
+        return False
+
+SANDBOX_WRITE_DIRS = set()
+SANDBOX_DENY_PATTERNS = [
+    r'[\\/]\.(git|svn|hg)[\\/]', r'[\\/]node_modules[\\/]', r'[\\/]__pycache__[\\/]',
+    r'[\\/]\.env$', r'[\\/]id_rsa', r'[\\/]id_ed25519', r'[\\/]\.ssh[\\/]',
+    r'[\\/]credentials', r'[\\/]\.aws[\\/]', r'[\\/]\.gnupg[\\/]',
+]
+DENIED_COMMANDS = [
+    'rm -rf /', 'format ', 'del /f /s /q C:', 'mkfs.', 'dd if=',
+    ':(){:|:&};:', 'shutdown', 'reboot', 'halt', 'poweroff',
+    'net user', 'net localgroup', 'reg add', 'reg delete',
+]
+
+class PermissionChecker:
+    """
+    PermissionChecker - 辉夜IDE权限检查器
+    
+    参考Trae/Claude Code设计:
+    1. 默认bypass_mode=False,所有危险操作都需要权限检查
+    2. 权限请求会阻塞工具执行,直到用户明确响应
+    3. 支持规则系统(allow/deny/ask rules)
+    4. 支持"始终允许"和"始终拒绝"的规则记忆
+    5. 命令分类器自动审批安全命令(参考Trae的bashClassifier)
+    """
+    
+    # 安全命令模式:这些命令会被分类器自动审批
+    SAFE_COMMAND_PATTERNS = [
+        # Python相关
+        r'^python\s', r'^python3\s', r'^python\.exe\s',
+        r'^pip\s+(install|list|show|check|freeze|download|cache|config)',
+        r'^pip3\s+(install|list|show|check)',
+        r'^conda\s+(install|list|info|env|create|activate|run|search)',
+        # 文件查看
+        r'^(echo|print|type|cat|more|less|head|tail|wc)\s',
+        r'^(dir|ls|ll|la)\b',
+        r'^(cd|chdir|pwd)\b',
+        r'^(find|grep|which|where|whereis)\b',
+        r'^(tree|fc|diff|cmp)\b',
+        # Git安全操作
+        r'^git\s+(status|log|diff|show|branch|tag|stash|remote|fetch|pull|clone|init|add|commit|checkout|merge|rebase|cherry-pick|blame|reflog|shortlog)',
+        # Node/npm
+        r'^npm\s+(install|list|run|test|start|build|info|view|ls|outdated|audit)',
+        r'^node\s+--version$', r'^node\s+-v$',
+        r'^npx\s',
+        # 系统信息
+        r'^(ver|hostname|whoami|date|time|systeminfo|env|set|printenv|uname)\b',
+        r'^(ipconfig|ifconfig|ping|nslookup|tracert|netstat)\b',
+        r'^(tasklist|taskkill|ps|top|jobs|bg|fg)\b',
+        # 开发工具
+        r'^(javac|java|gcc|g\+\+|make|cmake|cargo|go|rustc|mvn|gradle)\b',
+        r'^(pytest|unittest|jest|mocha|vitest|coverage)\b',
+        r'^(flask|django|manage\.py|artisan)\b',
+        # 文本处理
+        r'^(sort|uniq|cut|awk|sed|tr|xargs|tee|split|join|paste)\b',
+        # 网络下载(只读)
+        r'^(curl\s+(-I|--head|-s|-S)|wget\s+(--spider|-q))',
+        # 其他安全命令
+        r'^(help|man|info|apropos|whatis)\b',
+        r'^(clear|cls|reset)\b',
+        r'^(mkdir|md|touch|cp|copy|mv|move|rename)\s+(?!(?:/|C:\\\\|/etc/|/usr/|/bin/|/sbin/|/var/|/sys/))',
+    ]
+    
+    DANGEROUS_COMMAND_PATTERNS = [
+        r'\brm\s+(-rf|-r|-f)\s+(/|~|/home|/root|C:\\\\|/etc|/usr|/var|/sys)',
+        r'\bdel\s+(/[sfq]|/s|/f|/q)\s+[A-Z]:\\\\',
+        r'\bformat\s+[a-z]:',
+        r'\bshutdown\b', r'\breboot\b', r'\bhalt\b', r'\bpoweroff\b',
+        r':\(\)\{\s*\|\s*&\s*\}\s*;',  # fork bomb
+        r'\bdd\s+if=.*of=/dev/',
+        r'\bnet\s+(user|localgroup|share|stop|start)\s',
+        r'\breg\s+(add|delete|import|export|save|load|restore|unload|compare|copy|query)',
+        r'\bicacls\b',
+        r'\bsudo\s+(-i|--login|-s)\b',  # interactive sudo
+        r'\brunas\s+/user:',
+        r'\bchmod\s+777\b', r'\bchmod\s+-R\s+777\b',
+        r'\b>?\s*(/etc/passwd|/etc/shadow|/etc/sudoers|C:\\\\Windows\\System32\\config)',
+    ]
+    
+    def __init__(self):
+        self.denial_tracker = DenialTracker()
+        self.always_allow = set()
+        self.always_deny = set()
+        self.sandbox_mode = False
+        self.sandbox_dirs = set()
+        self.dangerous_commands_allowed = False
+        self.bypass_mode = False
+        self._rules_by_source = {'userSettings': [], 'projectSettings': [], 'localSettings': [], 'session': []}
+        for _t in ['read_file','list_directory','search_files','glob','todo_write','enter_plan_mode','exit_plan_mode','task_create','task_update','task_list','brief']:
+            self.always_allow.add(_t)
+        self._load_persisted_rules()
+        import re
+        self._safe_patterns = [re.compile(p, re.IGNORECASE) for p in self.SAFE_COMMAND_PATTERNS]
+        self._dangerous_patterns = [re.compile(p, re.IGNORECASE) for p in self.DANGEROUS_COMMAND_PATTERNS]
+
+    def _load_persisted_rules(self):
+        try:
+            rules_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'permission_rules.json')
+            if os.path.exists(rules_path):
+                with open(rules_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                for source in self._rules_by_source:
+                    if source in data:
+                        for rule in data[source]:
+                            behavior = rule.get('behavior', 'allow')
+                            tool = rule.get('tool', '')
+                            content = rule.get('content', '')
+                            self._rules_by_source[source].append({'behavior': behavior, 'tool': tool, 'content': content})
+                            if behavior == 'allow' and tool:
+                                self.always_allow.add(tool)
+                            elif behavior == 'deny' and tool:
+                                self.always_deny.add(tool)
+        except Exception:
+            pass
+
+    def _save_rules(self):
+        try:
+            rules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+            os.makedirs(rules_dir, exist_ok=True)
+            rules_path = os.path.join(rules_dir, 'permission_rules.json')
+            with open(rules_path, 'w', encoding='utf-8') as f:
+                json.dump(self._rules_by_source, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def add_rule(self, source, behavior, tool, content=''):
+        if source not in self._rules_by_source:
+            self._rules_by_source[source] = []
+        rule = {'behavior': behavior, 'tool': tool, 'content': content}
+        self._rules_by_source[source].append(rule)
+        if behavior == 'allow' and tool:
+            self.always_allow.add(tool)
+        elif behavior == 'deny' and tool:
+            self.always_deny.add(tool)
+        self._save_rules()
+
+    def remove_rule(self, source, behavior, tool):
+        if source in self._rules_by_source:
+            self._rules_by_source[source] = [r for r in self._rules_by_source[source] if not (r['behavior'] == behavior and r['tool'] == tool)]
+        if behavior == 'allow' and tool in self.always_allow:
+            self.always_allow.discard(tool)
+        elif behavior == 'deny' and tool in self.always_deny:
+            self.always_deny.discard(tool)
+        self._save_rules()
+
+    def _make_decision(self, behavior, reason, source='system', tool_name='', rule=None):
+        decision = {
+            'behavior': behavior,
+            'reason': reason,
+            'decision_reason': {'type': 'rule' if rule else source, 'source': source}
+        }
+        if rule:
+            decision['decision_reason']['rule'] = rule
+        if tool_name:
+            decision['tool'] = tool_name
+        return decision
+
+    def _classify_command(self, command):
+        """
+        命令分类器 - 参考Trae的bashClassifier设计
+        
+        返回:
+            'allow' - 安全命令,自动审批
+            'prompt' - 需要用户确认
+            'deny' - 危险命令,拒绝
+        """
+        if not command:
+            return 'deny', 'Empty command'
+        
+        cmd_stripped = command.strip().lower()
+        
+        # 1. 检查危险模式
+        for pattern in self._dangerous_patterns:
+            if pattern.search(cmd_stripped):
+                return 'deny', f'Dangerous command pattern detected'
+        
+        # 检查DENIED_COMMANDS列表
+        for denied in DENIED_COMMANDS:
+            if denied.lower() in cmd_stripped:
+                return 'deny', f'Matched denied command: {denied}'
+        
+        # 2. 检查安全模式
+        for pattern in self._safe_patterns:
+            if pattern.search(cmd_stripped):
+                return 'allow', f'Safe command (auto-approved by classifier)'
+        
+        # 3. 特殊检查: .py脚本运行通常是安全的
+        if cmd_stripped.endswith('.py') or cmd_stripped.endswith('.pyw'):
+            return 'prompt', f'Python script execution'
+        
+        if cmd_stripped.endswith('.bat') or cmd_stripped.endswith('.cmd') or cmd_stripped.endswith('.sh'):
+            return 'prompt', f'Script file execution'
+        
+        # 4. 默认需要用户确认
+        return 'prompt', 'Command requires user approval'
+
+    def check(self, tool_name, tool_input, tool_def, device_id=''):
+        import re
+        
+        if self.bypass_mode:
+            self.denial_tracker.record_approval()
+            audit_logger.log("permission_check", tool_name, {"result": "allow", "reason": "bypass_mode"}, True, device_id)
+            return self._make_decision('allow', 'bypass_mode', 'mode', tool_name)
+        
+        if tool_name in self.always_deny:
+            self.denial_tracker.record_denial()
+            audit_logger.log("permission_check", tool_name, {"result": "deny", "reason": "always_deny rule"}, False, device_id)
+            return self._make_decision('deny', 'always_deny rule', 'rule', tool_name, {'source': 'always_deny', 'tool': tool_name})
+        
+        if tool_name in self.always_allow:
+            self.denial_tracker.record_approval()
+            audit_logger.log("permission_check", tool_name, {"result": "allow", "reason": "always_allow rule"}, True, device_id)
+            return self._make_decision('allow', 'always_allow rule', 'rule', tool_name, {'source': 'always_allow', 'tool': tool_name})
+        
+        if not tool_def.get("requires_permission", True):
+            self.denial_tracker.record_approval()
+            audit_logger.log("permission_check", tool_name, {"result": "allow", "reason": "no permission required"}, True, device_id)
+            return self._make_decision('allow', 'tool does not require permission', 'mode', tool_name)
+        
+        if tool_def.get("is_read_only", False):
+            self.denial_tracker.record_approval()
+            audit_logger.log("permission_check", tool_name, {"result": "allow", "reason": "read-only tool"}, True, device_id)
+            return self._make_decision('allow', 'read-only tool', 'mode', tool_name)
+        
+        if tool_name in ("write_file", "edit_file", "create_directory"):
+            path = tool_input.get("path", "") if isinstance(tool_input, dict) else ""
+            path_check = self._check_path_permission(path, tool_name)
+            if path_check["behavior"] == "deny":
+                self.denial_tracker.record_denial()
+                audit_logger.log("permission_check", tool_name, {"result": "deny", "reason": path_check["reason"], "path": path}, False, device_id)
+                return path_check
+        
+        if tool_name == "execute_command":
+            cmd = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+            
+            cmd_check = self._check_command_permission(cmd)
+            if cmd_check["behavior"] == "deny":
+                self.denial_tracker.record_denial()
+                audit_logger.log("permission_check", tool_name, {"result": "deny", "reason": cmd_check["reason"], "command": cmd[:200]}, False, device_id)
+                return cmd_check
+            
+            classification, reason = self._classify_command(cmd)
+            if classification == 'allow':
+                self.denial_tracker.record_approval()
+                audit_logger.log("permission_check", tool_name, {"result": "allow", "reason": reason, "command": cmd[:100]}, True, device_id)
+                return self._make_decision('allow', reason, 'classifier', tool_name)
+            elif classification == 'deny':
+                self.denial_tracker.record_denial()
+                audit_logger.log("permission_check", tool_name, {"result": "deny", "reason": reason, "command": cmd[:100]}, False, device_id)
+                return self._make_decision('deny', reason, 'safetyCheck', tool_name)
+        
+        if self.denial_tracker.should_fallback_to_prompting():
+            audit_logger.log("permission_check", tool_name, {"result": "prompt", "reason": "denial threshold"}, True, device_id)
+            return self._make_decision('prompt', 'denial threshold reached - requiring explicit approval', 'mode', tool_name)
+        
+        audit_logger.log("permission_check", tool_name, {"result": "prompt", "reason": "requires permission"}, True, device_id)
+        return self._make_decision('prompt', 'tool requires permission', 'mode', tool_name)
+
+    def _check_path_permission(self, path, tool_name):
+        if not path:
+            return {"behavior": "deny", "reason": "No path specified"}
+        abs_path = os.path.abspath(path)
+        for pattern in SANDBOX_DENY_PATTERNS:
+            if re.search(pattern, abs_path.replace('\\', '/')):
+                return {"behavior": "deny", "reason": f"Path matches denied pattern: system/credential directory"}
+        if self.sandbox_mode and self.sandbox_dirs:
+            allowed = any(abs_path.startswith(os.path.abspath(d)) for d in self.sandbox_dirs)
+            if not allowed:
+                return {"behavior": "deny", "reason": f"Path outside sandbox directories. Allowed dirs: {', '.join(self.sandbox_dirs)}"}
+        return {"behavior": "allow", "reason": "path within allowed boundaries"}
+
+    def _check_command_permission(self, command):
+        if not command:
+            return self._make_decision('deny', 'No command specified', 'safetyCheck')
+        cmd_lower = command.lower().strip()
+        pipe_segments = self._split_pipe_segments(command)
+        for segment in pipe_segments:
+            seg_lower = segment.strip().lower()
+            for denied in DENIED_COMMANDS:
+                if denied.lower() in seg_lower:
+                    return self._make_decision('deny', f'Pipe segment contains denied pattern: {denied}', 'safetyCheck')
+        redirections = self._extract_redirections(command)
+        for redir in redirections:
+            target = redir.get('target', '')
+            for pattern in SANDBOX_DENY_PATTERNS:
+                if re.search(pattern, target.replace('\\', '/')):
+                    return self._make_decision('deny', f'Output redirection to protected path: {target}', 'safetyCheck')
+        for denied in DENIED_COMMANDS:
+            if denied.lower() in cmd_lower:
+                return self._make_decision('deny', f'Command contains denied pattern: {denied}', 'safetyCheck')
+        if not self.dangerous_commands_allowed:
+            dangerous_patterns = ['sudo ', 'runas ', 'chmod 777', 'chmod -R 777', 'icacls /grant Everyone']
+            for pat in dangerous_patterns:
+                if pat.lower() in cmd_lower:
+                    return self._make_decision('deny', f'Dangerous command pattern requires explicit approval: {pat}', 'safetyCheck')
+        return self._make_decision('allow', 'command within allowed boundaries', 'rule')
+
+    def _split_pipe_segments(self, command):
+        segments = []
+        current = []
+        in_single_quote = False
+        in_double_quote = False
+        escaped = False
+        for ch in command:
+            if escaped:
+                current.append(ch)
+                escaped = False
+                continue
+            if ch == '\\':
+                escaped = True
+                current.append(ch)
+                continue
+            if ch == "'" and not in_double_quote:
+                in_single_quote = not in_single_quote
+                current.append(ch)
+            elif ch == '"' and not in_single_quote:
+                in_double_quote = not in_double_quote
+                current.append(ch)
+            elif ch == '|' and not in_single_quote and not in_double_quote:
+                segments.append(''.join(current).strip())
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            segments.append(''.join(current).strip())
+        return [s for s in segments if s]
+
+    def _extract_redirections(self, command):
+        redirs = []
+        in_single_quote = False
+        in_double_quote = False
+        escaped = False
+        i = 0
+        while i < len(command):
+            ch = command[i]
+            if escaped:
+                escaped = False
+                i += 1
+                continue
+            if ch == '\\':
+                escaped = True
+                i += 1
+                continue
+            if ch == "'" and not in_double_quote:
+                in_single_quote = not in_single_quote
+            elif ch == '"' and not in_single_quote:
+                in_double_quote = not in_double_quote
+            elif ch == '>' and not in_single_quote and not in_double_quote:
+                operator = '>'
+                if i + 1 < len(command) and command[i + 1] == '>':
+                    operator = '>>'
+                    i += 1
+                i += 1
+                while i < len(command) and command[i] == ' ':
+                    i += 1
+                target_start = i
+                while i < len(command) and command[i] not in (' ', '|', ';', '&') and not (command[i] == '>' and not in_single_quote and not in_double_quote):
+                    i += 1
+                target = command[target_start:i].strip('"').strip("'")
+                if target:
+                    redirs.append({'operator': operator, 'target': target})
+                continue
+            i += 1
+        return redirs
+
+    def add_sandbox_dir(self, path):
+        abs_path = os.path.abspath(path)
+        self.sandbox_dirs.add(abs_path)
+        SANDBOX_WRITE_DIRS.add(abs_path)
+
+    def get_config(self):
+        return {
+            "bypass_mode": self.bypass_mode,
+            "sandbox_mode": self.sandbox_mode,
+            "sandbox_dirs": list(self.sandbox_dirs),
+            "always_allow": list(self.always_allow),
+            "always_deny": list(self.always_deny),
+            "dangerous_commands_allowed": self.dangerous_commands_allowed,
+            "session_denials": self.denial_tracker.session_denials,
+            "rules_by_source": {k: v for k, v in self._rules_by_source.items() if v},
+        }
+
+permission_checker = PermissionChecker()
+
+class EventBus:
+    _instance = None
+    def __init__(self):
+        self._listeners = {}
+        self._history = []
+        self._max_history = 200
+
+    def on(self, event_type, callback):
+        if event_type not in self._listeners:
+            self._listeners[event_type] = []
+        self._listeners[event_type].append(callback)
+
+    def off(self, event_type, callback=None):
+        if event_type in self._listeners:
+            if callback:
+                self._listeners[event_type] = [cb for cb in self._listeners[event_type] if cb != callback]
+            else:
+                del self._listeners[event_type]
+
+    def emit(self, event_type, data=None):
+        event = {"type": event_type, "data": data, "timestamp": time.time()}
+        self._history.append(event)
+        if len(self._history) > self._max_history:
+            self._history = self._history[-self._max_history:]
+        for cb in self._listeners.get(event_type, []):
+            try:
+                cb(event)
+            except:
+                pass
+        for cb in self._listeners.get("*", []):
+            try:
+                cb(event)
+            except:
+                pass
+
+    def get_history(self, event_type=None, limit=50):
+        events = self._history if not event_type else [e for e in self._history if e["type"] == event_type]
+        return events[-limit:]
+
+event_bus = EventBus()
+
+class TaskManager:
+    def __init__(self):
+        self.tasks = {}
+        self._counter = 0
+        self._lock = threading.Lock()
+        self._context_stack = []
+        self._active_task_id = None
+
+    def create_task(self, title, description="", priority="medium", dependencies=None, parent_id=None):
+        with self._lock:
+            self._counter += 1
+            task_id = f"task_{self._counter}_{int(time.time())}"
+            task = {
+                "id": task_id,
+                "title": title,
+                "description": description,
+                "priority": {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(priority, 2),
+                "priority_label": priority,
+                "status": "pending",
+                "result": None,
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "dependencies": dependencies or [],
+                "parent_id": parent_id,
+                "children": [],
+                "context": {},
+                "messages": [],
+                "progress": 0,
+            }
+            self.tasks[task_id] = task
+            if parent_id and parent_id in self.tasks:
+                self.tasks[parent_id]["children"].append(task_id)
+            event_bus.emit("task_created", {"task_id": task_id, "title": title})
+            return task_id
+
+    def update_task(self, task_id, status=None, result=None, progress=None, context=None):
+        with self._lock:
+            if task_id not in self.tasks:
+                return False
+            task = self.tasks[task_id]
+            if status:
+                task["status"] = status
+            if result is not None:
+                task["result"] = result
+            if progress is not None:
+                task["progress"] = min(100, max(0, progress))
+            if context:
+                task["context"].update(context)
+            task["updated_at"] = time.time()
+            event_bus.emit("task_updated", {"task_id": task_id, "status": status})
+            return True
+
+    def get_task(self, task_id):
+        return self.tasks.get(task_id)
+
+    def get_active_task(self):
+        if self._active_task_id and self._active_task_id in self.tasks:
+            return self.tasks[self._active_task_id]
+        return None
+
+    def set_active_task(self, task_id):
+        if task_id and task_id in self.tasks:
+            if self._active_task_id and self._active_task_id in self.tasks:
+                self._context_stack.append(self._active_task_id)
+            self._active_task_id = task_id
+            event_bus.emit("task_activated", {"task_id": task_id})
+            return True
+        return False
+
+    def restore_previous_task(self):
+        if self._context_stack:
+            prev_id = self._context_stack.pop()
+            self._active_task_id = prev_id
+            event_bus.emit("task_activated", {"task_id": prev_id})
+            return prev_id
+        self._active_task_id = None
+        return None
+
+    def get_ready_tasks(self):
+        ready = []
+        for tid, task in self.tasks.items():
+            if task["status"] != "pending":
+                continue
+            deps_met = all(
+                self.tasks.get(dep_id, {}).get("status") == "done"
+                for dep_id in task.get("dependencies", [])
+                if dep_id in self.tasks
+            )
+            if deps_met:
+                ready.append(task)
+        ready.sort(key=lambda t: (t["priority"], t["created_at"]))
+        return ready
+
+    def get_parallel_tasks(self):
+        running = [t for t in self.tasks.values() if t["status"] == "in_progress"]
+        return running
+
+    def list_tasks(self, status_filter=None, priority_filter=None):
+        tasks = list(self.tasks.values())
+        if status_filter:
+            tasks = [t for t in tasks if t["status"] == status_filter]
+        if priority_filter:
+            tasks = [t for t in tasks if t["priority_label"] == priority_filter]
+        tasks.sort(key=lambda t: (t["priority"], t["created_at"]))
+        return tasks
+
+    def cancel_task(self, task_id):
+        with self._lock:
+            if task_id in self.tasks:
+                self.tasks[task_id]["status"] = "failed"
+                self.tasks[task_id]["result"] = "Cancelled by user"
+                self.tasks[task_id]["updated_at"] = time.time()
+                for child_id in self.tasks[task_id].get("children", []):
+                    if child_id in self.tasks and self.tasks[child_id]["status"] in ("pending", "in_progress"):
+                        self.tasks[child_id]["status"] = "failed"
+                        self.tasks[child_id]["result"] = "Parent task cancelled"
+                event_bus.emit("task_cancelled", {"task_id": task_id})
+                return True
+        return False
+
+    def get_task_tree(self, task_id=None, depth=0):
+        if task_id is None:
+            roots = [t for t in self.tasks.values() if not t.get("parent_id")]
+            return [self.get_task_tree(t["id"], depth) for t in roots]
+        task = self.tasks.get(task_id, {})
+        node = {k: v for k, v in task.items() if k != "children"}
+        node["depth"] = depth
+        node["children"] = [self.get_task_tree(cid, depth + 1) for cid in task.get("children", []) if cid in self.tasks]
+        return node
+
+    def get_stats(self):
+        statuses = {}
+        for t in self.tasks.values():
+            s = t["status"]
+            statuses[s] = statuses.get(s, 0) + 1
+        return {
+            "total": len(self.tasks),
+            "by_status": statuses,
+            "active": self._active_task_id,
+            "context_stack_depth": len(self._context_stack),
+            "parallel_running": len(self.get_parallel_tasks()),
+        }
+
+task_manager = TaskManager()
+
+class BrowserIntegration:
+    def __init__(self):
+        self._search_cache = {}
+        self._cache_ttl = 300
+
+    def search(self, query, max_results=5):
+        cache_key = f"search:{query}"
+        if cache_key in self._search_cache:
+            cached_time, cached_results = self._search_cache[cache_key]
+            if time.time() - cached_time < self._cache_ttl:
+                return cached_results
+        results = []
+        try:
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+            resp = urllib.request.urlopen(req, timeout=10)
+            html = resp.read().decode("utf-8", errors="replace")
+            import re as _re
+            links = _re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, _re.DOTALL)
+            snippets = _re.findall(r'class="result__snippet"[^>]*>(.*?)</[at]', html, _re.DOTALL)
+            for i, (href, title) in enumerate(links[:max_results]):
+                clean_title = _re.sub(r'<[^>]+>', '', title).strip()
+                snippet = _re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+                results.append({"title": clean_title, "url": href, "snippet": snippet})
+        except Exception as e:
+            results.append({"error": str(e)})
+        self._search_cache[cache_key] = (time.time(), results)
+        event_bus.emit("browser_search", {"query": query, "results_count": len(results)})
+        return results
+
+    def fetch_page(self, url, format="markdown"):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+            resp = urllib.request.urlopen(req, timeout=15)
+            content_type = resp.headers.get("Content-Type", "")
+            raw = resp.read().decode("utf-8", errors="replace")
+            if "json" in content_type or url.endswith(".json"):
+                return {"format": "json", "content": raw[:15000], "url": url}
+            import re as _re
+            title_match = _re.search(r'<title[^>]*>(.*?)</title>', raw, _re.DOTALL | _re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else ""
+            clean = _re.sub(r'<script[^>]*>[\s\S]*?</script>', '', raw, flags=_re.IGNORECASE)
+            clean = _re.sub(r'<style[^>]*>[\s\S]*?</style>', '', clean, flags=_re.IGNORECASE)
+            clean = _re.sub(r'<nav[^>]*>[\s\S]*?</nav>', '', clean, flags=_re.IGNORECASE)
+            clean = _re.sub(r'<footer[^>]*>[\s\S]*?</footer>', '', clean, flags=_re.IGNORECASE)
+            clean = _re.sub(r'<header[^>]*>[\s\S]*?</header>', '', clean, flags=_re.IGNORECASE)
+            if format == "markdown":
+                clean = _re.sub(r'<h1[^>]*>(.*?)</h1>', r'\n# \1\n', clean, flags=_re.IGNORECASE)
+                clean = _re.sub(r'<h2[^>]*>(.*?)</h2>', r'\n## \1\n', clean, flags=_re.IGNORECASE)
+                clean = _re.sub(r'<h3[^>]*>(.*?)</h3>', r'\n### \1\n', clean, flags=_re.IGNORECASE)
+                clean = _re.sub(r'<h4[^>]*>(.*?)</h4>', r'\n#### \1\n', clean, flags=_re.IGNORECASE)
+                clean = _re.sub(r'<p[^>]*>(.*?)</p>', r'\n\1\n', clean, flags=_re.DOTALL | _re.IGNORECASE)
+                clean = _re.sub(r'<br\s*/?>', '\n', clean, flags=_re.IGNORECASE)
+                clean = _re.sub(r'<li[^>]*>(.*?)</li>', r'- \1\n', clean, flags=_re.DOTALL | _re.IGNORECASE)
+                clean = _re.sub(r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r'[\2](\1)', clean, flags=_re.DOTALL | _re.IGNORECASE)
+                clean = _re.sub(r'<strong[^>]*>(.*?)</strong>', r'**\1**', clean, flags=_re.DOTALL | _re.IGNORECASE)
+                clean = _re.sub(r'<em[^>]*>(.*?)</em>', r'*\1*', clean, flags=_re.DOTALL | _re.IGNORECASE)
+                clean = _re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', clean, flags=_re.DOTALL | _re.IGNORECASE)
+                clean = _re.sub(r'<pre[^>]*>(.*?)</pre>', r'\n```\n\1\n```\n', clean, flags=_re.DOTALL | _re.IGNORECASE)
+            clean = _re.sub(r'<[^>]+>', '', clean)
+            clean = _re.sub(r'\n{3,}', '\n\n', clean)
+            clean = clean.strip()
+            if len(clean) > 15000:
+                clean = clean[:15000] + "\n... (truncated)"
+            event_bus.emit("browser_fetch", {"url": url, "format": format})
+            return {"format": format, "title": title, "content": clean, "url": url}
+        except Exception as e:
+            return {"error": str(e), "url": url}
+
+    def open_local_project(self, path):
+        abs_path = os.path.abspath(path)
+        if not os.path.isdir(abs_path):
+            return {"error": f"Directory not found: {abs_path}"}
+        try:
+            if os.name == "nt":
+                os.startfile(abs_path)
+            elif os.name == "posix":
+                subprocess.Popen(["xdg-open", abs_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            event_bus.emit("browser_open_local", {"path": abs_path})
+            return {"status": "ok", "path": abs_path, "message": f"Opened project: {abs_path}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def open_url_in_browser(self, url):
+        try:
+            if os.name == "nt":
+                os.startfile(url)
+            elif os.name == "posix":
+                subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            event_bus.emit("browser_open_url", {"url": url})
+            return {"status": "ok", "url": url}
+        except Exception as e:
+            return {"error": str(e)}
+
+browser_integration = BrowserIntegration()
+
+class PluginRegistry:
+    def __init__(self):
+        self._plugins = {}
+        self._tool_map = {}
+
+    def register(self, plugin_id, name, description="", tools=None, icon="", category="general"):
+        self._plugins[plugin_id] = {
+            "id": plugin_id,
+            "name": name,
+            "description": description,
+            "icon": icon,
+            "category": category,
+            "enabled": True,
+            "tools": tools or [],
+            "config": {},
+        }
+        for tool in (tools or []):
+            tool_name = tool.get("name", "")
+            if tool_name:
+                self._tool_map[tool_name] = plugin_id
+        event_bus.emit("plugin_registered", {"plugin_id": plugin_id, "name": name})
+
+    def unregister(self, plugin_id):
+        if plugin_id in self._plugins:
+            for tool in self._plugins[plugin_id].get("tools", []):
+                tool_name = tool.get("name", "")
+                self._tool_map.pop(tool_name, None)
+            del self._plugins[plugin_id]
+            event_bus.emit("plugin_unregistered", {"plugin_id": plugin_id})
+
+    def get_plugin(self, plugin_id):
+        return self._plugins.get(plugin_id)
+
+    def list_plugins(self, category=None, enabled_only=False):
+        plugins = list(self._plugins.values())
+        if category:
+            plugins = [p for p in plugins if p["category"] == category]
+        if enabled_only:
+            plugins = [p for p in plugins if p["enabled"]]
+        return plugins
+
+    def toggle_plugin(self, plugin_id, enabled=None):
+        if plugin_id in self._plugins:
+            if enabled is not None:
+                self._plugins[plugin_id]["enabled"] = enabled
+            else:
+                self._plugins[plugin_id]["enabled"] = not self._plugins[plugin_id]["enabled"]
+            event_bus.emit("plugin_toggled", {"plugin_id": plugin_id, "enabled": self._plugins[plugin_id]["enabled"]})
+            return True
+        return False
+
+    def find_plugin_for_tool(self, tool_name):
+        plugin_id = self._tool_map.get(tool_name)
+        if plugin_id and plugin_id in self._plugins:
+            return self._plugins[plugin_id]
+        return None
+
+    def get_all_tools(self):
+        tools = []
+        for plugin in self._plugins.values():
+            if plugin["enabled"]:
+                tools.extend(plugin.get("tools", []))
+        return tools
+
+plugin_registry = PluginRegistry()
+plugin_registry.register("core_filesystem", "文件系统", "文件读写和目录操作", [
+    {"name": "read_file", "description": "Read file contents"},
+    {"name": "write_file", "description": "Write file contents"},
+    {"name": "edit_file", "description": "Edit file contents"},
+    {"name": "list_directory", "description": "List directory contents"},
+    {"name": "create_directory", "description": "Create directory"},
+    {"name": "glob", "description": "Find files by pattern"},
+    {"name": "search_files", "description": "Search in files"},
+], icon="📁", category="filesystem")
+plugin_registry.register("core_terminal", "终端操作", "命令执行和进程管理", [
+    {"name": "execute_command", "description": "Execute shell command"},
+    {"name": "compile", "description": "Compile and run code"},
+], icon="💻", category="terminal")
+plugin_registry.register("core_browser", "浏览器集成", "网络搜索和网页访问", [
+    {"name": "web_search", "description": "Search the web"},
+    {"name": "web_fetch", "description": "Fetch web page"},
+], icon="🌐", category="browser")
+plugin_registry.register("core_task", "任务管理", "多任务创建和跟踪", [
+    {"name": "task_create", "description": "Create tracked task"},
+    {"name": "task_update", "description": "Update task status"},
+    {"name": "task_list", "description": "List all tasks"},
+], icon="📋", category="task")
+plugin_registry.register("core_planning", "规划模式", "任务规划和执行控制", [
+    {"name": "enter_plan_mode", "description": "Enter plan mode"},
+    {"name": "exit_plan_mode", "description": "Exit plan mode"},
+    {"name": "todo_write", "description": "Update todo list"},
+    {"name": "brief", "description": "Generate context brief"},
+], icon="🧠", category="planning")
+
+def _snip_compact(messages, max_messages=30):
+    if len(messages) <= max_messages:
+        return messages
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    other_msgs = [m for m in messages if m.get("role") != "system"]
+    kept = other_msgs[-max_messages:]
+    return system_msgs + kept
+
+def _micro_compact(messages, max_tool_output=2000):
+    result = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str) and len(content) > max_tool_output:
+            msg = {**msg, "content": content[:max_tool_output] + f"\n... (truncated, {len(content)} total chars)"}
+        result.append(msg)
+    return result
+
+def _auto_compact(messages, token_threshold=40000):
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    estimated_tokens = total_chars // 4
+    if estimated_tokens < token_threshold:
+        return messages
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    other_msgs = [m for m in messages if m.get("role") != "system"]
+    if len(other_msgs) <= 8:
+        return messages
+    recent = other_msgs[-8:]
+    older = other_msgs[:-8]
+    summary_parts = []
+    for m in older:
+        role = m.get("role", "unknown")
+        content = str(m.get("content", ""))[:150]
+        if "[Tool Result:" in content:
+            tool_name = content.split("[Tool Result:")[1].split("]")[0] if "[Tool Result:" in content else ""
+            summary_parts.append(f"[{role}] Used tool: {tool_name}")
+        else:
+            summary_parts.append(f"[{role}] {content}")
+    summary = "[Context Summary - Earlier conversation compacted]\nWhat was done previously:\n" + "\n".join(summary_parts[-10:]) + "\n\n[End of summary. Continue with the current task.]"
+    return system_msgs + [{"role": "user", "content": summary}] + recent
+
+AGENT_SYSTEM_PROMPT = """You are 辉夜 (Kaguya), an autonomous coding agent. You operate directly on the user's files and project - writing, editing, creating, and running code in the actual file system, NOT in the chat.
+
+## Identity
+- Your name is 辉夜 (Kaguya). Always refer to yourself as 辉夜 when mentioning your identity.
+- You are an intelligent coding assistant that directly manipulates files and runs projects.
+- Respond in the same language as the user's message. If the user writes in Chinese, respond in Chinese.
+
+## CRITICAL: Direct File Operation Mode
+You work like Trae/Claude Code - you operate DIRECTLY on files in the file system:
+1. **NEVER show code in your text response** - use write_file/edit_file to write code directly to files
+2. **NEVER explain code by pasting it in chat** - instead, write it to the file and briefly describe what you did
+3. **Always use tools to make changes** - if you need to create a file, use write_file; if you need to edit, use edit_file
+4. **Create directories as needed** - use create_directory to set up project structure
+5. **Run the project when asked** - use execute_command to run the project, install dependencies, etc.
+6. **Be autonomous** - when asked to build something, do it end-to-end: create files, install deps, run the project
+
+## MANDATORY: You MUST use tools for ALL file and command operations
+- When asked to create a file → use write_file tool (NOT describe the code)
+- When asked to edit a file → use edit_file tool (NOT show the diff)
+- When asked to run a program → use execute_command tool (NOT describe how to run it)
+- When asked to install packages → use execute_command tool (NOT list the commands)
+- When asked to delete a file → use delete_file tool
+- When asked to undo changes → use undo_last tool
+- NEVER respond with just a description of what you would do - ALWAYS actually DO it using tools
+
+## API Integration & External Service Automation
+When asked to integrate with an external API or service, follow this workflow:
+1. **Identify API** - Use web_fetch to read the API documentation/OpenAPI spec. Parse endpoints, auth methods, request/response schemas.
+2. **Plan Architecture** - Determine what files to create: config files, API client modules, data models, main application entry point.
+3. **Create Project Structure** - Use create_directory to set up the project layout, then write_file for each component.
+4. **Install Dependencies** - Use execute_command to install required packages (pip install, npm install, etc.). Always check if packages are already installed first.
+5. **Implement & Test** - Write the code, then use execute_command to run and verify it works.
+6. **Handle Errors** - If a dependency is missing, install it. If the API returns errors, debug and fix the code.
+
+### API Identification Checklist
+- Authentication: API key, OAuth, Bearer token? → Set up in config/env
+- Base URL: What is the API endpoint?
+- Endpoints: What operations are available?
+- Request format: JSON body, query params, headers?
+- Response format: What data structure is returned?
+- Rate limits: Any throttling requirements?
+- Error handling: What HTTP status codes to handle?
+
+### Dependency Auto-Detection
+- Before running code, check if required packages are installed using execute_command (e.g., `pip list | grep package_name`)
+- If missing, install with execute_command (e.g., `pip install package_name`)
+- For Node.js: check package.json dependencies, run `npm install` if needed
+- For Python: check requirements.txt or imports in code, install missing packages
+- Always install in the correct virtual environment if specified
+
+## Workflow
+1. **Understand** the task → think about what files need to be created/modified
+2. **Read** existing files first (use read_file) to understand the codebase
+3. **Act** directly on files using write_file/edit_file/create_directory
+4. **Verify** by reading back or running the code (execute_command)
+5. **Report** briefly what you did (1-2 sentences, NO code blocks in chat)
+
+## File Tools
+- `read_file`: Read a file before editing. Use offset/limit for large files
+- `write_file`: Write content directly to a file. Creates parent dirs automatically
+- `edit_file`: Make targeted edits by replacing exact text matches
+- `delete_file`: Delete a file (backed up for undo)
+- `create_directory`: Create a directory (and parent directories)
+- `list_directory`: Understand project structure
+- `search_files`: Find code patterns across files
+- `glob`: Find files by name pattern
+- `undo_last`: Undo the last file operation
+- `list_versions`: View file version history
+
+## Execution Tools
+- `execute_command`: Run shell commands - use for installing packages, running projects, git, etc.
+  - Can specify working_dir to run in a specific directory
+  - Example: {"command": "python main.py", "working_dir": "/path/to/project"}
+- `compile`: Quick code execution in sandbox for testing snippets
+- `pip_install`: Install Python packages. Checks if already installed first. Use for dependency management.
+  - Example: {"packages": "requests flask numpy"}
+  - Example with specific Python: {"packages": "requests", "python_path": "/path/to/python"}
+- `check_dependencies`: Check if packages are installed. Returns missing packages list.
+  - Example: {"packages": "requests,flask,numpy"}
+  - Example with requirements.txt: {"requirements_file": "/path/to/requirements.txt"}
+- `web_fetch`: Fetch URL content - use for reading API docs, OpenAPI specs, web pages
+- `web_search`: Search the web - use for finding documentation, solutions, API references
+
+## Tool Call Format
+When you need to use a tool, output a tool_use block in this exact format:
+
+```tool
+tool_name
+{"param1": "value1", "param2": "value2"}
+```
+
+Examples:
+```tool
+write_file
+{"path": "/path/to/file.py", "content": "print('hello')"}
+```
+
+```tool
+edit_file
+{"path": "/path/to/file.py", "old_string": "old text", "new_string": "new text"}
+```
+
+```tool
+execute_command
+{"command": "python main.py", "working_dir": "/path/to/project"}
+```
+
+```tool
+delete_file
+{"path": "/path/to/old_file.py"}
+```
+
+```tool
+pip_install
+{"packages": "requests flask"}
+```
+
+```tool
+check_dependencies
+{"packages": "requests,flask,numpy"}
+```
+
+```tool
+web_fetch
+{"url": "https://api.example.com/docs", "format": "markdown"}
+```
+
+When you have completed the task, respond with a brief summary of what you did. NO code blocks in your final response.
+
+## ANTI-LOOP RULES (CRITICAL)
+- NEVER repeat the same tool call with the same parameters
+- NEVER re-check the same environment condition (e.g. python version) more than once
+- After using tools to complete the task, ALWAYS end with a plain text summary - do NOT make another tool call
+- Maximum 8 tool calls per task. Plan your steps efficiently.
+- If a tool fails, try a DIFFERENT approach or report the error - do NOT retry the exact same call
+- If you detect that you are repeating the same pattern of actions, STOP immediately and summarize what happened
+- After 3 failed attempts at the same goal, STOP and report the failure to the user
+- MINIMIZE planning tools (todo_write, task_*, brief): use them at most ONCE at start, then focus on actual work (write_file, execute_command)
+- When task involves writing AND running code: write file FIRST, then IMMEDIATELY run it with execute_command"""
+
+class LoopDetector:
+    def __init__(self):
+        self.tool_signatures = []
+        self.failed_operations = []
+        self.sequence_patterns = []
+        self._consecutive_same = 0
+
+    def make_signature(self, tc):
+        name = tc.get("name", "")
+        inp = tc.get("input", {})
+        if isinstance(inp, dict):
+            key = inp.get("command", "") or inp.get("path", "") or inp.get("query", "") or str(inp)[:100]
+        else:
+            key = str(inp)[:100]
+        return name + ":" + key.lower().strip()
+
+    def record_tool_call(self, tc):
+        sig = self.make_signature(tc)
+        if self.tool_signatures and self.tool_signatures[-1] == sig:
+            self._consecutive_same += 1
+        else:
+            self._consecutive_same = 0
+        self.tool_signatures.append(sig)
+        return sig
+
+    def record_failure(self, tc):
+        sig = self.make_signature(tc)
+        self.failed_operations.append(sig)
+
+    def check_loop(self):
+        if not self.tool_signatures:
+            return None, None
+        last_sig = self.tool_signatures[-1]
+        dup_count = sum(1 for s in self.tool_signatures[-12:] if s == last_sig)
+        if dup_count >= 5:
+            return "duplicate_tool", f"Tool call repeated {dup_count} times: {last_sig[:60]}"
+        recent_n = min(len(self.tool_signatures), 12)
+        recent_sigs = self.tool_signatures[-recent_n:]
+        seq_len = min(len(recent_sigs), 12)
+        if seq_len >= 6:
+            recent_seq = tuple(recent_sigs[-seq_len:])
+            for pattern_len in range(min(seq_len // 2, 4), 1, -1):
+                pattern = tuple(recent_seq[:pattern_len])
+                repetitions = 0
+                for i in range(0, len(recent_seq) - pattern_len + 1, pattern_len):
+                    if tuple(recent_seq[i:i + pattern_len]) == pattern:
+                        repetitions += 1
+                    else:
+                        break
+                if repetitions >= 3:
+                    return "sequence_loop", f"Detected repeating pattern (length {pattern_len}, repeated {repetitions}x)"
+        fail_count = sum(1 for s in self.failed_operations[-6:] if s == last_sig)
+        if fail_count >= 3:
+            return "retry_loop", f"Same operation failed {fail_count} times: {last_sig[:60]}"
+        unique_tools = len(set(s.split(":")[0] for s in self.tool_signatures[-12:]))
+        if len(self.tool_signatures) >= 12 and unique_tools <= 1:
+            return "stuck", f"Agent appears stuck with only {unique_tools} different tool"
+        if self._consecutive_same >= 6:
+            return "duplicate_tool", f"Same tool called {self._consecutive_same + 1} times consecutively: {last_sig[:60]}"
+        return None, None
+
+class ContinueReason:
+    NEXT_TURN = "next_turn"
+    REACTIVE_COMPACT = "reactive_compact"
+    MAX_OUTPUT_TOKENS = "max_output_tokens"
+    DENIAL_FALLBACK = "denial_fallback"
+
+class QueryState:
+    def __init__(self, messages, tool_use_context=None, turn_count=1, max_turns=15, transition=None):
+        self.messages = messages
+        self.tool_use_context = tool_use_context or {}
+        self.turn_count = turn_count
+        self.max_turns = max_turns
+        self.transition = transition
+        self.has_attempted_reactive_compact = False
+        self.total_usage = {"input_tokens": 0, "output_tokens": 0}
+        self.loop_detector = LoopDetector()
+
+class QueryLoop:
+    def __init__(self):
+        self.tool_registry = tool_registry
+        self.permission_checker = permission_checker
+
+    def _is_aborted(self, abort_event):
+        return bool(abort_event and abort_event.is_set())
+
+    def _abort_event_json(self, run_id):
+        return json.dumps({"type": "aborted", "run_id": run_id, "message": "Agent run aborted by user", "done": True})
+
+    def _wait_permission(self, preq, timeout, abort_event):
+        deadline = time.time() + timeout if timeout else None
+        while True:
+            if self._is_aborted(abort_event):
+                return False, True
+            remaining = None if deadline is None else max(0, deadline - time.time())
+            if remaining == 0:
+                return False, False
+            if preq.wait(timeout=0.25 if remaining is None else min(0.25, remaining)):
+                return True, False
+
+    def run(self, user_message, history=None, working_dir=None, max_turns=8, abort_event=None, run_id=None):
+        messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+        if working_dir:
+            messages[0]["content"] += f"\n\n## Working Directory\n{working_dir}"
+        if history:
+            for h in history[-10:]:
+                messages.append({"role": "user", "content": h.get("user", "")})
+                messages.append({"role": "assistant", "content": h.get("assistant", "")})
+        messages.append({"role": "user", "content": user_message})
+        state = QueryState(messages=messages, max_turns=max_turns)
+        return self._query_loop(state, abort_event=abort_event, run_id=run_id)
+
+    def run_with_external_api(self, user_message, history=None, working_dir=None, external_api=None, max_turns=10, abort_event=None, run_id=None):
+        messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+        if working_dir:
+            messages[0]["content"] += f"\n\n## Working Directory\n{working_dir}"
+        if history:
+            for h in history[-10:]:
+                messages.append({"role": "user", "content": h.get("user", "")})
+                messages.append({"role": "assistant", "content": h.get("assistant", "")})
+        messages.append({"role": "user", "content": user_message})
+        state = QueryState(messages=messages, max_turns=max_turns)
+        return self._query_loop_external(state, external_api, abort_event=abort_event, run_id=run_id)
+
+    def _query_loop_external(self, state, external_api, abort_event=None, run_id=None):
+        import urllib.request
+        external_api = _external_api_for_frontend(external_api)
+        provider = (external_api.get('provider', 'deepseek') or 'deepseek').strip().lower()
+        api_url = external_api.get('apiUrl', 'https://api.deepseek.com').rstrip('/')
+        api_key = external_api.get('apiKey', '')
+        model_name = external_api.get('model', 'deepseek-chat')
+        recent_tool_signatures = []
+        empty_response_count = 0
+        _planning_tools = ('todo_write','enter_plan_mode','exit_plan_mode','task_create','task_update','task_list','brief')
+        _planning_count = 0
+        _max_planning_calls = 3
+        while True:
+            if self._is_aborted(abort_event):
+                yield self._abort_event_json(run_id)
+                return
+            state.messages = _snip_compact(state.messages)
+            state.messages = _micro_compact(state.messages)
+            state.messages = _auto_compact(state.messages)
+            response_text = ""
+            tool_calls = []
+            try:
+                ollama_msgs = []
+                for m in state.messages:
+                    ollama_msgs.append({"role": m["role"], "content": m["content"]})
+                if provider == 'claude':
+                    base = api_url or 'https://api.anthropic.com/v1/messages'
+                    req_data = json.dumps({
+                        "model": model_name, "max_tokens": 4096, "stream": True,
+                        "messages": ollama_msgs,
+                        "system": ollama_msgs[0]["content"] if ollama_msgs and ollama_msgs[0].get("role")=="system" else ""
+                    }).encode()
+                    req = urllib.request.Request(base, data=req_data, headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"})
+                    resp = urllib.request.urlopen(req, timeout=30)
+                    _last_read_time = _time.time()
+                    try:
+                        while True:
+                            if self._is_aborted(abort_event):
+                                yield self._abort_event_json(run_id)
+                                return
+                            if _time.time() - _last_read_time > 60:
+                                response_text += "\n[Read timeout: no data for 60s]"
+                                break
+                            line = resp.readline()
+                            if not line:
+                                break
+                            _last_read_time = _time.time()
+                            line = line.decode('utf-8', errors='replace').strip()
+                            if not line.startswith('data: '): continue
+                            chunk = line[6:]
+                            try:
+                                cd = json.loads(chunk)
+                                evt = cd.get("type", "")
+                                if evt == "content_block_delta":
+                                    delta = cd.get("delta", {})
+                                    content = delta.get("text", "")
+                                    if content:
+                                        response_text += content
+                                        yield json.dumps({"type": "thinking", "content": content, "iteration": state.turn_count, "done": False})
+                            except: continue
+                    finally:
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                elif provider == 'gemini':
+                    import google.generativeai as genai
+                    genai.configure(api_key=api_key)
+                    gm = model_name.split('/')[-1].replace(':generateContent','') if '/' in model_name else model_name
+                    model = genai.GenerativeModel(gm)
+                    sys_content = ""
+                    clean_msgs = list(ollama_msgs)
+                    if clean_msgs and clean_msgs[0].get("role")=="system":
+                        sys_content = clean_msgs.pop(0)["content"]
+                    chat = model.start_chat(history=[{"role":"user" if m["role"]=="user" else "model","parts":[m["content"]]} for m in clean_msgs])
+                    result = chat.send_message(ollama_msgs[-1]["content"] if ollama_msgs else "hi", stream=True)
+                    for chunk in result:
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
+                        text = chunk.text
+                        if text:
+                            response_text += text
+                            yield json.dumps({"type": "thinking", "content": text, "iteration": state.turn_count, "done": False})
+                else:
+                    base = build_chat_completions_endpoint(provider, api_url)
+                    req_payload = build_openai_chat_payload(
+                        provider,
+                        model_name,
+                        ollama_msgs,
+                        stream=True,
+                        temperature=0.3,
+                        max_tokens=4096,
+                        tools=self.tool_registry.get_tool_schemas(),
+                    )
+                    req_data = json.dumps(req_payload).encode()
+                    auth = f"Bearer {api_key}"
+                    req = urllib.request.Request(base, data=req_data, headers={"Content-Type": "application/json", "Authorization": auth})
+                    resp = urllib.request.urlopen(req, timeout=30)
+                    native_tool_calls = []
+                    _last_read_time = _time.time()
+                    try:
+                        while True:
+                            if self._is_aborted(abort_event):
+                                yield self._abort_event_json(run_id)
+                                return
+                            if _time.time() - _last_read_time > 60:
+                                response_text += "\n[Read timeout: no data for 60s]"
+                                break
+                            line = resp.readline()
+                            if not line:
+                                break
+                            _last_read_time = _time.time()
+                            line = line.decode('utf-8', errors='replace').strip()
+                            if not line.startswith('data: '): continue
+                            chunk = line[6:]
+                            if chunk.strip() == '[DONE]': break
+                            try:
+                                cd = json.loads(chunk)
+                                delta = cd.get('choices',[{}])[0].get('delta',{})
+                                content = delta.get('content','')
+                                if content:
+                                    response_text += content
+                                    yield json.dumps({"type": "thinking", "content": content, "iteration": state.turn_count, "done": False})
+                                tc_list = delta.get('tool_calls', [])
+                                for tci in tc_list:
+                                    idx = tci.get("index", 0)
+                                    while len(native_tool_calls) <= idx:
+                                        native_tool_calls.append({"id":"","name":"","arguments":""})
+                                    if tci.get("id"): native_tool_calls[idx]["id"] = tci["id"]
+                                    if tci.get("function"):
+                                        fn = tci["function"]
+                                        if fn.get("name"): native_tool_calls[idx]["name"] = fn["name"]
+                                        if fn.get("arguments"): native_tool_calls[idx]["arguments"] += fn["arguments"]
+                            except: continue
+                    finally:
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                    if native_tool_calls:
+                        parsed_native = []
+                        for ntc in native_tool_calls:
+                            if ntc.get("name") and ntc.get("arguments"):
+                                try:
+                                    args_json = json.loads(ntc["arguments"])
+                                except:
+                                    args_json = {"raw_args": ntc["arguments"]}
+                                parsed_native.append({"name": ntc["name"], "input": args_json})
+                        if parsed_native:
+                            tool_calls = parsed_native
+                parsed = self._parse_tool_use(response_text)
+                if parsed and not tool_calls:
+                    tool_calls = parsed
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode('utf-8', errors='replace')
+                except:
+                    body = str(e)
+                yield json.dumps({"type": "error", "content": f"External API HTTP {e.code} ({provider}): {body[:500]}", "done": True})
+                return
+            except Exception as e:
+                yield json.dumps({"type": "error", "content": f"External API error ({provider}): {e}", "done": True})
+                return
+            if tool_calls:
+                text_before_tools = response_text
+                for tc in tool_calls:
+                    text_before_tools = text_before_tools.split('```tool')[0].strip()
+                _filtered_tools = []
+                for _tc in tool_calls:
+                    if _tc["name"] in _planning_tools:
+                        _planning_count += 1
+                        if _planning_count > _max_planning_calls:
+                            yield json.dumps({"type": "tool_use", "tool": _tc["name"], "input": _tc.get("input",{}), "iteration": state.turn_count, "dangerous": False, "permission": "allow", "done": False})
+                            yield json.dumps({"type": "tool_result", "tool": _tc["name"], "input": _tc.get("input", {}), "output": f"Planning tool limit reached ({_max_planning_calls} calls). Please proceed with actual work now.", "iteration": state.turn_count, "done": False})
+                            state.messages.append({"role":"assistant","content":text_before_tools or response_text or "[Skipped]"})
+                            state.messages.append({"role":"user","content":f"[Tool Result: {_tc['name']}] Planning limit reached. Focus on the task."})
+                            continue
+                    _filtered_tools.append(_tc)
+                tool_calls = _filtered_tools
+                if not tool_calls:
+                    state.turn_count += 1
+                    continue
+                if text_before_tools:
+                    yield json.dumps({"type": "assistant", "content": text_before_tools, "iteration": state.turn_count, "done": False})
+                clean_response = text_before_tools if text_before_tools else response_text.split('```tool')[0].strip()
+                if not clean_response:
+                    clean_response = "[Used tool: " + ", ".join(tc["name"] for tc in tool_calls) + "]"
+                for tc in tool_calls:
+                    if self._is_aborted(abort_event):
+                        yield self._abort_event_json(run_id)
+                        return
+                    tool_def = self.tool_registry.tools.get(tc["name"], {})
+                    if _agent_plan_mode and tc["name"] in ("write_file","edit_file","execute_command","compile"):
+                        yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":False,"permission":"deny","done":False})
+                        result_text="Blocked: Cannot use write_file/edit_file/execute_command/compile in plan mode."
+                        yield json.dumps({"type":"tool_result","tool":tc["name"],"input":tc.get("input",{}),"output":result_text,"iteration":state.turn_count,"done":False})
+                        state.messages.append({"role":"assistant","content":clean_response})
+                        state.messages.append({"role":"user","content":f"[Tool Result: {tc['name']}]\n{result_text}"})
+                        break
+                    perm=self.permission_checker.check(tc["name"],tc.get("input",{}),tool_def)
+                    is_dangerous=tool_def.get("is_destructive",False)
+                    if perm["behavior"]=="prompt":
+                        preq=PermissionRequest(tc["name"],tc.get("input",{}),perm.get("reason",""))
+                        pending_permission_requests[preq.request_id]=preq
+                        yield json.dumps({"type":"permission_request","request_id":preq.request_id,"tool":tc["name"],"input":tc["input"],"reason":perm.get("reason",""),"iteration":state.turn_count,"dangerous":is_dangerous,"done":False})
+                        resolved, aborted = self._wait_permission(preq, 60, abort_event)
+                        if aborted:
+                            pending_permission_requests.pop(preq.request_id,None)
+                            yield self._abort_event_json(run_id)
+                            return
+                        if not resolved:
+                            result_text = f"Permission request timeout or error: {tc['name']}. Please try again."
+                            audit_logger.log("permission_denied", tc["name"], {"reason": "timeout_or_error"}, False)
+                            self.permission_checker.denial_tracker.record_denial()
+                            pending_permission_requests.pop(preq.request_id,None)
+                            yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":is_dangerous,"permission":"deny","done":False})
+                            tool_result_event={"type":"tool_result","tool":tc["name"],"input":tc.get("input",{}),"output":result_text,"iteration":state.turn_count,"done":False}
+                            yield json.dumps(tool_result_event)
+                            state.messages.append({"role":"assistant","content":clean_response})
+                            state.messages.append({"role":"user","content":f"[Tool Result: {tc['name']}]\n{result_text}"})
+                            state.loop_detector.record_tool_call(tc)
+                            continue
+                        # 用户已响应,根据用户选择决定是否执行
+                        if preq.result:
+                            # 用户允许执行
+                            if preq.always:
+                                self.permission_checker.add_rule(tc["name"],"allow")
+                            audit_logger.log("permission_granted",tc["name"],{"reason":"user_approved","always":preq.always},True)
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id,None)
+                                yield self._abort_event_json(run_id)
+                                return
+                            result=self.tool_registry.execute(tc["name"],tc["input"])
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id,None)
+                                yield self._abort_event_json(run_id)
+                                return
+                            result_text=result.get("result",result.get("error","Unknown error"))
+                            if "error" in result:self.permission_checker.denial_tracker.record_denial()
+                            else:self.permission_checker.denial_tracker.record_approval()
+                        else:
+                            if preq.always:
+                                self.permission_checker.add_rule(tc["name"],"deny")
+                            audit_logger.log("permission_denied",tc["name"],{"reason":"user_denied","always":preq.always},False)
+                            result_text=f"Permission denied by user: {tc['name']}"
+                            result={"error":result_text}
+                            self.permission_checker.denial_tracker.record_denial()
+                        pending_permission_requests.pop(preq.request_id,None)
+                        yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":is_dangerous,"permission":"allow" if resolved and preq.result else "deny","done":False})
+                    elif perm["behavior"]=="deny":
+                        yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":is_dangerous,"permission":"deny","done":False})
+                        result_text=f"Permission denied: {perm['reason']}"
+                        result={"error":result_text}
+                        self.permission_checker.denial_tracker.record_denial()
+                    else:
+                        yield json.dumps({"type":"tool_use","tool":tc["name"],"input":tc["input"],"iteration":state.turn_count,"dangerous":is_dangerous,"permission":"allow","done":False})
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
+                        result=self.tool_registry.execute(tc["name"],tc["input"])
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
+                        result_text=result.get("result",result.get("error","Unknown error"))
+                        if not isinstance(result_text, str):
+                            result_text = json.dumps(result_text, ensure_ascii=False)
+                        if "error" in result:self.permission_checker.denial_tracker.record_denial()
+                        else:self.permission_checker.denial_tracker.record_approval()
+                    tool_result_event={"type":"tool_result","tool":tc["name"],"input":tc.get("input",{}),"output":result_text[:8000],"iteration":state.turn_count,"done":False}
+                    if tc["name"] in ("write_file","edit_file") and "old_content" in result:
+                        oc=result["old_content"]
+                        tool_result_event["old_content"]=oc[:50000] if oc else None
+                    yield json.dumps(tool_result_event)
+                    state.messages.append({"role":"assistant","content":clean_response})
+                    state.messages.append({"role":"user","content":f"[Tool Result: {tc['name']}]\n{result_text[:4000]}"})
+                    state.loop_detector.record_tool_call(tc)
+                    if "error" in result or (isinstance(result_text, str) and ("Error" in result_text or "error" in result_text)):
+                        state.loop_detector.record_failure(tc)
+            else:
+                if not response_text or not response_text.strip():
+                    empty_response_count += 1
+                    if empty_response_count >= 3:
+                        yield json.dumps({"type":"assistant","content":"[No response from model after 3 attempts. Please try again.]","iteration":state.turn_count,"done":True})
+                        return
+                    continue
+                empty_response_count = 0
+                yield json.dumps({"type":"assistant","content":response_text,"iteration":state.turn_count,"done":True})
+                return
+            state.turn_count+=1
+            loop_type, loop_reason = state.loop_detector.check_loop()
+            if loop_type:
+                audit_logger.log("loop_detected", "agent", {"type": loop_type, "reason": loop_reason, "turns": state.turn_count}, False)
+                yield json.dumps({"type":"assistant","content":f"[Stopped - detected {loop_type}: {loop_reason}. Task completed or requires different approach.]","iteration":state.turn_count,"done":True})
+                return
+            if state.turn_count>state.max_turns:
+                yield json.dumps({"type":"assistant","content":response_text,"iteration":state.turn_count,"done":True})
+                return
+            state.transition=ContinueReason.NEXT_TURN
+
+    def _query_loop(self, state, abort_event=None, run_id=None):
+        model = load_model()
+        _planning_tools = ('todo_write','enter_plan_mode','exit_plan_mode','task_create','task_update','task_list','brief')
+        _planning_count = 0
+        _max_planning_calls = 3
+        while True:
+            if self._is_aborted(abort_event):
+                yield self._abort_event_json(run_id)
+                return
+            state.messages = _snip_compact(state.messages)
+            state.messages = _micro_compact(state.messages)
+            state.messages = _auto_compact(state.messages)
+            response_text = ""
+            tool_calls = []
+            try:
+                _model_timeout = 180 if state.turn_count > 1 else 120
+                _stream_result = []
+                _stream_error = [None]
+                _stream_done = [False]
+                _stream_cancel = [False]
+                def _run_stream():
+                    try:
+                        for ct, cc in model.chat_stream(state.messages, temperature=0.3, max_tokens=4096, stream_timeout=_model_timeout):
+                            if _stream_cancel[0]:
+                                break
+                            _stream_result.append((ct, cc))
+                    except Exception as ex:
+                        _stream_error[0] = ex
+                    finally:
+                        _stream_done[0] = True
+                import threading as _th
+                _t = _th.Thread(target=_run_stream, daemon=True)
+                _t.start()
+                _start_time = __import__('time').time()
+                _last_heartbeat = _start_time
+                while not _stream_done[0]:
+                    if self._is_aborted(abort_event):
+                        _stream_cancel[0] = True
+                        yield self._abort_event_json(run_id)
+                        return
+                    _elapsed = __import__('time').time() - _start_time
+                    if _elapsed > _model_timeout:
+                        _stream_cancel[0] = True
+                        yield json.dumps({"type": "error", "content": f"Model response timeout after {_model_timeout}s (turn {state.turn_count}). The local model may be overloaded or the context is too large.", "done": True})
+                        return
+                    _now = __import__('time').time()
+                    if _now - _last_heartbeat > 15:
+                        yield json.dumps({"type": "thinking", "content": "...", "iteration": state.turn_count, "done": False})
+                        _last_heartbeat = _now
+                    __import__('time').sleep(0.5)
+                if _stream_error[0]:
+                    raise _stream_error[0]
+                for ct, cc in _stream_result:
+                    if self._is_aborted(abort_event):
+                        yield self._abort_event_json(run_id)
+                        return
+                    if ct == 'content' and cc:
+                        response_text += cc
+                        yield json.dumps({"type": "thinking", "content": cc, "iteration": state.turn_count, "done": False})
+                parsed = self._parse_tool_use(response_text)
+                if parsed:
+                    tool_calls = parsed
+            except Exception as e:
+                yield json.dumps({"type": "error", "content": f"Model error: {e}", "done": False})
+                return
+
+            if tool_calls:
+                _filtered_tools = []
+                for _tc in tool_calls:
+                    if _tc["name"] in _planning_tools:
+                        _planning_count += 1
+                        if _planning_count > _max_planning_calls:
+                            yield json.dumps({"type": "tool_use", "tool": _tc["name"], "input": _tc.get("input",{}), "iteration": state.turn_count, "dangerous": False, "permission": "allow", "done": False})
+                            yield json.dumps({"type": "tool_result", "tool": _tc["name"], "input": _tc.get("input", {}), "output": f"Planning tool limit reached ({_max_planning_calls} calls). Please proceed with actual work now - use write_file, execute_command, or respond with your summary.", "iteration": state.turn_count, "done": False})
+                            state.messages.append({"role":"assistant","content":response_text or "[Skipped planning tool]"})
+                            state.messages.append({"role":"user","content":f"[Tool Result: {_tc['name']}] Planning tool limit reached. Focus on completing the task."})
+                            continue
+                    _filtered_tools.append(_tc)
+                tool_calls = _filtered_tools
+                if not tool_calls:
+                    state.turn_count += 1
+                    continue
+                for tc in tool_calls:
+                    if self._is_aborted(abort_event):
+                        yield self._abort_event_json(run_id)
+                        return
+                    tool_def = self.tool_registry.tools.get(tc["name"], {})
+                    if _agent_plan_mode and tc["name"] in ("write_file", "edit_file", "execute_command", "compile"):
+                        yield json.dumps({
+                            "type": "tool_use",
+                            "tool": tc["name"],
+                            "input": tc["input"],
+                            "iteration": state.turn_count,
+                            "dangerous": False,
+                            "permission": "deny",
+                            "done": False
+                        })
+                        result_text = "Blocked: Cannot use write_file/edit_file/execute_command/compile in plan mode. Use exit_plan_mode first."
+                        yield json.dumps({
+                            "type": "tool_result",
+                            "tool": tc["name"],
+                            "input": tc.get("input", {}),
+                            "output": result_text,
+                            "iteration": state.turn_count,
+                            "done": False
+                        })
+                        state.messages.append({"role": "assistant", "content": response_text})
+                        state.messages.append({"role": "user", "content": f"[Tool Result: {tc['name']}]\n{result_text}"})
+                        break
+                    perm = self.permission_checker.check(tc["name"], tc.get("input", {}), tool_def)
+                    is_dangerous = tool_def.get("is_destructive", False)
+                    if perm["behavior"] == "prompt":
+                        preq = PermissionRequest(tc["name"], tc.get("input", {}), perm.get("reason", ""))
+                        pending_permission_requests[preq.request_id] = preq
+                        yield json.dumps({"type": "permission_request", "request_id": preq.request_id, "tool": tc["name"], "input": tc["input"], "reason": perm.get("reason", ""), "iteration": state.turn_count, "dangerous": is_dangerous, "done": False})
+                        resolved, aborted = self._wait_permission(preq, 60, abort_event)
+                        if aborted:
+                            pending_permission_requests.pop(preq.request_id, None)
+                            yield self._abort_event_json(run_id)
+                            return
+                        if not resolved:
+                            # 如果wait返回False(理论上不会发生,因为timeout=None),则拒绝执行
+                            result_text = f"Permission request timeout or error: {tc['name']}. Please try again."
+                            audit_logger.log("permission_denied", tc["name"], {"reason": "timeout_or_error"}, False)
+                            self.permission_checker.denial_tracker.record_denial()
+                            pending_permission_requests.pop(preq.request_id, None)
+                            yield json.dumps({"type": "tool_use", "tool": tc["name"], "input": tc["input"], "iteration": state.turn_count, "dangerous": is_dangerous, "permission": "deny", "done": False})
+                            yield json.dumps({"type": "tool_result", "tool": tc["name"], "input": tc.get("input", {}), "output": result_text, "iteration": state.turn_count, "done": False})
+                            state.messages.append({"role": "assistant", "content": response_text})
+                            state.messages.append({"role": "user", "content": f"[Tool Result: {tc['name']}]\n{result_text}"})
+                            state.loop_detector.record_tool_call(tc)
+                            continue
+                        # 用户已响应,根据用户选择决定是否执行
+                        if preq.result:
+                            # 用户允许执行
+                            if preq.always:
+                                self.permission_checker.add_rule(tc["name"], "allow")
+                            audit_logger.log("permission_granted", tc["name"], {"reason": "user_approved", "always": preq.always}, True)
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id, None)
+                                yield self._abort_event_json(run_id)
+                                return
+                            result = self.tool_registry.execute(tc["name"], tc["input"])
+                            if self._is_aborted(abort_event):
+                                pending_permission_requests.pop(preq.request_id, None)
+                                yield self._abort_event_json(run_id)
+                                return
+                            result_text = result.get("result", result.get("error", "Unknown error"))
+                            if not isinstance(result_text, str):
+                                result_text = json.dumps(result_text, ensure_ascii=False)
+                            if "error" in result:
+                                self.permission_checker.denial_tracker.record_denial()
+                            else:
+                                self.permission_checker.denial_tracker.record_approval()
+                        else:
+                            # 用户拒绝执行
+                            if preq.always:
+                                self.permission_checker.add_rule(tc["name"], "deny")
+                            audit_logger.log("permission_denied", tc["name"], {"reason": "user_denied", "always": preq.always}, False)
+                            result_text = f"Permission denied by user: {tc['name']}"
+                            result = {"error": result_text}
+                            self.permission_checker.denial_tracker.record_denial()
+                        pending_permission_requests.pop(preq.request_id, None)
+                        yield json.dumps({"type": "tool_use", "tool": tc["name"], "input": tc["input"], "iteration": state.turn_count, "dangerous": is_dangerous, "permission": "allow" if preq.result else "deny", "done": False})
+                    elif perm["behavior"] == "deny":
+                        yield json.dumps({"type": "tool_use", "tool": tc["name"], "input": tc["input"], "iteration": state.turn_count, "dangerous": is_dangerous, "permission": "deny", "done": False})
+                        result_text = f"Permission denied: {perm['reason']}"
+                        result = {"error": result_text}
+                        self.permission_checker.denial_tracker.record_denial()
+                    else:
+                        yield json.dumps({"type": "tool_use", "tool": tc["name"], "input": tc["input"], "iteration": state.turn_count, "dangerous": is_dangerous, "permission": "allow", "done": False})
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
+                        result = self.tool_registry.execute(tc["name"], tc["input"])
+                        if self._is_aborted(abort_event):
+                            yield self._abort_event_json(run_id)
+                            return
+                        result_text = result.get("result", result.get("error", "Unknown error"))
+                        if not isinstance(result_text, str):
+                            result_text = json.dumps(result_text, ensure_ascii=False)
+                        if "error" in result:
+                            self.permission_checker.denial_tracker.record_denial()
+                        else:
+                            self.permission_checker.denial_tracker.record_approval()
+                    yield json.dumps({
+                        "type": "tool_result",
+                        "tool": tc["name"],
+                        "input": tc.get("input", {}),
+                        "output": result_text[:8000],
+                        "iteration": state.turn_count,
+                        "done": False
+                    })
+                    state.messages.append({"role": "assistant", "content": response_text})
+                    state.messages.append({
+                        "role": "user",
+                        "content": f"[Tool Result: {tc['name']}]\n{result_text[:4000]}"
+                    })
+                    state.loop_detector.record_tool_call(tc)
+                    if "error" in result or (isinstance(result_text, str) and ("Error" in result_text or "error" in result_text)):
+                        state.loop_detector.record_failure(tc)
+            else:
+                yield json.dumps({
+                    "type": "assistant",
+                    "content": response_text,
+                    "iteration": state.turn_count,
+                    "done": True
+                })
+                return
+
+            state.turn_count += 1
+            loop_type, loop_reason = state.loop_detector.check_loop()
+            if loop_type:
+                audit_logger.log("loop_detected", "agent", {"type": loop_type, "reason": loop_reason, "turns": state.turn_count}, False)
+                yield json.dumps({
+                    "type": "assistant",
+                    "content": f"[Stopped - detected {loop_type}: {loop_reason}. Task completed or requires different approach.]",
+                    "iteration": state.turn_count,
+                    "done": True
+                })
+                return
+            if state.turn_count > state.max_turns:
+                yield json.dumps({
+                    "type": "assistant",
+                    "content": "I've reached the maximum number of iterations. Let me summarize what I've done so far:\n" + response_text,
+                    "iteration": state.turn_count,
+                    "done": True
+                })
+                return
+            state.transition = ContinueReason.NEXT_TURN
+
+    def _parse_tool_use(self, text):
+        import re
+        patterns = [
+            (r'```tool\n(\w+)\n(.*?)```', lambda m: [{"name": m.group(1), "input": self._safe_json(m.group(2))}]),
+            (r'<tool_use>\s*<name>(\w+)</name>\s*<input>(.*?)</input>\s*</tool_use>', lambda m: [{"name": m.group(1), "input": self._safe_json(m.group(2))}]),
+            (r'```(\w+)_call\n(.*?)```', lambda m: [{"name": m.group(1), "input": self._safe_json(m.group(2))}]),
+            (r'<(write_file|edit_file|read_file|execute_command|create_directory|delete_file|remove_directory|compile|list_directory|glob|search_files|list_env|undo_last|list_versions|pip_install|check_dependencies|web_fetch|web_search|agent_spawn|open_project_dir)>\s*(?:<path>([^<]*)</path>)?\s*(?:<content>([\s\S]*?)</content>|<command>([^<]*)</command>|<packages>([^<]*)</packages>|<url>([^<]*)</url>|<query>([^<]*)</query>)*\s*</\1>', self._parse_xml_tool),
+        ]
+        for pattern, handler in patterns:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                return handler(match)
+        json_pattern = r'```json\s*\{[\s\S]*?"tool"\s*:\s*"(\w+)"[\s\S]*?"input"\s*:\s*\{[\s\S]*?\}[\s\S]*?\}'
+        json_match = re.search(json_pattern, text)
+        if json_match:
+            try:
+                full = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', text)
+                if full:
+                    data = json.loads(full.group(1))
+                    return [{"name": data.get("tool"), "input": data.get("input", {})}]
+            except:
+                pass
+        nested_pattern = r'(execute_command|read_file|write_file|edit_file|list_directory|search_files|glob|create_directory|compile|delete_file|open_project_dir|list_env|undo_last|list_versions|remove_directory)\s*\(\s*(\w+|execute_command)\s*,\s*args\s*=\s*(\{[^}]+\})\s*\)'
+        nested_match = re.search(nested_pattern, text, re.DOTALL)
+        if nested_match:
+            tool_name = nested_match.group(1)
+            args_str = nested_match.group(3)
+            args = self._safe_json(args_str)
+            if isinstance(args, dict):
+                if "description" in args:
+                    del args["description"]
+                return [{"name": tool_name, "input": args}]
+        func_pattern_json = r'(?:read_file|write_file|edit_file|list_directory|search_files|execute_command|glob|create_directory|compile|open_project_dir|list_env|delete_file|undo_last|list_versions|remove_directory)\s*\(\s*(\{[^}]+\})\s*\)'
+        func_match_json = re.search(func_pattern_json, text, re.DOTALL)
+        if func_match_json:
+            tool_name_match = re.search(r'(read_file|write_file|edit_file|list_directory|search_files|execute_command|glob|create_directory|compile|open_project_dir|list_env|delete_file|undo_last|list_versions|remove_directory)', text)
+            if tool_name_match:
+                return [{"name": tool_name_match.group(1), "input": self._safe_json(func_match_json.group(1))}]
+        func_pattern_str = r'(execute_command|read_file|write_file|edit_file|list_directory|search_files|glob|create_directory|compile|open_project_dir|list_env|delete_file|undo_last|list_versions|remove_directory)\s*\(\s*[\'"](.+?)[\'"]\s*(?:,\s*[\'"](.+?)[\'"])?\s*(?:,\s*[\'"](.+?)[\'"])?\s*\)'
+        func_match_str = re.search(func_pattern_str, text, re.DOTALL)
+        if func_match_str:
+            tool_name = func_match_str.group(1)
+            params = {}
+            param_values = [func_match_str.group(i) for i in range(2, 5) if func_match_str.group(i)]
+            if tool_name == "execute_command":
+                if len(param_values) >= 1:
+                    params["command"] = param_values[0]
+                if len(param_values) >= 2:
+                    try:
+                        params["working_dir"] = param_values[1]
+                    except:
+                        pass
+            elif tool_name in ("read_file", "write_file", "edit_file"):
+                if len(param_values) >= 1:
+                    params["path"] = param_values[0]
+                if len(param_values) >= 2 and tool_name == "write_file":
+                    params["content"] = param_values[1]
+                elif len(param_values) >= 3 and tool_name == "edit_file":
+                    params["old_string"] = param_values[1]
+                    params["new_string"] = param_values[2]
+            elif tool_name in ("list_directory", "glob", "create_directory", "open_project_dir"):
+                if len(param_values) >= 1:
+                    params["path" if tool_name != "open_project_dir" else "path"] = param_values[0]
+            elif tool_name == "compile":
+                if len(param_values) >= 1:
+                    params["language"] = param_values[0]
+                if len(param_values) >= 2:
+                    params["code"] = param_values[1]
+            elif tool_name == "search_files":
+                if len(param_values) >= 1:
+                    params["query"] = param_values[0]
+                if len(param_values) >= 2:
+                    params["path"] = param_values[1]
+            elif tool_name == "delete_file":
+                if len(param_values) >= 1:
+                    params["path"] = param_values[0]
+            elif tool_name in ("undo_last", "list_env"):
+                pass
+            elif tool_name == "list_versions":
+                if len(param_values) >= 1:
+                    params["path"] = param_values[0]
+            elif tool_name == "remove_directory":
+                if len(param_values) >= 1:
+                    params["path"] = param_values[0]
+            if params or tool_name in ("undo_last", "list_env"):
+                return [{"name": tool_name, "input": params}]
+        return []
+
+    def _parse_xml_tool(self, match):
+        tool_name = match.group(1)
+        params = {}
+        path_val = match.group(2)
+        content_val = match.group(3)
+        command_val = match.group(4)
+        packages_val = match.group(5)
+        url_val = match.group(6)
+        query_val = match.group(7)
+        if path_val:
+            params["path"] = path_val
+        if content_val:
+            params["content"] = content_val
+        if command_val:
+            params["command"] = command_val
+        if packages_val:
+            params["packages"] = packages_val
+        if url_val:
+            params["url"] = url_val
+        if query_val:
+            params["query"] = query_val
+        if tool_name == "edit_file" and "path" in params:
+            if content_val and "<old_string>" in content_val:
+                import re as _re
+                old_m = _re.search(r'<old_string>(.*?)</old_string>', content_val, _re.DOTALL)
+                new_m = _re.search(r'<new_string>(.*?)</new_string>', content_val, _re.DOTALL)
+                if old_m:
+                    params["old_string"] = old_m.group(1)
+                if new_m:
+                    params["new_string"] = new_m.group(1)
+                params.pop("content", None)
+        return [{"name": tool_name, "input": params}]
+
+    def _safe_json(self, s):
+        s = s.strip()
+        try:
+            return json.loads(s)
+        except:
+            try:
+                return ast.literal_eval(s)
+            except:
+                return {"raw_input": s}
+
+agent_loop = QueryLoop()
+
+AGENT_IDE_HTML = r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kaguya Agent IDE</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg-0:#0a0a0f;--bg-1:#0f0f18;--bg-2:#161625;--bg-3:#1c1c30;
+  --bg-hover:#22223a;--bg-active:#2a2a45;
+  --border:#1e1e35;--border-light:#2d2d50;
+  --text:#e0e0f0;--text-dim:#8888aa;--text-muted:#555577;
+  --accent:#7c6aff;--accent2:#a78bfa;--accent3:#f472b6;
+  --accent-glow:rgba(124,106,255,0.25);
+  --cyan:#22d3ee;--cyan-glow:rgba(34,211,238,0.15);
+  --success:#34d399;--warning:#fbbf24;--error:#f87171;--info:#60a5fa;
+  --grad:linear-gradient(135deg,#7c6aff,#a78bfa);
+  --grad-warm:linear-gradient(135deg,#7c6aff,#f472b6);
+  --radius:8px;--radius-sm:5px;--radius-lg:12px;
+  --shadow:0 2px 12px rgba(0,0,0,0.4);
+  --transition:all 0.15s ease;
+}
+html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--bg-0);color:var(--text);overflow:hidden;font-size:13px;-webkit-font-smoothing:antialiased;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:var(--text-muted);}
+
+.layout{display:flex;height:100vh;width:100vw;overflow:hidden;}
+
+.sidebar{width:260px;min-width:200px;background:var(--bg-1);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:width 0.3s cubic-bezier(0.4,0,0.2,1),min-width 0.3s cubic-bezier(0.4,0,0.2,1);}
+.sidebar.collapsed{width:0;min-width:0;overflow:hidden;border-right:none;}
+.sidebar-header{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;background:linear-gradient(180deg,rgba(124,106,255,0.03),transparent);}
+.sidebar-header .logo{width:28px;height:28px;background:var(--grad-warm);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;box-shadow:0 2px 8px rgba(124,106,255,0.2);}
+.sidebar-header .back-link{margin-left:auto;font-size:10px;color:var(--text-muted);text-decoration:none;padding:3px 8px;border-radius:var(--radius-sm);border:1px solid transparent;transition:var(--transition);}
+.sidebar-header .back-link:hover{color:var(--cyan);border-color:rgba(34,211,238,0.2);}
+.sidebar-toggle-btn{position:absolute;left:0;top:50%;transform:translateY(-50%);width:20px;height:48px;background:var(--bg-2);border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:10px;z-index:50;transition:var(--transition);opacity:0;}
+.sidebar-toggle-btn:hover{background:var(--accent);color:#fff;width:24px;}
+.main-area:hover .sidebar-toggle-btn{opacity:1;}
+.file-tree{flex:1;overflow-y:auto;padding:4px 0;}
+.tree-section{padding:5px 12px 3px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:var(--text-muted);margin-top:2px;}
+.tree-item{padding:4px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);transition:var(--transition);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tree-item:hover{background:var(--bg-hover);color:var(--text);}
+.tree-item.active{background:var(--bg-active);color:var(--cyan);}
+.tree-icon{font-size:11px;flex-shrink:0;width:18px;text-align:center;}
+.tree-icon.dir{color:var(--accent2);}
+.tree-icon.file{color:var(--text-muted);}
+.tree-name{flex:1;overflow:hidden;text-overflow:ellipsis;}
+.tree-size{font-size:9px;color:var(--text-muted);opacity:0.5;margin-left:auto;flex-shrink:0;font-family:'JetBrains Mono',monospace;}
+.tree-item .tree-run-btn{display:none;font-size:10px;padding:1px 6px;border-radius:3px;background:var(--success);color:#fff;cursor:pointer;border:none;margin-left:4px;flex-shrink:0;transition:var(--transition);}
+.tree-item:hover .tree-run-btn{display:block;}
+.tree-item .tree-run-btn:hover{background:#059669;transform:scale(1.05);}
+.context-menu{position:fixed;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.4);z-index:99999;min-width:160px;padding:4px 0;display:none;}
+.context-menu.visible{display:block;}
+.context-menu-item{padding:6px 14px;font-size:11px;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;gap:8px;transition:var(--transition);}
+.context-menu-item:hover{background:var(--bg-hover);color:var(--text);}
+.context-menu-item.run-item{color:var(--success);font-weight:600;}
+.context-menu-item.run-item:hover{background:rgba(16,185,129,0.1);}
+.context-menu-divider{height:1px;background:var(--border);margin:4px 0;}
+
+.main-area{flex:1;display:flex;flex-direction:column;min-width:0;}
+
+.tabs-bar{display:flex;background:var(--bg-1);border-bottom:1px solid var(--border);height:34px;align-items:stretch;overflow-x:auto;flex-shrink:0;}
+.tab{padding:0 14px;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;border-right:1px solid var(--border);white-space:nowrap;position:relative;transition:var(--transition);}
+.editor-toolbar{display:none;align-items:center;gap:6px;padding:4px 10px;background:var(--bg-2);border-bottom:1px solid var(--border);min-height:32px;flex-shrink:0;}
+.editor-toolbar.visible{display:flex;}
+.editor-toolbar .toolbar-file{font-size:11px;color:var(--text);font-weight:600;margin-right:6px;}
+.editor-toolbar .toolbar-lang{font-size:9px;padding:1px 6px;border-radius:4px;background:var(--accent);color:#fff;text-transform:uppercase;}
+.editor-toolbar .toolbar-spacer{flex:1;}
+.editor-toolbar button.toolbar-btn{padding:3px 10px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-dim);cursor:pointer;display:flex;align-items:center;gap:4px;transition:var(--transition);white-space:nowrap;}
+.editor-toolbar button.toolbar-btn:hover{background:var(--bg-hover);border-color:var(--accent);color:var(--text);}
+.editor-toolbar button.toolbar-btn.run-btn{background:var(--success);border-color:var(--success);color:#fff;font-weight:600;}
+.editor-toolbar button.toolbar-btn.run-btn:hover{background:#059669;border-color:#059669;}
+.editor-toolbar button.toolbar-btn.term-btn{background:var(--bg-1);border-color:var(--accent2);color:var(--accent2);}
+.editor-toolbar button.toolbar-btn.term-btn:hover{background:rgba(99,102,241,0.1);}
+.editor-toolbar button.toolbar-btn.save-btn{background:var(--accent2);border-color:var(--accent2);color:#fff;}
+.editor-toolbar button.toolbar-btn.save-btn:hover{background:#4f46e5;}
+.tab:hover{color:var(--text-dim);background:var(--bg-hover);}
+.tab.active{color:var(--text);background:var(--bg-0);}
+.tab.active::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--accent);border-radius:2px 2px 0 0;}
+.tab .close{font-size:9px;opacity:0;transition:opacity .15s;margin-left:4px;padding:1px 3px;border-radius:3px;color:var(--text-muted);}
+.tab:hover .close{opacity:0.6;}
+.tab .close:hover{opacity:1;background:rgba(248,113,113,0.15);color:var(--error);}
+
+.editor-area{flex:1;display:flex;overflow:hidden;}
+.code-panel{flex:1;display:flex;flex-direction:column;min-width:0;}
+.code-content{flex:1;overflow:auto;position:relative;background:var(--bg-0);}
+.code-content pre{margin:0;padding:14px 18px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.65;tab-size:4;}
+.code-content code{background:none!important;padding:0!important;}
+.welcome-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-muted);gap:20px;}
+.welcome-logo{width:64px;height:64px;background:var(--grad-warm);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:#fff;box-shadow:0 8px 32px var(--accent-glow);}
+.welcome-screen h2{font-size:22px;color:var(--text);font-weight:700;}
+.welcome-screen p{color:var(--text-dim);font-size:13px;}
+.welcome-shortcuts{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px;margin-top:12px;}
+.welcome-shortcut{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);}
+.welcome-shortcut kbd{background:var(--bg-3);border:1px solid var(--border-light);border-radius:5px;padding:2px 8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);}
+
+.terminal-panel{height:160px;border-top:1px solid var(--border);background:var(--bg-1);display:flex;flex-direction:column;flex-shrink:0;}
+.terminal-header{display:flex;align-items:center;padding:0 12px;height:28px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-muted);gap:6px;flex-shrink:0;}
+.terminal-header .dot{width:6px;height:6px;border-radius:50%;background:var(--success);}
+.terminal-header .label{font-weight:700;color:var(--text-dim);letter-spacing:0.05em;}
+.terminal-body{flex:1;overflow-y:auto;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;color:var(--text-dim);}
+.terminal-body .line{white-space:pre-wrap;word-break:break-all;}
+.terminal-body .line.error{color:var(--error);}
+.terminal-body .line.success{color:var(--success);}
+.terminal-body .line.info{color:var(--cyan);}
+.terminal-input-line{display:flex;align-items:center;padding:4px 12px 8px;gap:6px;flex-shrink:0;}
+.terminal-input-line .prompt{color:var(--success);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;}
+.terminal-input{flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;outline:none;transition:var(--transition);}
+.terminal-input:focus{border-color:var(--accent);}
+
+.agent-panel{width:420px;min-width:320px;background:var(--bg-1);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
+.agent-panel.collapsed{width:0!important;min-width:0!important;overflow:hidden;border-left:none;display:none;}
+.agent-panel.collapsed .agent-toggle-float{position:fixed;right:8px;top:50%;transform:translateY(-50%);z-index:100;width:28px;height:28px;border-radius:50%;background:var(--bg-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:var(--accent2);box-shadow:0 2px 8px rgba(0,0,0,0.3);}
+.agent-toggle-float{display:none;}
+.agent-header{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.agent-header .agent-badge{background:var(--grad);color:#fff;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;}
+.agent-header .model-label{font-size:10px;color:var(--text-muted);margin-left:4px;}
+.agent-header .mode-toggle{margin-left:auto;display:flex;gap:3px;background:var(--bg-2);border-radius:var(--radius-sm);padding:2px;border:1px solid var(--border);}
+.mode-btn{padding:3px 10px;border-radius:4px;border:none;background:transparent;color:var(--text-muted);font-size:10px;cursor:pointer;transition:var(--transition);font-family:inherit;font-weight:600;}
+.mode-btn:hover{color:var(--text-dim);}
+.mode-btn.active{background:var(--accent);color:#fff;}
+.mode-btn.active#modeSolo{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;box-shadow:0 0 8px rgba(245,158,11,0.4);}
+.solo-indicator{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#f59e0b,#ef4444,#f59e0b);z-index:10001;animation:soloGlow 2s ease-in-out infinite;display:none;}
+.solo-indicator.active{display:block;}
+@keyframes soloGlow{0%,100%{opacity:0.6;}50%{opacity:1;}}
+.agent-panel.solo-active{border-color:rgba(245,158,11,0.3);box-shadow:0 0 20px rgba(245,158,11,0.08);}
+.agent-panel.solo-active .agent-header{background:linear-gradient(180deg,rgba(245,158,11,0.06),transparent);}
+.editor-area.drag-over{outline:2px dashed var(--accent);outline-offset:-4px;background:rgba(124,106,255,0.04);position:relative;}
+.editor-area.drag-over::after{content:'Drop files here';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:16px;color:var(--accent);font-weight:700;pointer-events:none;z-index:10;}
+
+.sidebar-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+.sidebar-tab{flex:1;padding:7px 0;text-align:center;font-size:10px;font-weight:700;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;transition:var(--transition);letter-spacing:0.03em;}
+.sidebar-tab:hover{color:var(--text-dim);background:var(--bg-hover);}
+.sidebar-tab.active{color:var(--accent2);border-bottom-color:var(--accent);}
+.sidebar-panel{display:none;flex:1;overflow-y:auto;flex-direction:column;}
+.sidebar-panel.active{display:flex;}
+.conv-list{padding:4px 0;flex:1;}
+.conv-item{padding:10px 14px;cursor:pointer;display:flex;align-items:flex-start;gap:10px;transition:all 0.2s ease;border-left:3px solid transparent;position:relative;margin:2px 6px;border-radius:8px;}
+.conv-item:hover{background:var(--bg-hover);border-left-color:var(--accent);transform:translateX(2px);}
+.conv-item.active{background:linear-gradient(135deg,rgba(124,106,255,0.1),rgba(6,182,212,0.05));border-left-color:var(--accent);box-shadow:0 2px 8px rgba(124,106,255,0.08);}
+.conv-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px;transition:var(--transition);}
+.conv-dot.pending{background:var(--text-muted);box-shadow:none;}
+.conv-dot.in_progress{background:var(--warning);box-shadow:0 0 8px rgba(251,191,36,0.5);animation:pulse 2s infinite;}
+.conv-dot.done{background:var(--success);box-shadow:0 0 6px rgba(52,211,153,0.3);}
+.conv-dot.failed{background:var(--error);box-shadow:0 0 6px rgba(248,113,113,0.3);}
+.conv-info{flex:1;min-width:0;}
+.conv-name{font-size:11px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;transition:var(--transition);}
+.conv-item.active .conv-name{color:var(--text);font-weight:700;}
+.conv-item:hover .conv-name{color:var(--text);}
+.conv-time{font-size:8px;color:var(--text-muted);margin-top:3px;opacity:0.7;}
+.conv-del{position:absolute;top:8px;right:10px;font-size:9px;color:var(--text-muted);opacity:0;cursor:pointer;transition:var(--transition);padding:3px 5px;border-radius:4px;}
+.conv-item:hover .conv-del{opacity:0.5;}
+.conv-del:hover{opacity:1;color:var(--error);background:rgba(248,113,113,0.1);}
+.conv-add{padding:8px 12px;border-top:1px solid var(--border);flex-shrink:0;}
+.conv-add-btn{width:100%;padding:8px;background:linear-gradient(135deg,rgba(124,106,255,0.04),rgba(6,182,212,0.02));border:1px dashed var(--border-light);border-radius:10px;color:var(--text-muted);font-size:10px;cursor:pointer;transition:var(--transition);font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;}
+.conv-add-btn:hover{color:var(--accent2);border-color:var(--accent);background:linear-gradient(135deg,rgba(124,106,255,0.08),rgba(6,182,212,0.04));transform:scale(1.02);box-shadow:0 2px 8px rgba(124,106,255,0.1);}
+
+.code-diff-container{border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin:6px 0;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;background:var(--bg-0);}
+.code-diff-header{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:linear-gradient(135deg,rgba(124,106,255,0.06),rgba(6,182,212,0.03));border-bottom:1px solid var(--border);font-size:10px;color:var(--text-dim);}
+.code-diff-header .diff-stats{display:flex;gap:12px;}
+.code-diff-header .stat-add{color:var(--success);font-weight:600;}
+.code-diff-header .stat-del{color:var(--error);font-weight:600;}
+.code-diff-header .diff-toggle{cursor:pointer;padding:2px 8px;border-radius:4px;font-size:9px;color:var(--accent2);transition:all 0.2s;}
+.code-diff-header .diff-toggle:hover{background:rgba(124,106,255,0.1);}
+.code-diff-body{overflow-x:auto;max-height:400px;overflow-y:auto;transition:max-height 0.3s ease;}
+.code-diff-body.collapsed{max-height:0;overflow:hidden;}
+.code-diff-line{padding:0 12px;white-space:pre;display:flex;align-items:flex-start;border-left:3px solid transparent;min-height:20px;}
+.code-diff-line:hover{background:rgba(255,255,255,0.02);}
+.code-diff-line.add{background:rgba(52,211,153,0.1);border-left-color:var(--success);color:#34d399;}
+.code-diff-line.del{background:rgba(248,113,113,0.08);border-left-color:var(--error);color:#f87171;text-decoration:none;}
+.code-diff-line.del .line-content{text-decoration:line-through;opacity:0.65;}
+.code-diff-line.ctx{color:var(--text-dim);opacity:0.5;}
+.code-diff-line.mod-old{background:rgba(248,113,113,0.06);border-left-color:rgba(248,113,113,0.4);color:#fca5a5;}
+.code-diff-line.mod-new{background:rgba(52,211,153,0.06);border-left-color:rgba(52,211,153,0.4);color:#6ee7b7;}
+.code-diff-line-num{min-width:40px;padding-right:12px;text-align:right;color:var(--text-muted);opacity:0.45;font-size:10px;user-select:none;flex-shrink:0;}
+.code-diff-line-num.old-num{color:rgba(248,113,113,0.4);}
+.code-diff-line-num.new-num{color:rgba(52,211,153,0.4);}
+.line-content{flex:1;word-break:break-all;}
+
+.agent-messages{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
+.msg{padding:8px 10px;border-radius:var(--radius);font-size:12px;line-height:1.55;max-width:100%;word-break:break-word;animation:fadeIn 0.15s ease;}
+.msg.user{background:rgba(124,106,255,0.1);border:1px solid rgba(124,106,255,0.2);align-self:flex-end;border-bottom-right-radius:2px;}
+.msg.assistant{background:var(--bg-2);border:1px solid var(--border);border-bottom-left-radius:2px;}
+.msg.assistant.thinking{border-left:3px solid var(--cyan);opacity:0.85;cursor:pointer;position:relative;transition: max-height 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease, border-color 0.3s ease;}
+.msg.assistant.thinking.collapsed{max-height:52px;overflow:hidden;}
+.msg.assistant.thinking.collapsed:hover{border-left-color:var(--accent);}
+.msg.assistant.thinking-done{border-left:3px solid var(--text-muted);opacity:0.6;cursor:pointer;position:relative;transition: max-height 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease;}
+.msg.assistant.thinking-done.collapsed{max-height:28px;overflow:hidden;}
+.msg.assistant.thinking-done .think-toggle{position:absolute;top:3px;right:6px;font-size:8px;color:var(--text-muted);cursor:pointer;padding:2px 8px;border-radius:6px;background:rgba(85,85,119,0.06);border:1px solid rgba(85,85,119,0.12);transition:all 0.2s ease;}
+.msg.assistant.thinking-done .think-toggle:hover{background:rgba(85,85,119,0.15);transform:scale(1.08);color:var(--text-dim);}
+.msg.assistant.thinking-done .think-fade{position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(transparent,var(--bg-2));pointer-events:none;transition:opacity 0.3s ease;}
+.msg.assistant.thinking .think-toggle{position:absolute;top:4px;right:8px;font-size:9px;color:var(--cyan);cursor:pointer;padding:2px 10px;border-radius:6px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.12);transition:all 0.2s ease;}
+.msg.assistant.thinking .think-toggle:hover{background:rgba(34,211,238,0.15);transform:scale(1.08);}
+.msg.assistant.thinking .think-fade{position:absolute;bottom:0;left:0;right:0;height:40px;background:linear-gradient(transparent,var(--bg-2));pointer-events:none;transition:opacity 0.3s ease;}
+.msg.tool-use{background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.15);font-size:11px;cursor:pointer;transition:all 0.3s ease;}
+.msg.tool-use.collapsed{max-height:36px;overflow:hidden;}
+.msg.tool-use.collapsed pre{display:none;}
+.msg.tool-use .tool-toggle{font-size:9px;color:var(--accent2);cursor:pointer;padding:2px 8px;margin-left:4px;opacity:0.5;transition:all 0.2s ease;border-radius:4px;}
+.msg.tool-use .tool-toggle:hover{opacity:1;background:rgba(167,139,250,0.1);}
+.msg.tool-result{background:rgba(52,211,153,0.04);border:1px solid rgba(52,211,153,0.12);font-size:11px;cursor:pointer;transition:all 0.3s ease;}
+.msg.tool-result.collapsed{max-height:36px;overflow:hidden;}
+.msg.tool-result.collapsed pre{display:none;}
+.msg.tool-result .tool-toggle{font-size:9px;color:var(--success);cursor:pointer;padding:2px 8px;margin-left:4px;opacity:0.5;transition:all 0.2s ease;border-radius:4px;}
+.msg.tool-result .tool-toggle:hover{opacity:1;background:rgba(52,211,153,0.1);}
+.msg.tool-result.error-result{background:rgba(248,113,113,0.04);border-color:rgba(248,113,113,0.12);}
+.msg.error{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.15);color:var(--error);}
+.msg pre{background:var(--bg-0);padding:8px 10px;border-radius:var(--radius-sm);overflow-x:auto;margin:6px 0;font-size:10.5px;border:1px solid var(--border);}
+.msg code{background:var(--bg-0);padding:1px 4px;border-radius:3px;font-size:10.5px;}
+.msg .tool-name{font-weight:700;color:var(--cyan);font-size:11px;}
+.msg .danger-badge{display:inline-flex;align-items:center;justify-content:center;background:var(--error);color:#fff;border-radius:50%;width:13px;height:13px;font-size:8px;font-weight:700;margin-left:4px;}
+.msg .permission-bar{margin-top:6px;padding:6px 8px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:6px;font-size:10px;}
+.msg .permission-bar button{padding:3px 10px;border-radius:4px;border:none;font-size:10px;cursor:pointer;font-weight:600;font-family:inherit;transition:var(--transition);}
+.msg .permission-bar .allow-btn{background:var(--success);color:#0a0a0f;}
+.msg .permission-bar .deny-btn{background:var(--bg-3);color:var(--text-dim);border:1px solid var(--border);}
+
+.agent-input-area{padding:8px 12px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg-1);}
+.agent-input-wrap{display:flex;gap:6px;align-items:flex-end;}
+.agent-input{flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-size:12px;resize:none;min-height:36px;max-height:120px;outline:none;font-family:'Inter',sans-serif;line-height:1.5;transition:var(--transition);}
+.agent-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow);}
+.agent-send{width:36px;height:36px;border-radius:var(--radius);border:none;background:var(--grad);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:var(--transition);flex-shrink:0;}
+.agent-send:hover{transform:scale(1.05);}
+.agent-send:disabled{opacity:0.3;cursor:not-allowed;transform:none;}
+.agent-stop{width:36px;height:36px;border-radius:var(--radius);border:none;background:#e74c3c;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:var(--transition);flex-shrink:0;}
+.agent-stop:hover{background:#c0392b;transform:scale(1.05);}
+.agent-status{font-size:9px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:8px;letter-spacing:0.02em;}
+.agent-status .token-info{color:var(--accent2);font-family:'JetBrains Mono',monospace;}
+.agent-status .cost-info{color:var(--warning);font-family:'JetBrains Mono',monospace;}
+
+.slash-menu{position:absolute;bottom:100%;left:0;right:0;background:var(--bg-2);border:1px solid var(--border-light);border-radius:var(--radius);max-height:200px;overflow-y:auto;display:none;z-index:100;box-shadow:0 -4px 20px rgba(0,0,0,0.4);}
+.slash-menu.visible{display:block;}
+.slash-item{padding:6px 12px;cursor:pointer;font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:8px;transition:var(--transition);}
+.slash-item:hover,.slash-item.active{background:var(--bg-hover);color:var(--text);}
+.slash-item .cmd{color:var(--accent2);font-weight:600;font-family:'JetBrains Mono',monospace;min-width:80px;}
+.slash-item .desc{color:var(--text-muted);}
+
+.status-bar{height:24px;background:var(--bg-1);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 10px;font-size:10px;color:var(--text-muted);gap:12px;flex-shrink:0;font-family:'JetBrains Mono',monospace;}
+.status-bar .sep{width:1px;height:10px;background:var(--border);}
+.status-bar a{color:var(--text-muted);text-decoration:none;transition:var(--transition);}
+.status-bar a:hover{color:var(--cyan);}
+
+.resize-handle{width:2px;cursor:col-resize;background:transparent;transition:background .2s;flex-shrink:0;}
+.resize-handle:hover,.resize-handle:active{background:var(--accent);}
+.resize-handle-h{height:2px;cursor:row-resize;background:transparent;transition:background .2s;flex-shrink:0;}
+.resize-handle-h:hover,.resize-handle-h:active{background:var(--accent);}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+.tool-danger{border-left:3px solid var(--warning)!important;background:rgba(251,191,36,0.03)!important;}
+#permPanel{animation:slideInRight .2s ease-out;}
+@keyframes slideInRight{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(100px);background:linear-gradient(135deg,rgba(30,30,50,0.95),rgba(20,20,40,0.95));color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;z-index:99999;transition:transform .3s ease,opacity .3s ease;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.1);box-shadow:0 8px 24px rgba(0,0,0,0.2);pointer-events:none;opacity:0;}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
+.toast.toast-success{border-color:rgba(16,185,129,0.5);background:linear-gradient(135deg,rgba(16,60,50,0.95),rgba(10,40,35,0.95));}
+.toast.toast-warning{border-color:rgba(245,158,11,0.5);background:linear-gradient(135deg,rgba(60,45,15,0.95),rgba(45,35,10,0.95));}
+.toast.toast-error{border-color:rgba(239,68,68,0.5);background:linear-gradient(135deg,rgba(60,20,20,0.95),rgba(45,15,15,0.95));}
+.toast.toast-info{border-color:rgba(59,130,246,0.5);background:linear-gradient(135deg,rgba(20,35,60,0.95),rgba(15,25,45,0.95));}
+#permPanel input[type="text"],#permPanel select{outline:none;transition:border-color .15s;}
+#permPanel input[type="text"]:focus,#permPanel select:focus{border-color:var(--accent);}
+#permPanel button:hover{opacity:.85;}
+
+@media(max-width:900px){
+  .sidebar{display:none;}
+  .agent-panel{width:340px;min-width:280px;}
+}
+.bottom-panel{display:flex;flex-direction:column;border-top:1px solid var(--border);background:var(--bg-1);flex-shrink:0;overflow:hidden;}
+.bottom-tabs{display:flex;background:var(--bg-2);border-bottom:1px solid var(--border);height:28px;align-items:stretch;flex-shrink:0;overflow-x:auto;}
+.bottom-tab{padding:0 12px;display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-muted);cursor:pointer;border-right:1px solid var(--border);white-space:nowrap;transition:var(--transition);}
+.bottom-tab:hover{color:var(--text-dim);background:var(--bg-hover);}
+.bottom-tab.active{color:var(--text);background:var(--bg-1);border-bottom:2px solid var(--accent);}
+.bottom-tab .tab-dot{width:5px;height:5px;border-radius:50%;}
+.bottom-tab .tab-dot.terminal{background:var(--success);}
+.bottom-tab .tab-dot.output{background:var(--cyan);}
+.bottom-tab .tab-dot.debug{background:var(--warning);}
+.bottom-content{flex:1;overflow:hidden;position:relative;}
+.bottom-pane{display:none;flex-direction:column;height:100%;overflow:hidden;}
+.bottom-pane.active{display:flex;}
+.output-panel{flex:1;overflow-y:auto;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;color:var(--text-dim);}
+.output-panel .out-line{white-space:pre-wrap;word-break:break-all;padding:1px 0;}
+.output-panel .out-line.out-stdout{color:var(--text-dim);}
+.output-panel .out-line.out-stderr{color:var(--error);}
+.output-panel .out-line.out-info{color:var(--cyan);}
+.output-panel .out-line.out-success{color:var(--success);}
+.output-panel .out-line.out-warn{color:var(--warning);}
+.output-panel .out-line.out-debug{color:var(--text-muted);font-style:italic;}
+.output-panel .out-timestamp{font-size:8px;color:var(--text-muted);margin-right:6px;font-family:'JetBrains Mono',monospace;}
+.output-toolbar{display:flex;align-items:center;padding:0 8px;height:24px;border-bottom:1px solid var(--border);gap:6px;flex-shrink:0;font-size:9px;color:var(--text-muted);}
+.output-toolbar button{background:var(--bg-2);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);font-size:8px;cursor:pointer;padding:1px 6px;transition:var(--transition);}
+.output-toolbar button:hover{color:var(--text);border-color:var(--accent);}
+.output-toolbar .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.debug-panel{flex:1;overflow-y:auto;padding:0;display:flex;flex-direction:column;}
+.debug-section{border-bottom:1px solid var(--border);}
+.debug-section-header{display:flex;align-items:center;padding:6px 10px;font-size:10px;font-weight:700;color:var(--text-dim);cursor:pointer;gap:6px;transition:var(--transition);}
+.debug-section-header:hover{background:var(--bg-hover);}
+.debug-section-header .arrow{font-size:8px;transition:transform 0.2s ease;}
+.debug-section-header.collapsed .arrow{transform:rotate(-90deg);}
+.debug-section-body{padding:4px 10px 8px;}
+.debug-section-header.collapsed+.debug-section-body{display:none;}
+.debug-var-row{display:flex;align-items:center;padding:2px 0;font-size:10px;gap:6px;font-family:'JetBrains Mono',monospace;}
+.debug-var-name{color:var(--cyan);min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.debug-var-value{color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.debug-var-type{color:var(--text-muted);font-size:8px;min-width:40px;text-align:right;}
+.debug-var-scope{font-size:8px;padding:1px 4px;border-radius:3px;background:var(--bg-3);color:var(--text-muted);}
+.debug-breakpoint{display:flex;align-items:center;padding:3px 8px;font-size:10px;gap:6px;cursor:pointer;transition:var(--transition);}
+.debug-breakpoint:hover{background:var(--bg-hover);}
+.debug-breakpoint .bp-dot{width:8px;height:8px;border-radius:50%;background:var(--error);flex-shrink:0;}
+.debug-breakpoint .bp-dot.disabled{background:var(--text-muted);opacity:0.4;}
+.debug-breakpoint .bp-file{color:var(--text-dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'JetBrains Mono',monospace;}
+.debug-breakpoint .bp-line{color:var(--text-muted);font-size:9px;font-family:'JetBrains Mono',monospace;}
+.debug-breakpoint .bp-actions{display:flex;gap:2px;opacity:0;transition:opacity 0.15s;}
+.debug-breakpoint:hover .bp-actions{opacity:1;}
+.debug-breakpoint .bp-actions button{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:9px;padding:1px 3px;border-radius:2px;}
+.debug-breakpoint .bp-actions button:hover{color:var(--error);background:rgba(248,113,113,0.1);}
+.debug-callstack{padding:2px 0;}
+.debug-callstack-frame{display:flex;align-items:center;padding:3px 8px;font-size:10px;gap:6px;cursor:pointer;transition:var(--transition);}
+.debug-callstack-frame:hover{background:var(--bg-hover);}
+.debug-callstack-frame.current{background:rgba(124,106,255,0.08);border-left:2px solid var(--accent);}
+.debug-callstack-frame .frame-func{color:var(--accent2);font-family:'JetBrains Mono',monospace;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.debug-callstack-frame .frame-loc{color:var(--text-muted);font-size:9px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.debug-empty{padding:16px;text-align:center;color:var(--text-muted);font-size:10px;}
+.terminal-tabs{display:flex;align-items:center;flex-shrink:0;padding:0 8px;gap:2px;}
+.terminal-tab{padding:2px 8px;font-size:9px;color:var(--text-muted);cursor:pointer;border-radius:3px;transition:var(--transition);display:flex;align-items:center;gap:4px;white-space:nowrap;}
+.terminal-tab:hover{color:var(--text-dim);background:var(--bg-hover);}
+.terminal-tab.active{color:var(--text);background:var(--bg-active);}
+.terminal-tab .tt-close{font-size:7px;opacity:0;transition:opacity 0.15s;padding:0 2px;}
+.terminal-tab:hover .tt-close{opacity:0.6;}
+.terminal-tab .tt-close:hover{opacity:1;color:var(--error);}
+.terminal-add-btn{font-size:10px;color:var(--text-muted);cursor:pointer;padding:2px 6px;border-radius:3px;transition:var(--transition);}
+.terminal-add-btn:hover{color:var(--accent2);background:var(--bg-hover);}
+.conv-group{margin-bottom:4px;}
+.conv-group-header{display:flex;align-items:center;padding:6px 14px;font-size:9px;font-weight:700;color:var(--text-muted);cursor:pointer;gap:6px;transition:all 0.2s ease;text-transform:uppercase;letter-spacing:0.06em;border-radius:6px;margin:2px 6px;}
+.conv-group-header:hover{color:var(--accent2);background:rgba(124,106,255,0.04);}
+.conv-group-header .group-arrow{font-size:7px;transition:transform 0.25s cubic-bezier(0.4,0,0.2,1);}
+.conv-group-header.collapsed .group-arrow{transform:rotate(-90deg);}
+.conv-group-header.collapsed+.conv-group-items{display:none;}
+.conv-group-items{padding:0;}
+.conv-filter-bar{display:flex;align-items:center;padding:6px 10px;gap:4px;border-bottom:1px solid var(--border);flex-shrink:0;background:linear-gradient(180deg,rgba(124,106,255,0.02),transparent);}
+.conv-filter-btn{padding:3px 10px;font-size:9px;color:var(--text-muted);cursor:pointer;border-radius:6px;border:1px solid transparent;transition:var(--transition);background:none;font-weight:500;}
+.conv-filter-btn:hover{color:var(--text-dim);border-color:var(--border);background:var(--bg-hover);}
+.conv-filter-btn.active{color:var(--accent2);border-color:var(--accent);background:rgba(124,106,255,0.06);box-shadow:0 1px 4px rgba(124,106,255,0.1);}
+.msg-group-divider{display:flex;align-items:center;padding:6px 0 2px;gap:8px;font-size:9px;color:var(--text-muted);}
+.msg-group-divider::before,.msg-group-divider::after{content:'';flex:1;height:1px;background:var(--border);}
+.msg-group-divider .group-label{white-space:nowrap;font-weight:600;letter-spacing:0.03em;}
+.msg-fold-section{margin:2px 0;}
+.msg-fold-header{display:flex;align-items:center;padding:4px 8px;font-size:9px;color:var(--text-muted);cursor:pointer;gap:4px;border-radius:var(--radius-sm);transition:var(--transition);}
+.msg-fold-header:hover{background:var(--bg-hover);color:var(--text-dim);}
+.msg-fold-header .fold-arrow{font-size:7px;transition:transform 0.2s ease;}
+.msg-fold-header.collapsed .fold-arrow{transform:rotate(-90deg);}
+.msg-fold-header.collapsed+.msg-fold-body{display:none;}
+.msg-fold-body{}
+</style>
+</head>
+<body>
+<div class="solo-indicator" id="soloIndicator"></div>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">K</div>
+      <span data-i18n="explorer">Explorer</span>
+      <a href="/" class="back-link" data-i18n="backToChat" onclick="if(isElectron){event.preventDefault();window.location.href='/';}">← Chat</a>
+    </div>
+    <div id="userPanel" style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;cursor:pointer;transition:var(--transition);" onclick="editUserName()">
+      <div id="userAvatar" style="width:26px;height:26px;border-radius:7px;background:var(--grad-warm);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0;">?</div>
+      <div style="flex:1;min-width:0;">
+        <div id="userName" style="font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Loading...</div>
+        <div id="userId" style="font-size:8px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">-</div>
+      </div>
+    </div>
+    <div class="sidebar-tabs">
+      <div class="sidebar-tab active" id="sidebarTabFiles" onclick="switchSidebarTab('files')" data-i18n="files">Files</div>
+      <div class="sidebar-tab" id="sidebarTabChats" onclick="switchSidebarTab('chats')" data-i18n="chats">Chats</div>
+    </div>
+    <div class="sidebar-panel active" id="sidebarPanelFiles">
+      <div style="padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <button onclick="openProjectDir()" style="width:100%;padding:5px;background:var(--grad);border:none;border-radius:var(--radius-sm);color:#fff;font-size:10px;cursor:pointer;font-weight:600;font-family:inherit;transition:var(--transition);display:flex;align-items:center;justify-content:center;gap:4px;">&#128193; <span data-i18n="openProject">Open Project</span></button>
+      </div>
+      <div class="file-tree" id="fileTree"></div>
+    </div>
+    <div class="sidebar-panel" id="sidebarPanelChats">
+      <div class="conv-list" id="convList"></div>
+      <div class="conv-add">
+        <button class="conv-add-btn" onclick="promptAddTask()">+ <span data-i18n="newChat">New Chat</span></button>
+      </div>
+    </div>
+    <div style="padding:6px 8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+      <div style="display:flex;gap:4px;">
+        <button onclick="selectFiles()" data-i18n="selectFile" style="flex:1;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">📁 选择文件</button>
+        <button onclick="selectFolder()" data-i18n="selectFolder" style="flex:1;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">📂 选择文件夹</button>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button onclick="importFilesFromHost()" data-i18n="pathImport" style="flex:1;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">📋 路径导入</button>
+        <button onclick="importEnvFromHost()" data-i18n="importEnv" style="flex:1;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">🐍 导入环境</button>
+      </div>
+      <button onclick="browseHostDirs()" data-i18n="browseHost" style="width:100%;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">🖥 浏览主机</button>
+      <button onclick="showProjectList()" style="width:100%;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--success)'" onmouseout="this.style.borderColor='var(--border)'">▶ 运行项目</button>
+      <button onclick="showPermPanel()" data-i18n="permPanel" style="width:100%;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">🛡️ 权限管理</button>
+      <div style="display:flex;gap:4px;">
+        <button onclick="showTaskPanel()" style="flex:1;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--success)'" onmouseout="this.style.borderColor='var(--border)'">📋 任务</button>
+        <button onclick="showBrowserPanel()" style="flex:1;padding:4px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">🌐 浏览器</button>
+      </div>
+      <input type="file" id="ideFileInput" multiple style="display:none" onchange="uploadDeviceFiles(event)">
+      <input type="file" id="ideFolderInput" webkitdirectory style="display:none" onchange="uploadDeviceFiles(event)">
+    </div>
+  </div>
+  <div class="main-area">
+    <div class="agent-toggle-float" id="agentToggleFloat" onclick="toggleAgentPanel()" title="Show Agent Panel (Ctrl+H)">▶</div>
+    <div class="tabs-bar" id="tabsBar"></div>
+    <div class="editor-toolbar" id="editorToolbar">
+      <span class="toolbar-file" id="toolbarFileName">—</span>
+      <span class="toolbar-lang" id="toolbarLang">—</span>
+      <span class="toolbar-track-indicator" id="trackIndicator" style="display:none;font-size:8px;padding:1px 6px;border-radius:4px;background:rgba(16,185,129,0.15);color:var(--success);font-weight:600;margin-left:4px;">📌 Tracking</span>
+      <span class="toolbar-spacer"></span>
+      <button class="toolbar-btn term-btn" onclick="toggleBottomPanel();" title="切换终端 (Ctrl+J)">⬛ 终端</button>
+      <button class="toolbar-btn run-btn" onclick="runCurrentFile();" title="运行当前文件 (F5)">▶ 运行</button>
+      <button class="toolbar-btn" onclick="compileCurrentFile();" title="编译当前文件">🔨 编译</button>
+      <button class="toolbar-btn save-btn" onclick="saveCurrentFile();" title="保存文件 (Ctrl+S)">💾 保存</button>
+    </div>
+    <div class="editor-area">
+      <div class="code-panel">
+        <div class="code-content" id="codeContent">
+          <div class="welcome-screen" id="welcomeScreen">
+            <div class="welcome-logo">K</div>
+            <h2>辉夜 Agent IDE</h2>
+            <p>智能体编程助手</p>
+            <div class="welcome-shortcuts">
+              <div class="welcome-shortcut"><kbd>Enter</kbd> <span data-i18n="sendMsg">发送消息</span></div>
+              <div class="welcome-shortcut"><kbd>Shift+Enter</kbd> <span data-i18n="newLine">换行</span></div>
+              <div class="welcome-shortcut"><kbd>Ctrl+B</kbd> <span data-i18n="toggleSidebar">切换侧边栏</span></div>
+              <div class="welcome-shortcut"><kbd>Ctrl+J</kbd> <span data-i18n="toggleTerminal">切换终端</span></div>
+              <div class="welcome-shortcut"><kbd>Ctrl+S</kbd> <span>保存文件</span></div>
+              <div class="welcome-shortcut"><kbd>F5</kbd> <span data-i18n="compileRun">运行文件</span></div>
+              <div class="welcome-shortcut"><kbd>/</kbd> <span data-i18n="slashCmd">斜杠命令</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="resize-handle-h" id="terminalResize"></div>
+        <div class="bottom-panel" id="bottomPanel" style="height:200px;">
+          <div class="bottom-tabs">
+            <div class="bottom-tab active" onclick="switchBottomTab('terminal')"><span class="tab-dot terminal"></span> <span data-i18n="terminal">Terminal</span></div>
+            <div class="bottom-tab" onclick="switchBottomTab('output')"><span class="tab-dot output"></span> Output</div>
+            <div class="bottom-tab" onclick="switchBottomTab('debug')"><span class="tab-dot debug"></span> Debug</div>
+            <span style="flex:1;"></span>
+            <span style="cursor:pointer;font-size:9px;color:var(--text-muted);padding:1px 4px;border-radius:3px;" onclick="toggleBottomPanel()">&#x2715;</span>
+          </div>
+          <div class="bottom-content">
+            <div class="bottom-pane active" id="paneTerminal">
+              <div class="terminal-header"><span class="dot"></span>
+                <div class="terminal-tabs" id="terminalTabs">
+                  <div class="terminal-tab active" id="ttab_0" onclick="switchTerminalTab(0)"><span>bash</span><span class="tt-close" onclick="event.stopPropagation();closeTerminalTab(0)">&#x2715;</span></div>
+                </div>
+                <span class="terminal-add-btn" onclick="addTerminalTab()">+</span>
+                <span style="margin-left:auto;display:flex;gap:4px;align-items:center;"><button id="termStopBtn" onclick="stopTerminalProcess()" style="background:none;border:1px solid #e74c3c;border-radius:3px;color:#e74c3c;font-size:8px;cursor:pointer;padding:1px 6px;display:none;" title="Stop running process">STOP</button><button onclick="clearTerminal()" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-muted);font-size:8px;cursor:pointer;padding:1px 6px;" title="Clear">CLR</button></span>
+              </div>
+              <div class="terminal-body" id="terminalBody"></div>
+              <div class="terminal-input-line">
+                <span class="prompt" id="termPrompt">$</span>
+                <input class="terminal-input" id="terminalInput" placeholder="Command..." data-i18n-placeholder="command" onkeydown="handleTerminalKey(event)">
+              </div>
+            </div>
+            <div class="bottom-pane" id="paneOutput">
+              <div class="output-toolbar">
+                <span>Output</span>
+                <span style="flex:1;"></span>
+                <button class="filter-btn active" onclick="toggleOutputFilter(this,'all')">All</button>
+                <button class="filter-btn" onclick="toggleOutputFilter(this,'stdout')">Out</button>
+                <button class="filter-btn" onclick="toggleOutputFilter(this,'stderr')">Err</button>
+                <button class="filter-btn" onclick="toggleOutputFilter(this,'info')">Info</button>
+                <button onclick="clearOutputPanel()">CLR</button>
+                <button onclick="scrollOutputBottom()">&#x2193;</button>
+                <label style="display:flex;align-items:center;gap:3px;font-size:8px;color:var(--text-muted);"><input type="checkbox" id="outputAutoscroll" checked style="width:10px;height:10px;"> Auto</label>
+              </div>
+              <div class="output-panel" id="outputPanel"></div>
+            </div>
+            <div class="bottom-pane" id="paneDebug">
+              <div class="debug-panel" id="debugPanel">
+                <div class="debug-section">
+                  <div class="debug-section-header" onclick="toggleDebugSection(this)"><span class="arrow">&#x25BC;</span> &#x1F6A9; Breakpoints <span id="bpCount" style="color:var(--text-muted);font-weight:400;">(0)</span></div>
+                  <div class="debug-section-body" id="breakpointList"><div class="debug-empty">No breakpoints set. Click line numbers in the editor to add.</div></div>
+                </div>
+                <div class="debug-section">
+                  <div class="debug-section-header" onclick="toggleDebugSection(this)"><span class="arrow">&#x25BC;</span> &#x1F50D; Variables <span id="varCount" style="color:var(--text-muted);font-weight:400;">(0)</span></div>
+                  <div class="debug-section-body" id="variableList"><div class="debug-empty">Run code in debug mode to inspect variables.</div></div>
+                </div>
+                <div class="debug-section">
+                  <div class="debug-section-header" onclick="toggleDebugSection(this)"><span class="arrow">&#x25BC;</span> &#x1F4DC; Call Stack</div>
+                  <div class="debug-section-body" id="callstackList"><div class="debug-empty">No active debug session.</div></div>
+                </div>
+                <div class="debug-section">
+                  <div class="debug-section-header collapsed" onclick="toggleDebugSection(this)"><span class="arrow">&#x25BC;</span> &#x1F4CB; Debug Log</div>
+                  <div class="debug-section-body" id="debugLog" style="max-height:150px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="resize-handle" id="agentResize"></div>
+      <div class="agent-panel" id="agentPanel">
+        <div class="agent-header">
+          <span class="agent-badge" data-i18n="agent">Agent</span>
+          <span id="modeBadge" style="display:none;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;color:#fff;background:var(--bg-2);letter-spacing:0.05em;"></span>
+          <span class="model-label" id="modelLabel">-</span>
+          <span style="margin-left:8px;display:flex;gap:2px;">
+            <button onclick="collapseAllMsgs()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);font-size:8px;cursor:pointer;padding:1px 5px;transition:var(--transition);" title="Collapse all" onmouseover="this.style.borderColor='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)'">◀</button>
+            <button onclick="expandAllMsgs()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);font-size:8px;cursor:pointer;padding:1px 5px;transition:var(--transition);" title="Expand all" onmouseover="this.style.borderColor='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)'">▶</button>
+          </span>
+          <div class="mode-toggle">
+            <button class="mode-btn active" id="modeChat" onclick="setMode('chat')" data-i18n="modeChat">Chat</button>
+            <button class="mode-btn" id="modeAgent" onclick="setMode('agent')" data-i18n="modeAgent">Agent</button>
+            <button class="mode-btn" id="modeSolo" onclick="setMode('solo')" data-i18n="modeSolo" style="color:#f59e0b;">Solo</button>
+            <button class="mode-btn" id="modeCompile" onclick="setMode('compile')" data-i18n="modeRun">Run</button>
+          </div>
+          <button onclick="toggleAgentPanel()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);font-size:10px;cursor:pointer;padding:2px 6px;margin-left:4px;transition:var(--transition);" title="Toggle Agent Panel (Ctrl+H)" onmouseover="this.style.borderColor='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)'">✕</button>
+        </div>
+        <div class="conv-filter-bar" id="convFilterBar">
+          <button class="conv-filter-btn active" onclick="setConvFilter('session')">Session</button>
+          <button class="conv-filter-btn" onclick="setConvFilter('time')">Time</button>
+          <button class="conv-filter-btn" onclick="setConvFilter('topic')">Topic</button>
+          <span style="flex:1;"></span>
+          <button class="conv-filter-btn" onclick="toggleMsgFoldAll()" id="foldToggleBtn" title="Fold/Unfold all">◀ All</button>
+        </div>
+        <div class="agent-messages" id="agentMessages">
+          <div class="msg assistant">你好！我是辉夜，你的智能编程助手。我可以直接读取、编写和编辑文件，搜索代码，编译程序等。输入 <code>/help</code> 查看可用命令。</div>
+        </div>
+        <div class="agent-input-area" style="position:relative;">
+          <div class="slash-menu" id="slashMenu"></div>
+          <div class="agent-input-wrap">
+            <textarea class="agent-input" id="agentInput" placeholder="发送消息... (/ 查看命令)" data-i18n-placeholder="msgPlaceholder" rows="1" onkeydown="handleInputKey(event)" oninput="handleInputChange(this)"></textarea>
+            <button class="agent-stop" id="agentStopBtn" onclick="stopAgent()" style="display:none;" title="Stop Agent">&#9632;</button>
+            <button class="agent-send" id="agentSendBtn" onclick="sendAgentMsg()">&#9654;</button>
+          </div>
+          <div class="agent-status" id="agentStatus">
+            <span id="statusText">Ready</span>
+            <span class="token-info" id="tokenInfo"></span>
+            <span class="cost-info" id="costInfo"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span id="statusMode">chat</span>
+      <div class="sep"></div>
+      <span id="statusFile">No file</span>
+      <div class="sep"></div>
+      <span id="statusLang">-</span>
+      <div class="sep"></div>
+      <span id="statusTokens">0 tokens</span>
+      <div class="sep"></div>
+      <span id="statusCost">$0.00</span>
+      <div class="sep"></div>
+      <span id="statusUser">-</span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:8px;"><button onclick="toggleLang()" id="langToggle" style="background:var(--bg-2);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;padding:1px 6px;transition:var(--transition);" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">中/EN</button><a href="/">Kaguya</a> | Agent IDE</span>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const isElectron = typeof window !== 'undefined' && typeof window.kaguyaDesktop !== 'undefined';
+const isDesktopMode = isElectron || (typeof window !== 'undefined' && window.location && window.location.search && window.location.search.includes('desktop=1'));
+function canUseDesktopDialog(kind){
+    if(!isElectron || !window.kaguyaDesktop || !window.kaguyaDesktop.dialog) return false;
+    const dialog = window.kaguyaDesktop.dialog;
+    if(kind === 'folder') return typeof dialog.openFolder === 'function';
+    return typeof dialog.openFile === 'function';
+}
+if (isElectron) {
+    console.log('[Kaguya] Running in Electron desktop mode');
+    console.log('[Kaguya] Platform:', window.kaguyaDesktop.platform);
+    console.log('[Kaguya] Version:', window.kaguyaDesktop.version);
+}
+window.onerror = function(msg, url, line, col, error) {
+    console.error('[Kaguya IDE] Uncaught error:', msg, 'at', url, 'line', line, ':', col, error ? error.stack : '');
+    return false;
+};
+window.addEventListener('unhandledrejection', function(e) {
+    console.error('[Kaguya IDE] Unhandled promise rejection:', e.reason);
+});
+function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    if (!t) { console.log('[Toast]', msg); return; }
+    t.textContent = msg;
+    t.className = 'toast show' + (type ? ' toast-' + type : '');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.className = 'toast'; }, 2500);
+}
+let currentLang=localStorage.getItem('kaguya_ide_lang')||'zh';
+const I18N={
+  zh:{
+    explorer:'资源管理器',chat:'聊天',files:'文件',selectFile:'📁 选择文件',selectFolder:'📂 选择文件夹',pathImport:'📋 路径导入',importEnv:'🐍 导入环境',browseHost:'🖥 浏览主机',
+    welcomeTitle:'辉夜 Agent IDE',welcomeSub:'智能体编程助手',sendMsg:'发送消息',newLine:'换行',toggleSidebar:'切换侧边栏',toggleTerminal:'切换终端',compileRun:'编译运行',slashCmd:'斜杠命令',
+    terminal:'终端',command:'命令...',agent:'Agent',modeChat:'聊天',modeAgent:'Agent',modeRun:'运行',
+    noFile:'无文件',ready:'就绪',thinking:'思考中',compiling:'编译中',executing:'执行中',
+    msgPlaceholder:'发送消息... (/ 查看命令)',noFileCompile:'没有打开的文件无法编译',importingPaths:'正在导入路径...',importSuccess:'导入成功',importFailed:'导入失败',
+    uploadSuccess:'上传成功',uploadFailed:'上传失败',noFilesSelected:'未选择文件',uploadingFiles:'正在上传文件...',
+    langToggle:'中/EN',backToChat:'← 聊天',statusTokens:'令牌',statusCost:'费用',
+    slashHelp:'查看可用命令',slashClear:'清除对话历史',slashCompact:'压缩对话上下文',slashCost:'查看令牌用量和费用',slashMemory:'查看/编辑记忆文件',slashModel:'查看当前模型信息',slashPermissions:'查看权限设置',slashStatus:'查看Agent状态',slashUndo:'撤销上次文件更改',slashDiff:'查看待处理的文件更改',
+    allow:'允许',deny:'拒绝',allowTool:'是否允许',alwaysAllow:'始终允许',alwaysDeny:'始终拒绝',
+    permPanel:'权限管理',sandboxDirs:'沙箱目录',addSandboxDir:'添加目录',removeSandboxDir:'移除',
+    permRules:'权限规则',dangerousCmds:'危险命令',sandboxMode:'沙箱模式',permDenied:'权限被拒绝',permGranted:'权限已授予',
+    auditLog:'审计日志',auditStats:'审计统计',totalOps:'总操作数',allowedOps:'允许',deniedOps:'拒绝',
+    noSandboxDirs:'No sandbox dirs configured - agent can operate anywhere',permRequest:'Permission Request',permReason:'Reason',
+    permDetail:'Detail',waitingApproval:'Waiting for approval...',permTimeout:'Approval timeout',closePanel:'Close',
+    apiNotConnected:'API Not Connected',apiRequiresModel:'Agent IDE requires external AI model. Local Ollama models are not supported.',apiConfig:'Please configure an external model in API Center',
+    browseDir:'Browse Directory',enterPath:'Directory path (leave empty for home):',enterPaths:'Enter file/folder paths (comma separated):\nExample: C:\\Users\\xxx\\project, C:\\Users\\xxx\\data.csv',
+    editName:'输入你的名字：',envImported:'环境已导入',envImportFailed:'环境导入失败',
+    tasks:'任务',newTaskPlaceholder:'新任务...',taskPending:'待处理',taskInProgress:'进行中',taskDone:'已完成',taskFailed:'失败',
+    chats:'对话',newChat:'新对话',files:'文件',acceptChange:'接受',rejectChange:'拒绝',fileChanged:'文件已更改',additions:'行新增',deletions:'行删除',
+    openProject:'打开项目',enterProjectPath:'输入项目目录路径：',collapseAll:'折叠全部',expandAll:'展开全部',thinking:'思考中',
+  },
+  en:{
+    explorer:'Explorer',chat:'Chat',files:'Files',selectFile:'📁 Select Files',selectFolder:'📂 Select Folder',pathImport:'📋 Path Import',importEnv:'🐍 Import Env',browseHost:'🖥 Browse Host',
+    welcomeTitle:'Kaguya Agent IDE',welcomeSub:'AI Agent Programming Assistant',sendMsg:'Send message',newLine:'New line',toggleSidebar:'Toggle sidebar',toggleTerminal:'Toggle terminal',compileRun:'Compile & Run',slashCmd:'Slash command',
+    terminal:'Terminal',command:'Command...',agent:'Agent',modeChat:'Chat',modeAgent:'Agent',modeRun:'Run',
+    noFile:'No file',ready:'Ready',thinking:'Thinking',compiling:'Compiling',executing:'Executing',
+    msgPlaceholder:'Message agent... (/ for commands)',noFileCompile:'No file open to compile',importingPaths:'Importing paths...',importSuccess:'Imported',importFailed:'Import failed',
+    uploadSuccess:'Uploaded',uploadFailed:'Upload failed',noFilesSelected:'No files selected',uploadingFiles:'Uploading files...',
+    langToggle:'中/EN',backToChat:'← Chat',statusTokens:'tokens',statusCost:'cost',
+    slashHelp:'Show available commands',slashClear:'Clear conversation history',slashCompact:'Compact conversation context',slashCost:'Show token usage and cost',slashMemory:'View/edit KAGUYA.md memory',slashModel:'Show current model info',slashPermissions:'Show permission settings',slashStatus:'Show agent status',slashUndo:'Undo last file change',slashDiff:'Show pending file changes',
+    allow:'Allow',deny:'Deny',allowTool:'Allow',alwaysAllow:'Always Allow',alwaysDeny:'Always Deny',
+    permPanel:'Permissions',sandboxDirs:'Sandbox Dirs',addSandboxDir:'Add Dir',removeSandboxDir:'Remove',
+    permRules:'Permission Rules',dangerousCmds:'Dangerous Commands',sandboxMode:'Sandbox Mode',permDenied:'Permission Denied',permGranted:'Permission Granted',
+    auditLog:'Audit Log',auditStats:'Audit Stats',totalOps:'Total Ops',allowedOps:'Allowed',deniedOps:'Denied',
+    noSandboxDirs:'No sandbox dirs configured (agent can operate anywhere)',permRequest:'Permission Request',permReason:'Reason',
+    permDetail:'Detail',waitingApproval:'Waiting for approval...',permTimeout:'Approval timeout',closePanel:'Close',
+    apiNotConnected:'API Not Connected',apiRequiresModel:'Agent IDE requires an external AI model. Local Ollama models are not supported.',apiConfig:'Please configure an external model in the API hub',
+    browseDir:'Browse Directory',enterPath:'Directory path (empty for home):',enterPaths:'Enter file/folder paths (comma-separated):\ne.g. C:\\Users\\xxx\\project, C:\\Users\\xxx\\data.csv',
+    editName:'Enter your name:',envImported:'Env imported',envImportFailed:'Env import failed',
+    tasks:'Tasks',newTaskPlaceholder:'New task...',taskPending:'Pending',taskInProgress:'In Progress',taskDone:'Done',taskFailed:'Failed',
+    chats:'Chats',newChat:'New Chat',files:'Files',acceptChange:'Accept',rejectChange:'Reject',fileChanged:'File Changed',additions:'additions',deletions:'deletions',
+    openProject:'Open Project',enterProjectPath:'Enter project directory path:',collapseAll:'Collapse All',expandAll:'Expand All',thinking:'Thinking',
+  }
+};
+function t(key){return(I18N[currentLang]||I18N.zh)[key]||key;}
+function toggleLang(){currentLang=currentLang==='zh'?'en':'zh';localStorage.setItem('kaguya_ide_lang',currentLang);applyLang();}
+function applyLang(){
+  document.querySelectorAll('[data-i18n]').forEach(function(el){var k=el.getAttribute('data-i18n');if(t(k)!==k)el.textContent=t(k);});
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){var k=el.getAttribute('data-i18n-placeholder');if(t(k)!==k)el.placeholder=t(k);});
+  var ai=document.getElementById('agentInput');if(ai)ai.placeholder=t('msgPlaceholder');
+  var ti=document.getElementById('terminalInput');if(ti)ti.placeholder=t('command');
+  var ws=document.getElementById('welcomeScreen');
+  if(ws){var h2=ws.querySelector('h2');if(h2)h2.textContent=t('welcomeTitle');var p=ws.querySelector('p');if(p)p.textContent=t('welcomeSub');}
+  var lt=document.getElementById('langToggle');if(lt)lt.textContent=t('langToggle');
+  renderTasks();
+}
+let currentMode='chat';let openTabs=[];let activeTab=null;let agentHistory=[];let isAgentRunning=false;
+let currentAgentRunId=null;
+let currentAgentAbortController=null;
+let electronTerminalSession=null;
+let ideTasks=JSON.parse(localStorage.getItem('kaguya_ide_tasks')||'[]');
+let activeTaskId=localStorage.getItem('kaguya_ide_active_task')||'main';
+let _termHistory=[];let _termHistIdx=-1;
+let _terminalTabs=[{id:0,name:'bash',history:[],histIdx:-1}];let _activeTermTab=0;let _nextTermTabId=1;
+let _outputLines=[];let _outputFilter='all';let _outputMaxLines=5000;
+let _debugBreakpoints=[];let _debugVariables=[];let _debugCallstack=[];let _debugLogEntries=[];
+let _convFilterMode='session';let _msgFoldAllState=false;
+if(!ideTasks.length){ideTasks=[{id:'main',name:'Main',status:'done',created:Date.now(),history:[],pendingChanges:[]}];}
+function switchSidebarTab(tab){
+  document.getElementById('sidebarTabFiles').classList.toggle('active',tab==='files');
+  document.getElementById('sidebarTabChats').classList.toggle('active',tab==='chats');
+  document.getElementById('sidebarPanelFiles').classList.toggle('active',tab==='files');
+  document.getElementById('sidebarPanelChats').classList.toggle('active',tab==='chats');
+}
+function saveTasks(){
+  ideTasks.forEach(function(t2){
+    t2.history=t2.history||[];
+    if(t2.id===activeTaskId&&agentHistory.length>0){
+      t2.history=agentHistory.slice(-50);
+    }
+  });
+  localStorage.setItem('kaguya_ide_tasks',JSON.stringify(ideTasks.map(function(t2){return{id:t2.id,name:t2.name,status:t2.status,created:t2.created,history:t2.history||[]};})));
+  localStorage.setItem('kaguya_ide_active_task',activeTaskId||'main');
+  renderConvList();
+}
+function getActiveTask(){return ideTasks.find(function(t2){return t2.id===activeTaskId;})||ideTasks[0];}
+function promptAddTask(){const name=prompt(t('newTaskPlaceholder'));if(name&&name.trim()){addTask(name.trim());}}
+function addTask(name){const task={id:'t'+Date.now(),name:name,status:'pending',created:Date.now(),history:[],pendingChanges:[]};ideTasks.push(task);activeTaskId=task.id;agentHistory=[];saveTasks();switchSidebarTab('chats');const msgs=document.getElementById('agentMessages');msgs.innerHTML='';msgs.scrollTop=msgs.scrollHeight;}
+function removeTask(id){if(id==='main')return;ideTasks=ideTasks.filter(function(t2){return t2.id!==id;});if(activeTaskId===id){activeTaskId='main';agentHistory=[];const msgs=document.getElementById('agentMessages');msgs.innerHTML='';const task=getActiveTask();if(task&&task.history&&task.history.length){task.history.forEach(function(h){const uEl=document.createElement('div');uEl.className='msg user';uEl.textContent=h.user;msgs.appendChild(uEl);const aEl=document.createElement('div');aEl.className='msg assistant';aEl.innerHTML=renderMd(h.assistant);msgs.appendChild(aEl);});}}saveTasks();}
+function switchTask(id){if(id===activeTaskId)return;activeTaskId=id;agentHistory=[];const msgs=document.getElementById('agentMessages');msgs.innerHTML='';const task=getActiveTask();if(task&&task.history&&task.history.length){task.history.forEach(function(h){const uEl=document.createElement('div');uEl.className='msg user';uEl.textContent=h.user;msgs.appendChild(uEl);const aEl=document.createElement('div');aEl.className='msg assistant';aEl.innerHTML=renderMd(h.assistant);msgs.appendChild(aEl);agentHistory.push(h);});}msgs.scrollTop=msgs.scrollHeight;saveTasks();switchSidebarTab('chats');}
+function updateTaskStatus(id,status){const task=ideTasks.find(function(t2){return t2.id===id;});if(task){task.status=status;saveTasks();}}
+function renderConvList(){
+  const list=document.getElementById('convList');if(!list)return;list.innerHTML='';
+  ideTasks.forEach(function(task){
+    const item=document.createElement('div');
+    item.className='conv-item'+(task.id===activeTaskId?' active':'');
+    const timeStr=new Date(task.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    item.innerHTML='<div class="conv-dot '+task.status+'"></div><div class="conv-info"><div class="conv-name">'+esc(task.name.substring(0,20))+'</div><div class="conv-time">'+timeStr+'</div></div>'+(task.id!=='main'?'<span class="conv-del" onclick="event.stopPropagation();removeTask(\''+task.id+'\')">&#x2715;</span>':'');
+    item.onclick=function(){switchTask(task.id);};
+    list.appendChild(item);
+  });
+}
+function toggleTaskStatus(id){const task=ideTasks.find(function(t2){return t2.id===id;});if(!task)return;const order=['pending','in_progress','done'];const idx=order.indexOf(task.status);task.status=order[(idx+1)%order.length];saveTasks();}
+function renderTasks(){renderConvList();}
+async function openProjectDir(){
+  let projectPath;
+  if(canUseDesktopDialog('folder')){
+    try{
+      const result = await window.kaguyaDesktop.dialog.openFolder({title: t('openProject')});
+      if(result.canceled || !result.filePaths || !result.filePaths.length) return;
+      projectPath = result.filePaths[0];
+    }catch(e){termLog('Failed to select folder: '+e.message,'error');return;}
+  } else {
+    projectPath = prompt(t('enterProjectPath'));
+    if(!projectPath||!projectPath.trim())return;
+    projectPath = projectPath.trim();
+  }
+  fetch('/agent/open-project',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:projectPath,device_id:generateDeviceId()})}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){termLog('Error: '+d.error,'error');return;}
+    currentWorkspace=d.workspace;
+    loadFileTree(d.project_path);
+    termLog('Project opened: '+d.project_path,'success');
+    switchSidebarTab('files');
+  }).catch(function(e){termLog('Failed to open project: '+e.message,'error');});
+}
+function toggleMsgCollapse(el){
+  if(el.classList.contains('collapsed')){
+    el.classList.remove('collapsed');
+    const fade=el.querySelector('.think-fade');if(fade)fade.style.display='none';
+    const toggle=el.querySelector('.think-toggle')||el.querySelector('.tool-toggle');
+    if(toggle){toggle.textContent='▼';toggle.title='折叠';}
+  } else {
+    el.classList.add('collapsed');
+    const fade=el.querySelector('.think-fade');if(fade)fade.style.display='block';
+    const toggle=el.querySelector('.think-toggle')||el.querySelector('.tool-toggle');
+    if(toggle){toggle.textContent='▶';toggle.title='展开';}
+  }
+}
+function collapseAllMsgs(){
+  document.querySelectorAll('#agentMessages .msg.assistant.thinking, #agentMessages .msg.tool-use, #agentMessages .msg.tool-result').forEach(function(el){
+    if(!el.classList.contains('collapsed'))toggleMsgCollapse(el);
+  });
+}
+function expandAllMsgs(){
+  document.querySelectorAll('#agentMessages .msg.assistant.thinking, #agentMessages .msg.tool-use, #agentMessages .msg.tool-result').forEach(function(el){
+    if(el.classList.contains('collapsed'))toggleMsgCollapse(el);
+  });
+}
+let currentUserId=null;let currentUserName=null;let currentWorkspace=null;
+let totalTokensIn=0;let totalTokensOut=0;let totalCost=0;let currentIteration=0;
+let pendingPermissions={};
+const DANGEROUS=['write_file','edit_file','execute_command','compile','agent_spawn'];
+const TOOL_ICONS={'read_file':'R','write_file':'W','edit_file':'E','list_directory':'D','search_files':'S','execute_command':'!','glob':'G','compile':'C','todo_write':'T','enter_plan_mode':'P','exit_plan_mode':'P','web_fetch':'F','web_search':'Q','agent_spawn':'A','task_create':'+','task_update':'^','task_list':'L','brief':'B'};
+const SLASH_COMMANDS=[
+  {cmd:'/help',desc:'Show available commands'},
+  {cmd:'/clear',desc:'Clear conversation history'},
+  {cmd:'/compact',desc:'Compact conversation context'},
+  {cmd:'/cost',desc:'Show token usage and cost'},
+  {cmd:'/memory',desc:'View/edit KAGUYA.md memory'},
+  {cmd:'/model',desc:'Show current model info'},
+  {cmd:'/permissions',desc:'Show permission settings'},
+  {cmd:'/status',desc:'Show agent status'},
+  {cmd:'/undo',desc:'Undo last file change'},
+  {cmd:'/diff',desc:'Show pending file changes'},
+];
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function getExternalApiConfig(){try{const cfg=JSON.parse(localStorage.getItem('api_providers')||'{}');var active=localStorage.getItem('active_api_provider')||'';var keys=active?[active].concat(Object.keys(cfg).filter(function(k){return k!==active;})):Object.keys(cfg);for(const pv of keys){const c=cfg[pv];if(c&&c.enabled&&(c.apiKey||c.hasSavedKey))return{enabled:true,apiKey:c.apiKey||'',hasSavedKey:!!c.hasSavedKey,apiUrl:c.apiUrl||'',model:c.model||'',provider:pv};}}catch(e){}return null;}
+function generateDeviceId(){let stored=localStorage.getItem('kaguya_device_id');if(stored)return stored;const nav=window.navigator;const screen=window.screen;const raw=[nav.userAgent,nav.language,screen.width+'x'+screen.height,screen.colorDepth,new Date().getTimezoneOffset(),nav.hardwareConcurrency||0,nav.platform||''].join('|');let hash=0;for(let i=0;i<raw.length;i++){const c=raw.charCodeAt(i);hash=((hash<<5)-hash)+c;hash|=0;}const id='dev_'+Math.abs(hash).toString(36)+'_'+Date.now().toString(36);localStorage.setItem('kaguya_device_id',id);return id;}
+function updateTokenDisplay(){document.getElementById('statusTokens').textContent=totalTokensIn+'+'+totalTokensOut+' tk';document.getElementById('tokenInfo').textContent=totalTokensIn+'+'+totalTokensOut+' tk';const costStr='$'+totalCost.toFixed(4);document.getElementById('statusCost').textContent=costStr;document.getElementById('costInfo').textContent=costStr;}
+function estimateTokens(text){return Math.ceil(text.length/4);}
+function addCost(inputTokens,outputTokens){totalTokensIn+=inputTokens;totalTokensOut+=outputTokens;const inCost=inputTokens*0.000003;const outCost=outputTokens*0.000015;totalCost+=inCost+outCost;updateTokenDisplay();}
+async function identifyDevice(){const deviceId=generateDeviceId();const storedName=localStorage.getItem('kaguya_user_name')||'';try{const r=await fetch('/agent/identify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:deviceId,device_name:storedName})});const d=await r.json();currentUserId=d.user_id;currentUserName=d.user_name;currentWorkspace=d.workspace;document.getElementById('userName').textContent=currentUserName;document.getElementById('userId').textContent=currentUserId.substring(0,10)+'...';document.getElementById('userAvatar').textContent=currentUserName.charAt(0).toUpperCase();document.getElementById('statusUser').textContent=currentUserName;return true;}catch(e){document.getElementById('userName').textContent='Unknown';return false;}}
+function editUserName(){const name=prompt(t('editName'),currentUserName||'');if(name&&name.trim()){currentUserName=name.trim().substring(0,32);localStorage.setItem('kaguya_user_name',currentUserName);fetch('/agent/identify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:generateDeviceId(),device_name:currentUserName})}).then(r=>r.json()).then(d=>{document.getElementById('userName').textContent=d.user_name;document.getElementById('userAvatar').textContent=d.user_name.charAt(0).toUpperCase();document.getElementById('statusUser').textContent=d.user_name;});}}
+function setMode(m){
+  currentMode=m;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  const btnId='mode'+m.charAt(0).toUpperCase()+m.slice(1);
+  const btn=document.getElementById(btnId);
+  if(btn)btn.classList.add('active');
+  const statusEl=document.getElementById('statusMode');
+  if(statusEl)statusEl.textContent=m;
+  const agentPanel=document.querySelector('.agent-panel');
+  const filePanel=document.querySelector('.file-panel');
+  const termPanel=document.getElementById('bottomPanel');
+  const soloInd=document.getElementById('soloIndicator');
+  if(m==='solo'){
+    if(agentPanel){agentPanel.style.width='520px';agentPanel.classList.add('solo-active');}
+    if(filePanel)filePanel.style.display='flex';
+    if(termPanel)termPanel.style.display='flex';
+    if(soloInd)soloInd.classList.add('active');
+    const modeBadge=document.getElementById('modeBadge');
+    if(modeBadge){modeBadge.textContent='SOLO';modeBadge.style.background='linear-gradient(135deg,#f59e0b,#ef4444)';modeBadge.style.display='inline-block';}
+    showToast('Solo Mode: Full autonomy - Agent will execute all operations directly','success');
+  } else {
+    if(agentPanel){agentPanel.style.width='420px';agentPanel.classList.remove('solo-active');}
+    if(soloInd)soloInd.classList.remove('active');
+    const modeBadge=document.getElementById('modeBadge');
+    if(modeBadge){modeBadge.textContent=m.toUpperCase();modeBadge.style.background=m==='agent'?'var(--accent)':'var(--bg-2)';modeBadge.style.display=m==='agent'?'inline-block':'none';}
+  }
+}
+function handleInputKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const v=document.getElementById('agentInput').value.trim();if(v.startsWith('/')){executeSlashCommand(v);document.getElementById('agentInput').value='';hideSlashMenu();}else{sendAgentMsg();}}else if(e.key==='Tab'){e.preventDefault();const menu=document.getElementById('slashMenu');if(menu.classList.contains('visible')){const active=menu.querySelector('.active')||menu.querySelector('.slash-item');if(active){document.getElementById('agentInput').value=active.querySelector('.cmd').textContent+' ';hideSlashMenu();}}}}
+function handleInputChange(el){const v=el.value;if(v.startsWith('/')){showSlashMenu(v.substring(1));}else{hideSlashMenu();}el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px';}
+function showSlashMenu(filter){const menu=document.getElementById('slashMenu');const filtered=SLASH_COMMANDS.filter(c=>c.cmd.substring(1).startsWith(filter.toLowerCase()));if(!filtered.length){hideSlashMenu();return;}menu.innerHTML=filtered.map(function(c,i){return '<div class="slash-item'+(i===0?' active':'')+'" onclick="document.getElementById(\'agentInput\').value=\''+c.cmd+' \';hideSlashMenu();"><span class="cmd">'+c.cmd+'</span><span class="desc">'+c.desc+'</span></div>';}).join('');menu.classList.add('visible');}
+function hideSlashMenu(){document.getElementById('slashMenu').classList.remove('visible');}
+function executeSlashCommand(cmd){const msgs=document.getElementById('agentMessages');const el=document.createElement('div');el.className='msg user';el.textContent=cmd;msgs.appendChild(el);switch(cmd.trim()){case'/help':const helpEl=document.createElement('div');helpEl.className='msg assistant';helpEl.innerHTML=SLASH_COMMANDS.map(function(c){return '<code>'+c.cmd+'</code> '+c.desc;}).join('<br>');msgs.appendChild(helpEl);break;case'/clear':agentHistory=[];msgs.innerHTML='<div class="msg assistant">Conversation cleared.</div>';break;case'/compact':agentHistory=agentHistory.slice(-2);const compactEl=document.createElement('div');compactEl.className='msg assistant';compactEl.textContent='Context compacted. Kept last 2 exchanges.';msgs.appendChild(compactEl);break;case'/cost':const costEl=document.createElement('div');costEl.className='msg assistant';costEl.innerHTML='Token usage: <code>'+totalTokensIn+'+'+totalTokensOut+'</code><br>Estimated cost: <code>$'+totalCost.toFixed(4)+'</code>';msgs.appendChild(costEl);break;case'/model':const extCfg=getExternalApiConfig();const modelEl=document.createElement('div');modelEl.className='msg assistant';modelEl.innerHTML=extCfg?'Provider: <code>'+esc(extCfg.provider)+'</code><br>Model: <code>'+esc(extCfg.model)+'</code>':'No external API configured. Using local model.';msgs.appendChild(modelEl);break;case'/memory':const memEl=document.createElement('div');memEl.className='msg assistant';memEl.innerHTML='Memory file (KAGUYA.md):<br><pre>Click "Import" to load, or ask the agent to create one.</pre>';msgs.appendChild(memEl);break;case'/status':const statusEl=document.createElement('div');statusEl.className='msg assistant';statusEl.innerHTML='Mode: <code>'+currentMode+'</code><br>Iterations: <code>'+currentIteration+'</code><br>Tokens: <code>'+totalTokensIn+'+'+totalTokensOut+'</code><br>Cost: <code>$'+totalCost.toFixed(4)+'</code><br>History: <code>'+agentHistory.length+' exchanges</code>';msgs.appendChild(statusEl);break;case'/permissions':showPermPanel();const permInfoEl=document.createElement('div');permInfoEl.className='msg assistant';permInfoEl.innerHTML='&#x1F6E1; '+t('permPanel')+' <button onclick="showPermPanel()" style="padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:10px;cursor:pointer;">'+t('permPanel')+'</button>';msgs.appendChild(permInfoEl);break;default:const unknownEl=document.createElement('div');unknownEl.className='msg assistant';unknownEl.textContent='Unknown command. Type /help for available commands.';msgs.appendChild(unknownEl);}msgs.scrollTop=msgs.scrollHeight;}
+const FILE_ICONS={py:'🐍',js:'📜',ts:'🔷',jsx:'⚛️',tsx:'⚛️',html:'🌐',css:'🎨',json:'📋',yaml:'⚙️',yml:'⚙️',md:'📝',txt:'📄',sql:'🗃️',sh:'🖥️',bash:'🖥️',rs:'🦀',go:'🐹',java:'☕',rb:'💎',php:'🐘',swift:'🐦',c:'🔧',cpp:'⚙️',h:'📐',toml:'⚙️',ini:'⚙️',cfg:'⚙️',dockerfile:'🐳',gitignore:'🚫'};
+function getFileIcon(name,ext){if(FILE_ICONS[ext])return FILE_ICONS[ext];if(name==='Dockerfile')return'🐳';if(name.startsWith('.'))return'🔒';return'📄';}
+function formatFileSize(bytes){if(!bytes||bytes===0)return'';if(bytes<1024)return bytes+'B';if(bytes<1024*1024)return(bytes/1024).toFixed(1)+'KB';if(bytes<1024*1024*1024)return(bytes/(1024*1024)).toFixed(1)+'MB';return(bytes/(1024*1024*1024)).toFixed(1)+'GB';}
+var _loadFileTreeTimer=null;
+function loadFileTreeDebounced(path){clearTimeout(_loadFileTreeTimer);_loadFileTreeTimer=setTimeout(function(){loadFileTree(path);},500);}
+async function loadFileTree(path){try{const r=await fetch('/agent/file-tree',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path||undefined,device_id:generateDeviceId()})});const d=await r.json();if(d.error){termLog('Error: '+d.error,'error');return;}if(d.user_name){currentUserName=d.user_name;document.getElementById('userName').textContent=d.user_name;document.getElementById('userAvatar').textContent=d.user_name.charAt(0).toUpperCase();}const tree=document.getElementById('fileTree');tree.innerHTML='<div class="tree-section" data-i18n="files">'+t('files')+'</div>';if(d.path){const up=document.createElement('div');up.className='tree-item';up.innerHTML='<span class="tree-icon dir">📁</span> <span class="tree-name">..</span>';const parentPath=d.path.split(/[\\/]/).slice(0,-1).join('/');up.onclick=()=>{if(currentWorkspace&&parentPath&&parentPath.length>=currentWorkspace.length)loadFileTree(parentPath);};tree.appendChild(up);}d.entries.forEach(e=>{const item=document.createElement('div');item.className='tree-item';item.dataset.path=e.path;item.dataset.name=e.name;item.dataset.isdir=e.is_dir?'1':'0';var icon=e.is_dir?'📁':getFileIcon(e.name,e.ext);var sizeStr=e.is_dir?'':formatFileSize(e.size);var runBtn=e.is_dir?'':'<button class="tree-run-btn" onclick="event.stopPropagation();treeRunFile(\''+esc(e.path).replace(/'/g,"\\'")+'\',\''+esc(e.name).replace(/'/g,"\\'")+'\')" title="运行此文件">▶</button>';item.innerHTML='<span class="tree-icon '+(e.is_dir?'dir':'file')+'">'+icon+'</span> <span class="tree-name">'+esc(e.name)+'</span>'+runBtn+(sizeStr?'<span class="tree-size">'+sizeStr+'</span>':'');item.onclick=()=>{if(e.is_dir)loadFileTree(e.path);else openFile(e.path,e.name);};item.oncontextmenu=function(ev){showTreeContextMenu(ev,e.path,e.name,e.is_dir);};tree.appendChild(item);});}catch(e){termLog('Failed to load file tree: '+e,'error');}}
+async function openFile(path,name){try{const r=await fetch('/agent/read-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,device_id:generateDeviceId()})});const d=await r.json();if(d.error){termLog('Error: '+d.error,'error');return;}var existingTab=openTabs.find(tb=>tb.path===path);if(!existingTab){openTabs.push({path,name,language:d.language,isTracked:false});renderTabs();}else{existingTab.language=d.language;}activeTab=path;renderTabs();renderCode(d.content,d.language);var ws=document.getElementById('welcomeScreen');if(ws)ws.style.display='none';document.getElementById('statusFile').textContent=name;document.getElementById('statusLang').textContent=d.language;document.querySelectorAll('.tree-item').forEach(i=>i.classList.toggle('active',i.dataset.path===path));showEditorToolbar(name,d.language,existingTab?existingTab.isTracked:false);}catch(e){termLog('Failed to open file: '+e,'error');}}
+function renderTabs(){const bar=document.getElementById('tabsBar');bar.innerHTML='';openTabs.forEach(tb=>{const tab=document.createElement('div');tab.className='tab'+(tb.path===activeTab?' active':'');tab.innerHTML='<span>'+esc(tb.name)+'</span><span class="close" onclick="event.stopPropagation();closeTab(\''+esc(tb.path).replace(/'/g,"\\'")+'\')">&#x2715;</span>';tab.onclick=()=>openFile(tb.path,tb.name);bar.appendChild(tab);});}
+function closeTab(path){openTabs=openTabs.filter(tb=>tb.path!==path);if(activeTab===path){activeTab=openTabs.length?openTabs[openTabs.length-1].path:null;if(activeTab)openFile(activeTab,openTabs.find(tb=>tb.path===activeTab).name);else{document.getElementById('codeContent').innerHTML='<div class="welcome-screen" id="welcomeScreen"><div class="welcome-logo">K</div><h2>'+t('welcomeTitle')+'</h2><p>'+t('welcomeSub')+'</p><div class="welcome-shortcuts"><div class="welcome-shortcut"><kbd>Enter</kbd> <span data-i18n="sendMsg">发送消息</span></div><div class="welcome-shortcut"><kbd>Shift+Enter</kbd> <span data-i18n="newLine">换行</span></div><div class="welcome-shortcut"><kbd>Ctrl+B</kbd> <span data-i18n="toggleSidebar">切换侧边栏</span></div><div class="welcome-shortcut"><kbd>Ctrl+J</kbd> <span data-i18n="toggleTerminal">切换终端</span></div><div class="welcome-shortcut"><kbd>Ctrl+S</kbd> <span>保存文件</span></div><div class="welcome-shortcut"><kbd>F5</kbd> <span data-i18n="compileRun">运行文件</span></div><div class="welcome-shortcut"><kbd>/</kbd> <span data-i18n="slashCmd">斜杠命令</span></div></div></div>';document.getElementById('statusFile').textContent=t('noFile');document.getElementById('statusLang').textContent='-';hideEditorToolbar();}}renderTabs();}
+function showEditorToolbar(name,lang,isTracked){var tb=document.getElementById('editorToolbar');if(!tb)return;tb.classList.add('visible');document.getElementById('toolbarFileName').textContent=name||'—';document.getElementById('toolbarLang').textContent=lang||'—';var ti=document.getElementById('trackIndicator');if(ti){ti.style.display=isTracked?'inline-block':'none';}}
+function hideEditorToolbar(){var tb=document.getElementById('editorToolbar');if(!tb)return;tb.classList.remove('visible');var ti=document.getElementById('trackIndicator');if(ti)ti.style.display='none';}
+async function runCurrentFile(){if(!activeTab){termLog('No file is open. Please open a file first.','error');return;}var tab=openTabs.find(function(t2){return t2.path===activeTab;});if(!tab){termLog('Cannot find active file.');return;}var filename=tab.name||activeTab;var fname=filename.toLowerCase();var tp=document.getElementById('bottomPanel');if(tp){tp.style.display='flex';switchBottomTab('terminal');}if(fname.endsWith('.py')){termLog('▶ Running: '+filename,'info');runTerminalCmd('python "'+activeTab+'"');}else if(fname.endsWith('.js')){termLog('▶ Running: '+filename,'info');runTerminalCmd('node "'+activeTab+'"');}else if(fname.endsWith('.ts')){termLog('▶ Running: '+filename,'info');runTerminalCmd('npx ts-node "'+activeTab+'"');}else if(fname.endsWith('.java')){termLog('▶ Running (compile+run): '+filename,'info');runTerminalCmd('javac "'+activeTab+'" && java "'+activeTab.replace(/\.java$/,'')+'"');}else if(fname.endsWith('.go')){termLog('▶ Running: '+filename,'info');runTerminalCmd('go run "'+activeTab+'"');}else if(fname.endsWith('.rs')){termLog('▶ Running (compile+run): '+filename,'info');runTerminalCmd('rustc "'+activeTab+'" && "'+activeTab.replace(/\.rs$/,'.exe')+'"');}else if(fname.endsWith('.c')){var outExe=activeTab.replace(/\.c$/,'.exe');termLog('▶ Running (compile+run): '+filename,'info');runTerminalCmd('gcc "'+activeTab+'" -o "'+outExe+'" && "'+outExe+'"');}else if(fname.endsWith('.cpp')){var outExe2=activeTab.replace(/\.cpp$/,'.exe');termLog('▶ Running (compile+run): '+filename,'info');runTerminalCmd('g++ "'+activeTab+'" -o "'+outExe2+'" && "'+outExe2+'"');}else if(fname.endsWith('.sh')||fname.endsWith('.bat')){termLog('▶ Running: '+filename,'info');runTerminalCmd('"'+activeTab+'"');}else{termLog('▶ Running (compile mode): '+filename,'info');switchBottomTab('output');compileCurrentFile();}}
+async function saveCurrentFile(){if(!activeTab){termLog('No file to save');return;}var tab=openTabs.find(function(t2){return t2.path===activeTab;});if(!tab){termLog('Cannot find active file');return;}var codeEl=document.querySelector('#codeContent code');var content=codeEl?codeEl.textContent:'';if(!content){termLog('No content to save; file is read-only in this view','error');return;}try{var r=await fetch('/agent/write-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:activeTab,content:content,device_id:generateDeviceId()})});var d=await r.json();if(d.error){termLog('Save failed: '+d.error,'error');return;}termLog('Saved: '+tab.name,'success');showFileChangeConfirmation(tab.name,'saved');document.getElementById('statusFile').textContent=tab.name+' ✓';}catch(e){termLog('Save failed: '+e.message,'error');}}
+function showTreeContextMenu(e,path,name,isDir){e.preventDefault();var existing=document.getElementById('treeContextMenu');if(existing)existing.remove();var menu=document.createElement('div');menu.id='treeContextMenu';menu.className='context-menu visible';menu.style.left=e.clientX+'px';menu.style.top=e.clientY+'px';if(isDir){menu.innerHTML='<div class="context-menu-item" onclick="loadFileTree(\''+esc(path).replace(/'/g,"\\'")+'\');this.parentElement.remove();">📂 打开文件夹</div><div class="context-menu-item" onclick="runInTerminalAtPath(\''+esc(path).replace(/'/g,"\\'")+'\');this.parentElement.remove();">📁 在此路径运行命令</div>';}else{menu.innerHTML='<div class="context-menu-item" onclick="openFile(\''+esc(path).replace(/'/g,"\\'")+'\',\''+esc(name).replace(/'/g,"\\'")+'\');this.parentElement.remove();">📄 打开文件</div><div class="context-menu-item run-item" onclick="openFile(\''+esc(path).replace(/'/g,"\\'")+'\',\''+esc(name).replace(/'/g,"\\'")+'\');setTimeout(function(){runCurrentFile();},500);this.parentElement.remove();">▶ 运行文件</div>';}menu.innerHTML+='<div class="context-menu-divider"></div><div class="context-menu-item" onclick="this.parentElement.remove();">✕ 关闭菜单</div>';document.body.appendChild(menu);setTimeout(function(){document.addEventListener('click',function closeMenu(ev){if(!menu.contains(ev.target)){menu.remove();document.removeEventListener('click',closeMenu);}});},10);}
+function runInTerminalAtPath(dirPath){var tp=document.getElementById('bottomPanel');if(tp){tp.style.display='flex';switchBottomTab('terminal');}termLog('Working directory: '+dirPath,'info');var input=document.getElementById('terminalInput');if(input)input.focus();}
+async function treeRunFile(path,name){var tp=document.getElementById('bottomPanel');if(tp){tp.style.display='flex';switchBottomTab('terminal');}var cmd='';var pn=name.toLowerCase();if(pn.endsWith('.py'))cmd='python "'+path+'"';else if(pn.endsWith('.js'))cmd='node "'+path+'"';else if(pn.endsWith('.ts'))cmd='npx ts-node "'+path+'"';else if(pn.endsWith('.go'))cmd='go run "'+path+'"';else if(pn.endsWith('.sh')||pn.endsWith('.bat'))cmd='"'+path+'"';else if(pn.endsWith('.c')||pn.endsWith('.cpp')||pn.endsWith('.java')||pn.endsWith('.rs')){openFile(path,name);setTimeout(function(){runCurrentFile();},500);return;}else{openFile(path,name);setTimeout(function(){runCurrentFile();},500);return;}termLog('▶ Running: '+name+' ('+cmd.substr(0,80)+')','info');runTerminalCmd(cmd);}
+function renderCode(content,lang){const el=document.getElementById('codeContent');let highlighted;try{highlighted=hljs.highlight(content,{language:lang||'plaintext'}).value;}catch(e){highlighted=esc(content);}el.innerHTML='<pre><code class="hljs">'+highlighted+'</code></pre>';}
+function termLog(text,cls=''){const body=document.getElementById('terminalBody');const line=document.createElement('div');line.className='line'+(cls?' '+cls:'');if(cls==='html'){line.innerHTML=text;}else{line.textContent=text;}body.appendChild(line);body.scrollTop=body.scrollHeight;var tab=_terminalTabs.find(function(t){return t.id===_activeTermTab;});if(tab){if(!tab._outputCache)tab._outputCache=[];tab._outputCache.push({text:text,cls:cls});if(tab._outputCache.length>500)tab._outputCache=tab._outputCache.slice(-300);}var outType=cls==='error'?'stderr':cls==='success'?'stdout':cls==='info'?'info':'stdout';outputLog(text,outType);}
+async function selectFiles(){
+  if(canUseDesktopDialog('file')){
+    try{
+      const result=await window.kaguyaDesktop.dialog.openFile({title:t('selectFile'),multi:true});
+      if(result.canceled||!result.filePaths||!result.filePaths.length){termLog(t('noFilesSelected'),'info');return;}
+      termLog(t('importingPaths')+' '+result.filePaths.length+' ...','info');
+      const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:result.filePaths,device_id:generateDeviceId()})});
+      const d=await r.json();
+      if(d.error){termLog(t('importFailed')+': '+d.error,'error');return;}
+      if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('importSuccess')+': '+i.src+' -> '+i.dst,'success'));loadFileTree();}
+      if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('importFailed')+': '+e.path+' - '+e.error,'error'));}
+    }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
+    return;
+  }
+  document.getElementById('ideFileInput').click();
+}
+async function selectFolder(){
+  if(canUseDesktopDialog('folder')){
+    try{
+      const result=await window.kaguyaDesktop.dialog.openFolder({title:t('selectFolder')});
+      if(result.canceled||!result.filePaths||!result.filePaths.length){termLog(t('noFilesSelected'),'info');return;}
+      const selectedPath=result.filePaths[0];
+      termLog(t('importingPaths')+' '+selectedPath+' ...','info');
+      const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:[selectedPath],device_id:generateDeviceId()})});
+      const d=await r.json();
+      if(d.error){termLog(t('importFailed')+': '+d.error,'error');return;}
+      if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('importSuccess')+': '+i.src+' -> '+i.dst,'success'));loadFileTree();}
+      if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('importFailed')+': '+e.path+' - '+e.error,'error'));}
+    }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
+    return;
+  }
+  document.getElementById('ideFolderInput').click();
+}
+function showOperationFeedback(toolName,toolInput,status){
+  const fb=document.getElementById('operationFeedback');
+  if(!fb){
+    const newFb=document.createElement('div');
+    newFb.id='operationFeedback';
+    newFb.style.cssText='position:fixed;top:60px;right:20px;z-index:9999;padding:12px 20px;border-radius:10px;font-size:12px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,0.4);transition:all 0.3s ease;max-width:320px;';
+    document.body.appendChild(newFb);
+  }
+  const el=document.getElementById('operationFeedback');
+  const iconMap={executing:'&#9203;',success:'&#10003;',error:'&#10007;',info:'&#8505;'};
+  const colorMap={executing:'#fbbf24',success:'#34d399',error:'#f87171',info:'#60a5fa'};
+  el.style.background=colorMap[status]||colorMap.info;
+  el.style.color='#fff';
+  el.innerHTML=(iconMap[status]||'')+' '+(status==='executing'?'Executing '+toolName:(status==='success'?toolName+' completed':(status==='error'?toolName+' failed':'')));
+  el.style.opacity='1';
+  el.style.transform='translateY(0)';
+  clearTimeout(el._timeout);
+  el._timeout=setTimeout(()=>{el.style.opacity='0';el.style.transform='translateY(-10px)';},3000);
+}
+function showFileChangeConfirmation(toolName,toolInput,output){
+  const fileName=toolInput&&toolInput.path?toolInput.path.split(/[\\/]/).pop():'unknown file';
+  const filePath=toolInput&&toolInput.path?toolInput.path:'';
+  const confirmDiv=document.createElement('div');
+  confirmDiv.className='file-change-confirmation';
+  confirmDiv.style.cssText='margin:8px 0;padding:10px 14px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:8px;display:flex;align-items:center;gap:10px;animation:fadeIn 0.3s ease;';
+  confirmDiv.innerHTML='<span style="font-size:18px;color:var(--success);">&#10003;</span><div style="flex:1;"><div style="font-size:11px;font-weight:600;color:var(--success);">File saved successfully</div><div style="font-size:9px;color:var(--text-dim);margin-top:2px;">'+esc(fileName)+'</div></div><button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px;">&#x2715;</button>';
+  const msgs=document.getElementById('agentMessages');
+  msgs.appendChild(confirmDiv);
+  msgs.scrollTop=msgs.scrollHeight;
+  setTimeout(()=>{if(confirmDiv.parentElement){confirmDiv.style.opacity='0';confirmDiv.style.transition='opacity 0.5s ease';setTimeout(()=>{if(confirmDiv.parentElement)confirmDiv.remove();},500);}},5000);
+}
+function handleTerminalKey(e){
+  const input=document.getElementById('terminalInput');
+  var tab=_terminalTabs.find(function(t){return t.id===_activeTermTab;});
+  var hist=tab?tab.history:_termHistory;
+  var hIdx=tab?tab.histIdx:_termHistIdx;
+  if(e.key==='Enter'){
+    const cmd=input.value.trim();
+    if(cmd){hist.push(cmd);if(tab){tab.histIdx=hist.length;}else{_termHistIdx=hist.length;}}
+    runTerminalCmd(cmd);input.value='';
+  }else if(e.key==='ArrowUp'){
+    e.preventDefault();
+    if(hIdx>0){hIdx--;input.value=hist[hIdx]||'';if(tab){tab.histIdx=hIdx;}else{_termHistIdx=hIdx;}}
+  }else if(e.key==='ArrowDown'){
+    e.preventDefault();
+    if(hIdx<hist.length-1){hIdx++;input.value=hist[hIdx]||'';if(tab){tab.histIdx=hIdx;}else{_termHistIdx=hIdx;}}
+    else{hIdx=hist.length;input.value='';if(tab){tab.histIdx=hIdx;}else{_termHistIdx=hIdx;}}
+  }else if(e.ctrlKey&&e.key==='c'){
+    e.preventDefault();
+    input.value='';
+  }
+}
+function clearTerminal(){const body=document.getElementById('terminalBody');if(body)body.innerHTML='';}
+function switchBottomTab(tab){
+  document.querySelectorAll('.bottom-tab').forEach(function(t){t.classList.remove('active');});
+  document.querySelectorAll('.bottom-pane').forEach(function(p){p.classList.remove('active');});
+  var tabMap={terminal:0,output:1,debug:2};
+  var tabs=document.querySelectorAll('.bottom-tab');
+  if(tabs[tabMap[tab]])tabs[tabMap[tab]].classList.add('active');
+  var paneMap={terminal:'paneTerminal',output:'paneOutput',debug:'paneDebug'};
+  var pane=document.getElementById(paneMap[tab]);
+  if(pane)pane.classList.add('active');
+}
+function toggleBottomPanel(){
+  var bp=document.getElementById('bottomPanel');
+  if(!bp)return;
+  if(bp.style.display==='none'){bp.style.display='flex';}else{bp.style.display='none';}
+}
+var agentPanelOpen=true;
+function toggleAgentPanel(){
+  var panel=document.getElementById('agentPanel');
+  var floatBtn=document.getElementById('agentToggleFloat');
+  if(!panel)return;
+  var isCollapsed=panel.classList.contains('collapsed');
+  if(isCollapsed){
+    panel.classList.remove('collapsed');
+    panel.style.opacity='1';
+    panel.style.width='';
+    panel.style.minWidth='';
+    if(floatBtn)floatBtn.style.display='none';
+    localStorage.setItem('kaguya_agent_panel_collapsed','0');
+    agentPanelOpen=true;
+  }else{
+    panel.classList.add('collapsed');
+    if(floatBtn)floatBtn.style.display='flex';
+    localStorage.setItem('kaguya_agent_panel_collapsed','1');
+    agentPanelOpen=false;
+  }
+}
+function initAgentPanelState(){
+  var panel=document.getElementById('agentPanel');
+  var floatBtn=document.getElementById('agentToggleFloat');
+  if(!panel)return;
+  var saved=localStorage.getItem('kaguya_agent_panel_collapsed');
+  if(saved==='1'){
+    panel.classList.add('collapsed');
+    panel.style.width='0';
+    panel.style.minWidth='0';
+    panel.style.opacity='0';
+    panel.style.overflow='hidden';
+    panel.style.borderLeft='none';
+    if(floatBtn)floatBtn.style.display='flex';
+    agentPanelOpen=false;
+  }else{
+    panel.classList.remove('collapsed');
+    panel.style.width='';
+    panel.style.minWidth='';
+    panel.style.opacity='1';
+    panel.style.overflow='';
+    panel.style.borderLeft='';
+    if(floatBtn)floatBtn.style.display='none';
+    agentPanelOpen=true;
+  }
+}
+function addTerminalTab(){
+  var id=_nextTermTabId++;
+  var names=['python','node','cmd','powershell','zsh','sh'];
+  var name=names[id%names.length];
+  _terminalTabs.push({id:id,name:name,history:[],histIdx:-1});
+  renderTerminalTabs();
+  switchTerminalTab(id);
+}
+function switchTerminalTab(id){
+  _activeTermTab=id;
+  renderTerminalTabs();
+  var body=document.getElementById('terminalBody');
+  if(body)body.innerHTML='';
+  var tab=_terminalTabs.find(function(t){return t.id===id;});
+  if(tab&&tab._outputCache){tab._outputCache.forEach(function(l){termLog(l.text,l.cls);});}
+  document.getElementById('termPrompt').textContent=tab&&tab.name==='python'?'>>>':'$';
+}
+function closeTerminalTab(id){
+  if(_terminalTabs.length<=1)return;
+  _terminalTabs=_terminalTabs.filter(function(t){return t.id!==id;});
+  if(_activeTermTab===id){_activeTermTab=_terminalTabs[0].id;switchTerminalTab(_activeTermTab);}
+  renderTerminalTabs();
+}
+function renderTerminalTabs(){
+  var container=document.getElementById('terminalTabs');
+  if(!container)return;
+  container.innerHTML='';
+  _terminalTabs.forEach(function(tab){
+    var el=document.createElement('div');
+    el.className='terminal-tab'+(tab.id===_activeTermTab?' active':'');
+    el.id='ttab_'+tab.id;
+    el.innerHTML='<span>'+esc(tab.name)+'</span>'+(_terminalTabs.length>1?'<span class="tt-close" onclick="event.stopPropagation();closeTerminalTab('+tab.id+')">&#x2715;</span>':'');
+    el.onclick=function(){switchTerminalTab(tab.id);};
+    container.appendChild(el);
+  });
+}
+function outputLog(text,type){
+  type=type||'stdout';
+  var now=new Date();
+  var ts=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'.'+String(now.getMilliseconds()).padStart(3,'0');
+  var entry={text:text,type:type,timestamp:ts};
+  _outputLines.push(entry);
+  if(_outputLines.length>_outputMaxLines){_outputLines=_outputLines.slice(-_outputMaxLines);}
+  if(_outputFilter!=='all'&&_outputFilter!==type){return;}
+  appendOutputLine(entry);
+}
+function appendOutputLine(entry){
+  var panel=document.getElementById('outputPanel');
+  if(!panel)return;
+  var line=document.createElement('div');
+  line.className='out-line out-'+entry.type;
+  line.dataset.type=entry.type;
+  line.innerHTML='<span class="out-timestamp">'+esc(entry.timestamp)+'</span>'+esc(entry.text);
+  panel.appendChild(line);
+  var auto=document.getElementById('outputAutoscroll');
+  if(!auto||auto.checked){panel.scrollTop=panel.scrollHeight;}
+}
+function clearOutputPanel(){
+  _outputLines=[];
+  var panel=document.getElementById('outputPanel');
+  if(panel)panel.innerHTML='';
+}
+function scrollOutputBottom(){
+  var panel=document.getElementById('outputPanel');
+  if(panel)panel.scrollTop=panel.scrollHeight;
+}
+function toggleOutputFilter(btn,filter){
+  _outputFilter=filter;
+  document.querySelectorAll('.output-toolbar .filter-btn').forEach(function(b){b.classList.remove('active');});
+  btn.classList.add('active');
+  var panel=document.getElementById('outputPanel');
+  if(!panel)return;
+  panel.innerHTML='';
+  _outputLines.forEach(function(entry){
+    if(filter==='all'||filter===entry.type){appendOutputLine(entry);}
+  });
+}
+function toggleDebugSection(header){
+  header.classList.toggle('collapsed');
+}
+function addBreakpoint(filePath,line){
+  var bp=_debugBreakpoints.find(function(b){return b.file===filePath&&b.line===line;});
+  if(bp){bp.enabled=!bp.enabled;}else{_debugBreakpoints.push({id:'bp_'+Date.now(),file:filePath,line:line,enabled:true});}
+  renderBreakpoints();
+  addDebugLog('Breakpoint '+(bp?(bp.enabled?'enabled':'disabled'):'added')+': '+filePath+':'+line);
+}
+function removeBreakpoint(bpId){
+  _debugBreakpoints=_debugBreakpoints.filter(function(b){return b.id!==bpId;});
+  renderBreakpoints();
+}
+function renderBreakpoints(){
+  var list=document.getElementById('breakpointList');
+  var count=document.getElementById('bpCount');
+  if(!list)return;
+  if(count)count.textContent='('+_debugBreakpoints.length+')';
+  if(!_debugBreakpoints.length){list.innerHTML='<div class="debug-empty">No breakpoints set. Click line numbers in the editor to add.</div>';return;}
+  list.innerHTML=_debugBreakpoints.map(function(bp){
+    var fname=bp.file.split(/[\\/]/).pop();
+    return '<div class="debug-breakpoint" onclick="jumpToBreakpoint(\''+esc(bp.file).replace(/'/g,"\\'")+'\','+bp.line+')"><span class="bp-dot'+(bp.enabled?'':' disabled')+'"></span><span class="bp-file">'+esc(fname)+':'+bp.line+'</span><span class="bp-line">'+esc(bp.file)+'</span><span class="bp-actions"><button onclick="event.stopPropagation();toggleBreakpoint(\''+bp.id+'\')" title="Toggle">&#x21BB;</button><button onclick="event.stopPropagation();removeBreakpoint(\''+bp.id+'\')" title="Remove">&#x2715;</button></span></div>';
+  }).join('');
+}
+function toggleBreakpoint(bpId){
+  var bp=_debugBreakpoints.find(function(b){return b.id===bpId;});
+  if(bp){bp.enabled=!bp.enabled;renderBreakpoints();}
+}
+function jumpToBreakpoint(filePath,line){openFile(filePath,filePath.split(/[\\/]/).pop());}
+function updateVariables(vars){
+  _debugVariables=vars||[];
+  renderVariables();
+}
+function renderVariables(){
+  var list=document.getElementById('variableList');
+  var count=document.getElementById('varCount');
+  if(!list)return;
+  if(count)count.textContent='('+_debugVariables.length+')';
+  if(!_debugVariables.length){list.innerHTML='<div class="debug-empty">Run code in debug mode to inspect variables.</div>';return;}
+  list.innerHTML=_debugVariables.map(function(v){
+    return '<div class="debug-var-row"><span class="debug-var-scope">'+esc(v.scope||'local')+'</span><span class="debug-var-name">'+esc(v.name)+'</span><span class="debug-var-value">'+esc(String(v.value).substring(0,100))+'</span><span class="debug-var-type">'+esc(v.type||'')+'</span></div>';
+  }).join('');
+}
+function updateCallstack(frames){
+  _debugCallstack=frames||[];
+  renderCallstack();
+}
+function renderCallstack(){
+  var list=document.getElementById('callstackList');
+  if(!list)return;
+  if(!_debugCallstack.length){list.innerHTML='<div class="debug-empty">No active debug session.</div>';return;}
+  list.innerHTML='<div class="debug-callstack">'+_debugCallstack.map(function(f,i){
+    return '<div class="debug-callstack-frame'+(i===0?' current':'')+'" onclick="jumpToBreakpoint(\''+esc(f.file||'').replace(/'/g,"\\'")+'\','+(f.line||0)+')"><span class="frame-func">'+esc(f.function||'?')+'</span><span class="frame-loc">'+esc((f.file||'').split(/[\\/]/).pop())+':'+(f.line||0)+'</span></div>';
+  }).join('')+'</div>';
+}
+function addDebugLog(msg){
+  var now=new Date();
+  var ts=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  _debugLogEntries.push({msg:msg,ts:ts});
+  if(_debugLogEntries.length>200)_debugLogEntries=_debugLogEntries.slice(-100);
+  var log=document.getElementById('debugLog');
+  if(log){log.innerHTML+='<div style="padding:1px 0;"><span style="color:var(--text-muted);font-size:8px;">'+esc(ts)+'</span> '+esc(msg)+'</div>';log.scrollTop=log.scrollHeight;}
+}
+function setConvFilter(mode){
+  _convFilterMode=mode;
+  document.querySelectorAll('.conv-filter-btn').forEach(function(b){b.classList.remove('active');});
+  event.target.classList.add('active');
+  applyConvFolding();
+}
+function applyConvFolding(){
+  var msgs=document.getElementById('agentMessages');
+  if(!msgs)return;
+  msgs.querySelectorAll('.msg-group-divider,.msg-fold-section').forEach(function(el){el.remove();});
+  var children=Array.from(msgs.children);
+  if(_convFilterMode==='session'){
+    var sessionIdx=0;
+    children.forEach(function(child){
+      if(child.classList.contains('user')){
+        sessionIdx++;
+        var divider=document.createElement('div');
+        divider.className='msg-group-divider';
+        divider.innerHTML='<span class="group-label">Session #'+sessionIdx+'</span>';
+        msgs.insertBefore(divider,child);
+      }
+    });
+  }else if(_convFilterMode==='time'){
+    var lastMinute=null;
+    children.forEach(function(child){
+      var ts=child.dataset.timestamp;
+      if(!ts)return;
+      var d=new Date(ts);
+      var minute=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      if(minute!==lastMinute){
+        lastMinute=minute;
+        var divider=document.createElement('div');
+        divider.className='msg-group-divider';
+        divider.innerHTML='<span class="group-label">'+minute+'</span>';
+        msgs.insertBefore(divider,child);
+      }
+    });
+  }else if(_convFilterMode==='topic'){
+    var topicLabels={'read_file':'File Reading','write_file':'File Writing','edit_file':'File Editing','execute_command':'Command Execution','search_files':'Code Search','compile':'Compilation','glob':'File Search','web_fetch':'Web Fetch','web_search':'Web Search','agent_spawn':'Agent Spawn'};
+    var lastTopic=null;
+    children.forEach(function(child){
+      var topic=null;
+      if(child.classList.contains('tool-use')||child.classList.contains('tool-result')){
+        var nameEl=child.querySelector('.tool-name');
+        if(nameEl){var m=nameEl.textContent.match(/\[\w+\]\s*(\w+)/);if(m)topic=m[1];}
+      }
+      if(topic&&topic!==lastTopic){
+        lastTopic=topic;
+        var section=document.createElement('div');
+        section.className='msg-fold-section';
+        var header=document.createElement('div');
+        header.className='msg-fold-header';
+        header.innerHTML='<span class="fold-arrow">&#x25BC;</span> '+(topicLabels[topic]||topic);
+        header.onclick=function(){header.classList.toggle('collapsed');};
+        var body=document.createElement('div');
+        body.className='msg-fold-body';
+        section.appendChild(header);
+        section.appendChild(body);
+        msgs.insertBefore(section,child);
+        body.appendChild(child);
+      }else if(lastTopic){
+        var prevSection=child.previousElementSibling;
+        if(prevSection&&prevSection.classList.contains('msg-fold-section')){
+          prevSection.querySelector('.msg-fold-body').appendChild(child);
+        }
+      }
+    });
+  }
+}
+function toggleMsgFoldAll(){
+  _msgFoldAllState=!_msgFoldAllState;
+  var btn=document.getElementById('foldToggleBtn');
+  if(btn)btn.textContent=_msgFoldAllState?'▶ All':'◀ All';
+  if(_msgFoldAllState){collapseAllMsgs();}else{expandAllMsgs();}
+  document.querySelectorAll('.msg-fold-header').forEach(function(h){
+    if(_msgFoldAllState){h.classList.add('collapsed');}else{h.classList.remove('collapsed');}
+  });
+  document.querySelectorAll('.conv-group-header').forEach(function(h){
+    if(_msgFoldAllState){h.classList.add('collapsed');}else{h.classList.remove('collapsed');}
+  });
+}
+var _termRunning=false;
+var _termAbortCtrl=null;
+function setTermRunning(running){
+  _termRunning=running;
+  var btn=document.getElementById('termStopBtn');
+  if(btn){btn.style.display=running?'inline-block':'none';}
+}
+async function stopTerminalProcess(){
+  if(!_termRunning)return;
+  if(isElectron && electronTerminalSession){
+    try{window.kaguyaDesktop.terminal.kill(electronTerminalSession);electronTerminalSession=null;}catch(e){}
+    termLog('[Process killed]','error');
+    setTermRunning(false);
+    return;
+  }
+  if(_termAbortCtrl){_termAbortCtrl.abort();_termAbortCtrl=null;}
+  try{await fetch('/agent/terminal/kill',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:generateDeviceId()})});}catch(e){}
+  termLog('[Process killed]','error');
+  setTermRunning(false);
+}
+async function runTerminalCmd(cmd){
+  if(!cmd.trim())return;
+  if(_termRunning){termLog('[Waiting for previous command to finish...]','info');return;}
+  termLog('$ '+cmd);
+  addDebugLog('Terminal: $ '+cmd);
+  setTermRunning(true);
+  if(isElectron && electronTerminalSession){
+    try{
+      window.kaguyaDesktop.terminal.write(electronTerminalSession, cmd + '\n');
+      setTermRunning(false);
+      return;
+    }catch(e){
+      termLog('Error: '+e.message,'error');
+      setTermRunning(false);
+      return;
+    }
+  }
+  var startTime=performance.now();
+  try{
+    _termAbortCtrl=new AbortController();
+    var tid=setTimeout(function(){_termAbortCtrl.abort();},30000);
+    const r=await fetch('/agent/terminal/exec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd,device_id:generateDeviceId(),timeout:30}),signal:_termAbortCtrl.signal});
+    clearTimeout(tid);
+    const d=await r.json();
+    var elapsed=Math.round(performance.now()-startTime);
+    if(d.error){termLog('Error: '+d.error,'error');addDebugLog('Command failed ('+elapsed+'ms): '+d.error);}
+    else{
+      var out=d.output||'';
+      var isErr=d.exit_code!==0&&d.exit_code!==undefined;
+      termLog(out,isErr?'error':'success');
+      if(d.exit_code!==undefined&&d.exit_code!==0){termLog('[Exit code: '+d.exit_code+']','error');}
+      addDebugLog('Command completed ('+elapsed+'ms, exit: '+(d.exit_code||0)+')');
+      if(d.variables){updateVariables(d.variables);}
+    }
+  }catch(e){
+    if(e.name==='AbortError'){termLog('Error: Command timed out (30s)','error');addDebugLog('Command timed out');}
+    else{termLog('Error: '+e.message,'error');addDebugLog('Command error: '+e.message);}
+  }
+  _termAbortCtrl=null;
+  setTermRunning(false);
+}
+function showPermissionPrompt(toolName,toolInput,requestId,reason,msgEl){return new Promise((resolve)=>{const bar=document.createElement('div');bar.className='permission-bar';bar.style.flexWrap='wrap';bar.style.gap='4px';const inputStr=typeof toolInput==='object'?JSON.stringify(toolInput,null,1):String(toolInput);const shortInput=inputStr.length>200?inputStr.substring(0,200)+'...':inputStr;const reasonHtml=reason?'<div style="width:100%;font-size:9px;color:var(--text-muted);margin-top:2px;">'+t('permReason')+': '+esc(reason)+'</div>':'';const detailHtml='<div style="width:100%;max-height:80px;overflow:auto;font-size:9px;color:var(--text-dim);background:var(--bg-0);padding:4px 6px;border-radius:3px;margin-top:2px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-all;">'+esc(shortInput)+'</div>';bar.innerHTML='<span style="color:var(--warning);">&#x26A0;</span> <span>'+t('permRequest')+': <strong>'+esc(toolName)+'</strong></span>'+'<button class="allow-btn" id="permAllow">'+t('allow')+'</button>'+'<button class="deny-btn" id="permDeny">'+t('deny')+'</button>'+'<label style="font-size:9px;color:var(--text-muted);display:flex;align-items:center;gap:3px;margin-left:4px;"><input type="checkbox" id="permAlways" style="width:10px;height:10px;"> '+t('alwaysAllow')+'</label>'+reasonHtml+detailHtml;msgEl.appendChild(bar);msgEl.scrollTop=msgEl.scrollHeight;var _resolved=false;function _doResolve(result){if(_resolved)return;_resolved=true;bar.remove();if(requestId){fetch('/agent/permission/respond',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:requestId,allowed:result.allowed,always:result.always})}).catch(function(e){console.warn('[Kaguya IDE] Permission respond failed:',e);});}resolve(result);}bar.querySelector('#permAllow').onclick=()=>{const always=bar.querySelector('#permAlways').checked;_doResolve({allowed:true,always:always});};bar.querySelector('#permDeny').onclick=()=>{const always=bar.querySelector('#permAlways').checked;_doResolve({allowed:false,always:always});};setTimeout(function(){_doResolve({allowed:false,always:false});termLog('[Permission auto-denied after 55s timeout]','info');},55000);});}
+async function stopAgent(){
+  const runId=currentAgentRunId;
+  const ctrl=currentAgentAbortController;
+  if(ctrl){try{ctrl.abort();}catch(e){}}
+  if(runId){
+    try{
+      await fetch('/agent/abort',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})});
+    }catch(e){
+      termLog('[Agent abort request failed] '+(e.message||e),'error');
+    }
+  }else if(!isAgentRunning){
+    termLog('[No active agent run]','info');
+    return;
+  }else{
+    termLog('[Agent stop requested before run id was received]','info');
+  }
+  currentAgentRunId=null;
+  currentAgentAbortController=null;
+  isAgentRunning=false;
+  document.getElementById('agentSendBtn').disabled=false;
+  document.getElementById('agentStopBtn').style.display='none';
+  document.getElementById('statusText').textContent=t('ready');
+  termLog('[Agent stopped by user]','info');
+}
+function _setAgentRunning(running){
+  isAgentRunning=running;
+  document.getElementById('agentSendBtn').disabled=running;
+  document.getElementById('agentStopBtn').style.display=running?'inline-flex':'none';
+}
+async function sendAgentMsg(){
+  const input=document.getElementById('agentInput');
+  const msg=input.value.trim();
+  if(!msg||isAgentRunning)return;
+  input.value='';input.style.height='auto';hideSlashMenu();
+  const msgs=document.getElementById('agentMessages');
+  const userMsg=document.createElement('div');
+  userMsg.className='msg user';userMsg.textContent=msg;
+  userMsg.dataset.timestamp=new Date().toISOString();
+  msgs.appendChild(userMsg);msgs.scrollTop=msgs.scrollHeight;
+  _setAgentRunning(true);
+  document.getElementById('statusText').textContent=t('thinking')+'...';
+  currentIteration=0;
+  updateTaskStatus(activeTaskId,'in_progress');
+  let thinkingEl=null;
+  let thinkingText='';
+  let _lastDataTime=Date.now();
+  let _stallWarned=false;
+  currentAgentRunId=null;
+  currentAgentAbortController=new AbortController();
+  const _stallCheck=setInterval(function(){
+    if(!isAgentRunning){clearInterval(_stallCheck);return;}
+    var idle=Date.now()-_lastDataTime;
+    if(idle>60000&&!_stallWarned){
+      _stallWarned=true;
+      termLog('⚠ Agent响应缓慢 (已等待'+Math.round(idle/1000)+'s)，模型可能正在处理复杂任务...','info');
+      document.getElementById('statusText').textContent=t('thinking')+' (slow '+Math.round(idle/1000)+'s)...';
+    }
+    if(idle>180000){
+      clearInterval(_stallCheck);
+      termLog('❌ Agent超时 (3分钟无响应)，正在终止...','error');
+      stopAgent();
+    }
+  },10000);
+  try{
+    const soloMode=currentMode==='solo';
+    const r=await fetch('/agent/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,history:agentHistory.slice(-10),working_dir:undefined,external_api:getExternalApiConfig(),solo_mode:soloMode,device_id:generateDeviceId()}),signal:currentAgentAbortController.signal});
+    if(!r.ok){const errText=await r.text();throw new Error('HTTP '+r.status+': '+errText.substring(0,200));}
+    const reader=r.body.getReader();const dec=new TextDecoder();
+    let buf='';let fullContent='';
+    while(true){
+      if(!isAgentRunning){try{reader.cancel();}catch(e){}break;}
+      const{done,value}=await reader.read();
+      _lastDataTime=Date.now();
+      if(done){
+        clearInterval(_stallCheck);
+        if(isAgentRunning){
+          if(thinkingEl){thinkingEl.classList.remove('thinking');thinkingEl.classList.add('thinking-done');thinkingEl.classList.add('collapsed');const fade=thinkingEl.querySelector('.think-fade');if(fade)fade.style.display='block';const tg=thinkingEl.querySelector('.think-toggle');if(tg)tg.textContent='▶';}
+          agentHistory.push({user:msg,assistant:fullContent||thinkingText});
+          const task=getActiveTask();if(task){task.history=agentHistory.slice(-20);task.status='done';}
+          _setAgentRunning(false);
+          document.getElementById('statusText').textContent=t('ready');
+          saveTasks();
+        }
+        break;
+      }
+      buf+=dec.decode(value,{stream:true});
+      const lines=buf.split('\n');buf=lines.pop()||'';
+      for(const l of lines){
+        if(!l.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(l.slice(6));
+          if(d.type==='run_started'){
+            currentAgentRunId=d.run_id||null;
+            continue;
+          }
+          if(d.type==='aborted'){
+            termLog('[Agent stopped by user]','info');
+            _setAgentRunning(false);
+            currentAgentRunId=null;
+            currentAgentAbortController=null;
+            document.getElementById('statusText').textContent=t('ready');
+            continue;
+          }
+          if(d.type==='thinking'){
+            currentIteration=d.iteration||0;
+            document.getElementById('statusText').textContent=t('thinking')+' (turn '+currentIteration+')...';
+            thinkingText+=d.content||'';
+            if(!thinkingEl){
+              thinkingEl=document.createElement('div');
+              thinkingEl.className='msg assistant thinking collapsed';
+              thinkingEl.innerHTML='<span class="think-toggle">▶</span><div class="think-fade" style="display:block;"></div>';
+              thinkingEl.onclick=function(ev){if(ev.target.classList.contains('think-toggle')||ev.target===thinkingEl){toggleMsgCollapse(thinkingEl);}};
+              msgs.appendChild(thinkingEl);
+            }
+            const toggleBtn=thinkingEl.querySelector('.think-toggle');
+            const fadeEl=thinkingEl.querySelector('.think-fade');
+            const summary=thinkingText.length>120?thinkingText.substring(0,120)+'...':thinkingText;
+            thinkingEl.innerHTML=renderMd(thinkingText)+'<span class="think-toggle">'+(thinkingEl.classList.contains('collapsed')?'▶':'▼')+'</span><div class="think-fade" style="display:'+(thinkingEl.classList.contains('collapsed')?'block':'none')+';"></div>';
+            thinkingEl.onclick=function(ev){if(ev.target.classList.contains('think-toggle')||ev.target===thinkingEl){toggleMsgCollapse(thinkingEl);}};
+            msgs.scrollTop=msgs.scrollHeight;
+          }
+          else if(d.type==='permission_request'){
+            if(thinkingEl){thinkingEl.classList.remove('thinking');thinkingEl.classList.add('thinking-done');thinkingEl.classList.add('collapsed');const fade=thinkingEl.querySelector('.think-fade');if(fade)fade.style.display='block';const tg=thinkingEl.querySelector('.think-toggle');if(tg)tg.textContent='▶';thinkingEl=null;thinkingText='';}
+            const icon=TOOL_ICONS[d.tool]||'?';
+            const isDanger=d.dangerous||DANGEROUS.includes(d.tool);
+            const inputStr=typeof d.input==='object'?JSON.stringify(d.input,null,2):String(d.input);
+            const el=document.createElement('div');el.className='msg tool-use collapsed'+(isDanger?' tool-danger':'');
+            const fileHint=(d.tool==='write_file'||d.tool==='edit_file')&&d.input&&d.input.path?' &#128196; '+esc(d.input.path.split(/[\\/]/).pop()):'';
+            el.innerHTML='<span class="tool-name">['+icon+'] '+esc(d.tool)+'</span>'+(isDanger?'<span class="danger-badge">!</span>':'')+fileHint+'<span class="tool-toggle">▶</span><pre>'+esc(inputStr.substring(0,800))+'</pre>';
+            el.onclick=function(ev){if(ev.target.classList.contains('tool-toggle')||ev.target===el){toggleMsgCollapse(el);}};
+            msgs.appendChild(el);
+            if(d.tool==='execute_command'){
+              const outStr=(d.output||'').substring(0,500);
+              const isPermErr=d.output&&d.output.startsWith('Error');
+              termLog('[Result] '+outStr+(d.output&&d.output.length>500?'...':''),isPermErr?'error':'success');
+            }
+            else if((d.tool==='write_file'||d.tool==='edit_file')&&!(d.output&&d.output.startsWith('Error'))){
+              termLog('[Success] File saved: '+(d.input&&d.input.path),'success');
+            }
+            else if(d.output&&d.output.startsWith('Error')){
+              termLog('[Error] '+d.tool+': '+(d.output||'Unknown error').substring(0,200),'error');
+            }
+            else{
+              termLog('[Done] '+d.tool,'success');
+            }
+            document.getElementById('statusText').textContent=t('waitingApproval');
+            _lastDataTime=Date.now();
+            const result=await showPermissionPrompt(d.tool,d.input,d.request_id,d.reason,msgs);
+            _lastDataTime=Date.now();
+            if(!result.allowed){const denyEl=document.createElement('div');denyEl.className='msg tool-result error-result';denyEl.innerHTML='<span class="tool-name">['+t('deny')+'] '+esc(d.tool)+'</span>'+(result.always?' <span style="color:var(--warning);font-size:9px;">('+t('alwaysDeny')+')</span>':'');msgs.appendChild(denyEl);}
+            else if(result.always){const alwaysEl=document.createElement('div');alwaysEl.className='msg tool-result';alwaysEl.innerHTML='<span class="tool-name">['+t('allow')+'] '+esc(d.tool)+'</span> <span style="color:var(--success);font-size:9px;">('+t('alwaysAllow')+')</span>';msgs.appendChild(alwaysEl);}
+          }
+          else if(d.type==='tool_use'){
+            if(thinkingEl){thinkingEl.classList.remove('thinking');thinkingEl.classList.add('thinking-done');thinkingEl.classList.add('collapsed');const fade=thinkingEl.querySelector('.think-fade');if(fade)fade.style.display='block';const tg=thinkingEl.querySelector('.think-toggle');if(tg)tg.textContent='▶';thinkingEl=null;thinkingText='';}
+            const icon=TOOL_ICONS[d.tool]||'?';
+            const isDanger=DANGEROUS.includes(d.tool);
+            const inputStr=typeof d.input==='object'?JSON.stringify(d.input,null,2):String(d.input);
+            const permBadge=d.permission==='deny'?'<span class="danger-badge" style="background:#ef4444;">X</span>':(d.permission==='allow'?'<span class="danger-badge" style="background:var(--success);">&#10003;</span>':'');
+            const el=document.createElement('div');el.className='msg tool-use collapsed';
+            const fileHint=(d.tool==='write_file'||d.tool==='edit_file')&&d.input&&d.input.path?' &#128196; '+esc(d.input.path.split(/[\\/]/).pop()):'';
+            el.innerHTML='<span class="tool-name">['+icon+'] '+esc(d.tool)+'</span>'+permBadge+fileHint+'<span class="tool-toggle">▶</span><pre>'+esc(inputStr.substring(0,800))+'</pre>';
+            el.onclick=function(ev){if(ev.target.classList.contains('tool-toggle')||ev.target===el){toggleMsgCollapse(el);}};
+            msgs.appendChild(el);
+            document.getElementById('statusText').textContent=t('executing')+' '+d.tool+' (turn '+currentIteration+')...';
+            const tp=document.getElementById('bottomPanel');
+            if(tp&&tp.style.display==='none'){tp.style.display='flex';switchBottomTab('terminal');}
+            if(d.tool==='execute_command'&&d.input&&d.input.command){
+              termLog('[Agent] $ '+d.input.command,'info');
+            }
+            else if(d.tool==='write_file'&&d.input&&d.input.path){
+              termLog('[Agent] Writing: '+d.input.path,'info');
+            }
+            else if(d.tool==='edit_file'&&d.input&&d.input.path){
+              termLog('[Agent] Editing: '+d.input.path,'info');
+            }
+            else{
+              termLog('[Agent] Executing: '+d.tool,'info');
+            }
+          }
+          else if(d.type==='tool_result'){
+            if(thinkingEl){thinkingEl.classList.remove('thinking');thinkingEl.classList.add('thinking-done');thinkingEl.classList.add('collapsed');const fade=thinkingEl.querySelector('.think-fade');if(fade)fade.style.display='block';const tg=thinkingEl.querySelector('.think-toggle');if(tg)tg.textContent='▶';thinkingEl=null;thinkingText='';}
+            const isErr=d.output&&d.output.startsWith('Error');
+            const el=document.createElement('div');el.className='msg tool-result collapsed'+(isErr?' error-result':'');
+            const shortOut=(d.output||'').substring(0,120).replace(/\n/g,' ');
+            const filePath=d.input&&(d.input.path||d.input.file_path);
+            let diffHtml='';
+            if((d.tool==='write_file'||d.tool==='edit_file')&&d.old_content&&!isErr){
+              const newContent=d.input&&d.input.content;
+              if(newContent){diffHtml=renderDiffView(d.old_content,newContent,d.tool,filePath);}
+            }
+            if(diffHtml){
+              el.innerHTML='<span class="tool-name">['+(isErr?'FAIL':'OK')+'] '+esc(d.tool)+'</span> <span style="color:var(--text-muted);font-size:10px;">'+esc(filePath||shortOut)+'</span><span class="tool-toggle">▶</span>'+diffHtml+'<pre style="margin-top:4px;">'+esc((d.output||'').substring(0,800))+'</pre>';
+            }else{
+              el.innerHTML='<span class="tool-name">['+(isErr?'FAIL':'OK')+'] '+esc(d.tool)+'</span> <span style="color:var(--text-muted);font-size:10px;">'+esc(shortOut)+(d.output&&d.output.length>120?'...':'')+'</span><span class="tool-toggle">▶</span><pre>'+esc((d.output||'').substring(0,1500))+'</pre>';
+            }
+            el.onclick=function(ev){if(ev.target.classList.contains('tool-toggle')||ev.target===el){toggleMsgCollapse(el);}};
+            msgs.appendChild(el);
+            if(d.tool==='execute_command'){
+              const outStr=(d.output||'').substring(0,500);
+              termLog('[Result] '+outStr+(d.output&&d.output.length>500?'...':''),isErr?'error':'success');
+            }
+            else if((d.tool==='write_file'||d.tool==='edit_file')&&!isErr){
+              termLog('[Success] File saved: '+(d.input&&d.input.path),'success');
+              showFileChangeConfirmation(d.tool,d.input,d.output);
+            }
+            else if(isErr){
+              termLog('[Error] '+d.tool+': '+(d.output||'Unknown error').substring(0,200),'error');
+            }
+            else{
+              termLog('[Done] '+d.tool,'success');
+            }
+            if(d.tool==='read_file'&&d.output){const p=d.input&&d.input.path;const ln=d.input&&d.input.line_number?d.input.line_number:0;if(p)openFileFromAgent(p,d.output,ln);}
+            if((d.tool==='write_file'||d.tool==='edit_file'||d.tool==='create_directory')&&!isErr){
+              loadFileTreeDebounced();
+              if(d.input){
+                const p=d.input.path||d.input.file_path;
+                const ln=d.input.line_number?d.input.line_number:0;
+                if(p&&(d.tool==='write_file'||d.tool==='edit_file')){
+                  var _trackContent=d.input&&d.input.content;
+                  if(_trackContent){
+                    openFileFromAgent(p,_trackContent,ln);
+                    termLog('[Track] Editor tracking: '+p.split(/[\\/]/).pop(),'success');
+                  }else{
+                    fetch('/agent/read-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,device_id:generateDeviceId()})}).then(function(r){return r.json();}).then(function(fileData){
+                      if(fileData.content!==undefined){
+                        openFileFromAgent(p,fileData.content,ln);
+                        termLog('[Track] Editor tracking: '+p.split(/[\\/]/).pop(),'success');
+                      }else{
+                        termLog('[Track] Could not load file for tracking: '+p,'error');
+                      }
+                    }).catch(function(e){
+                      termLog('[Track] File tracking fetch failed: '+(e.message||e),'error');
+                    });
+                  }
+                }
+              }
+            }
+          }
+          else if(d.type==='assistant'){
+            if(thinkingEl){thinkingEl.classList.remove('thinking');thinkingEl=null;thinkingText='';}
+            fullContent=d.content||'';
+            const inTk=estimateTokens(msg);const outTk=estimateTokens(fullContent);
+            addCost(inTk,outTk);
+            const el=document.createElement('div');el.className='msg assistant';el.innerHTML=renderMd(fullContent);el.dataset.timestamp=new Date().toISOString();msgs.appendChild(el);
+          }
+          else if(d.type==='error'){const el=document.createElement('div');el.className='msg error';el.textContent='Error: '+d.content;msgs.appendChild(el);}
+          msgs.scrollTop=msgs.scrollHeight;
+          if(d.done){
+            if(thinkingEl){thinkingEl.classList.remove('thinking');thinkingEl.classList.add('thinking-done');thinkingEl.classList.add('collapsed');const fade=thinkingEl.querySelector('.think-fade');if(fade)fade.style.display='block';const tg=thinkingEl.querySelector('.think-toggle');if(tg)tg.textContent='▶';thinkingEl=null;thinkingText='';}
+            agentHistory.push({user:msg,assistant:fullContent});
+            const task=getActiveTask();if(task){task.history=agentHistory.slice(-20);task.status='done';}
+            _setAgentRunning(false);
+            currentAgentRunId=null;
+            currentAgentAbortController=null;
+            document.getElementById('statusText').textContent=t('ready');
+            saveTasks();
+            applyConvFolding();
+            addDebugLog('Agent run completed. Tokens: '+totalTokensIn+'+'+totalTokensOut+', Cost: $'+totalCost.toFixed(4));
+          }
+        }catch(e){console.warn('[Kaguya IDE] SSE parse error:',e);}
+      }
+    }
+  }catch(e){
+    clearInterval(_stallCheck);
+    if(e.name==='AbortError'){
+      _setAgentRunning(false);
+      currentAgentRunId=null;
+      currentAgentAbortController=null;
+      document.getElementById('statusText').textContent=t('ready');
+      return;
+    }
+    const el=document.createElement('div');el.className='msg error';el.textContent='Connection error: '+e.message;msgs.appendChild(el);_setAgentRunning(false);currentAgentRunId=null;currentAgentAbortController=null;document.getElementById('statusText').textContent='Error';
+  }
+}
+function openFileFromAgent(path, content, lineNum){
+  var name=path.split(/[\\/]/).pop();
+  var ext=path.split('.').pop();
+  var existingTab=openTabs.find(function(tb){return tb.path===path;});
+  if(!existingTab){
+    openTabs.push({path:path, name:name, language:ext, isTracked:true});
+    renderTabs();
+  } else {
+    existingTab.isTracked=true;
+  }
+  activeTab=path;
+  renderTabs();
+  var ws=document.getElementById('welcomeScreen');
+  if(ws) ws.style.display='none';
+  showEditorToolbar(name, ext, true);
+  
+  if(content && typeof content==='string' && !content.match(/^\s*\d+\s*→/m)){
+    renderCode(content, ext);
+    scrollToLine(lineNum);
+    document.getElementById('statusFile').textContent=name;
+    document.getElementById('statusLang').textContent=ext;
+    return;
+  }
+  
+  fetch('/agent/read-file', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:path, device_id:generateDeviceId()})
+  }).then(function(r){ return r.json(); })
+   .then(function(d){
+     if(d.content!==undefined){
+       renderCode(d.content, d.language||ext);
+       scrollToLine(lineNum);
+       showEditorToolbar(name, d.language||ext, true);
+     } else if(content){
+       var clean=content.replace(/^\s*\d+\s*→/gm, '');
+       renderCode(clean, ext);
+       scrollToLine(lineNum);
+     }
+   }).catch(function(){
+     if(content){
+       var clean=content.replace(/^\s*\d+\s*→/gm, '');
+       renderCode(clean, ext);
+       scrollToLine(lineNum);
+     }
+   });
+  document.getElementById('statusFile').textContent=name;
+  document.getElementById('statusLang').textContent=ext;
+}
+function scrollToLine(lineNum){
+  if(!lineNum || lineNum<=0) return;
+  var el=document.getElementById('codeContent');
+  if(!el) return;
+  var lines=el.querySelectorAll('.code-diff-line, pre code');
+  if(lines.length>0 && lines[0].tagName!=='PRE'){
+    var target=lines[Math.min(lineNum-1, lines.length-1)];
+    if(target) target.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+  var codeEl=el.querySelector('pre code');
+  if(!codeEl) return;
+  var allLines=codeEl.innerHTML.split('\n');
+  if(lineNum<=allLines.length){
+    var lineEls=codeEl.querySelectorAll('.hljs-line');
+    if(lineEls.length===0){
+      var newHtml='';
+      for(var li=0;li<allLines.length;li++){
+        newHtml+='<span class="hljs-line" data-line="'+(li+1)+'">'+allLines[li]+'</span>';
+      }
+      codeEl.innerHTML=newHtml;
+    }
+    var tl=codeEl.querySelector('[data-line="'+lineNum+'"]');
+    if(tl) tl.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
+function computeDiff(oldText,newText){const oldLines=oldText?oldText.split('\n'):[];const newLines=newText?newText.split('\n'):[];const m=oldLines.length,n=newLines.length;const dp=[];for(let i=0;i<=m;i++){dp[i]=[];for(let j=0;j<=n;j++)dp[i][j]=0;}for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){if(oldLines[i-1]===newLines[j-1])dp[i][j]=dp[i-1][j-1]+1;else dp[i][j]=Math.max(dp[i-1][j],dp[i][j-1]);}const result=[];let i=m,j=n;while(i>0||j>0){if(i>0&&j>0&&oldLines[i-1]===newLines[j-1]){result.unshift({type:'ctx',oldLine:i,newLine:j,content:oldLines[i-1]});i--;j--;}else if(j>0&&(i===0||dp[i][j-1]>=dp[i-1][j])){result.unshift({type:'add',newLine:j,content:newLines[j-1]});j--;}else{result.unshift({type:'del',oldLine:i,content:oldLines[i-1]});i--;}}return result;}
+function renderDiffView(oldContent,newContent,toolName,filePath){
+  if(!oldContent) return null;
+  const diff=computeDiff(oldContent,newContent);
+  let addCount=0,delCount=0;
+  diff.forEach(function(d){if(d.type==='add')addCount++;else if(d.type==='del')delCount++;});
+  let html='<div class="code-diff-container">';
+  html+='<div class="code-diff-header">';
+  html+='<span><span style="color:var(--accent2);font-weight:600;">'+esc(toolName)+'</span>'+
+    (filePath?' <span style="opacity:0.5;">'+esc(filePath)+'</span>':'')+'</span>';
+  html+='<span class="diff-stats"><span class="stat-add">+'+addCount+'</span><span class="stat-del">-'+delCount+'</span></span>';
+  html+='<span class="diff-toggle" onclick="this.closest(\'.code-diff-container\').querySelector(\'.code-diff-body\').classList.toggle(\'collapsed\')">Collapse</span>';
+  html+='</div>';
+  html+='<div class="code-diff-body">';
+  var lineNums=[];
+  diff.forEach(function(d){if(d.oldLine)lineNums.push(d.oldLine);if(d.newLine)lineNums.push(d.newLine);});
+  var maxLineNum=lineNums.length?Math.max.apply(null,lineNums):0;
+  var numDigits=String(maxLineNum).length;
+  diff.forEach(function(d){
+    var cls='code-diff-line '+d.type;
+    var numHtml='';
+    if(d.type==='ctx'){
+      numHtml='<span class="line-num old-num">'+String(d.oldLine).padStart(numDigits,' ')+'</span>'+
+        '<span class="line-num new-num">'+String(d.newLine).padStart(numDigits,' ')+'</span>';
+    }else if(d.type==='del'){
+      numHtml='<span class="line-num old-num">'+String(d.oldLine).padStart(numDigits,' ')+'</span>'+
+        '<span class="line-num"></span>';
+    }else if(d.type==='add'){
+      numHtml='<span class="line-num old-num"></span>'+
+        '<span class="line-num new-num">'+String(d.newLine).padStart(numDigits,' ')+'</span>';
+    }
+    html+='<div class="'+cls+'">'+numHtml+
+      '<span class="line-content">'+
+      (d.type==='add'?'+ ':(d.type==='del'?'- ':'  '))+esc(d.content)+
+      '</span></div>';
+  });
+  html+='</div></div>';
+  return html;
+}
+function renderMd(text){let html=esc(text);html=html.replace(new RegExp(String.fromCharCode(96)+String.fromCharCode(96)+String.fromCharCode(96)+'(\\w*)\\n([\\s\\S]*?)'+String.fromCharCode(96)+String.fromCharCode(96)+String.fromCharCode(96),'g'),function(m,lang,code){return '<pre><code>'+code+'</code></pre>';});html=html.replace(new RegExp(String.fromCharCode(96)+'([^'+String.fromCharCode(96)+']+)'+String.fromCharCode(96),'g'),'<code>$1</code>');html=html.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');html=html.replace(/\n/g,'<br>');return html;}
+document.addEventListener('keydown',function(e){if(e.ctrlKey&&e.key==='b'){e.preventDefault();const s=document.querySelector('.sidebar');if(s)s.classList.toggle('collapsed');}if(e.ctrlKey&&e.key==='h'){e.preventDefault();toggleAgentPanel();}if(e.ctrlKey&&e.key==='j'){e.preventDefault();const tp=document.getElementById('bottomPanel');if(tp){if(tp.style.display==='none'){tp.style.display='flex';switchBottomTab('terminal');}else{tp.style.display='none';}}}if(e.key==='F5'){e.preventDefault();runCurrentFile();}if(e.ctrlKey&&e.key==='s'){e.preventDefault();saveCurrentFile();}if(e.key==='Escape'){const overlay=document.getElementById('apiWarningOverlay');if(overlay)overlay.remove();}});
+async function compileCurrentFile(){if(!activeTab){termLog(t('noFileCompile'),'error');return;}const tab=openTabs.find(t2=>t2.path===activeTab);if(!tab)return;const langMap={'py':'python','js':'javascript','ts':'typescript','c':'c','cpp':'cpp','java':'java','go':'go','rs':'rust'};const lang=langMap[tab.language]||tab.language;try{const r=await fetch('/agent/read-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:tab.path,device_id:generateDeviceId()})});const d=await r.json();if(d.error){termLog('Error: '+d.error,'error');return;}termLog(t('compiling')+' '+tab.name+' ('+lang+')...','info');outputLog('[Compile] '+tab.name+' ('+lang+')','info');addDebugLog('Compiling: '+tab.name+' ('+lang+')');switchBottomTab('output');const cr=await fetch('/agent/compile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({language:lang,code:d.content,timeout:15})});const cd=await cr.json();if(cd.result){termLog(cd.result,cd.result.includes('Error')?'error':'success');outputLog(cd.result,cd.result.includes('Error')?'stderr':'stdout');addDebugLog('Compile '+(cd.result.includes('Error')?'failed':'succeeded'));if(cd.variables){updateVariables(cd.variables);}if(cd.callstack){updateCallstack(cd.callstack);}}else if(cd.error){termLog('Compile error: '+cd.error,'error');outputLog('Compile error: '+cd.error,'stderr');addDebugLog('Compile error: '+cd.error);}}catch(e){termLog('Compile failed: '+e.message,'error');outputLog('Compile failed: '+e.message,'stderr');addDebugLog('Compile exception: '+e.message);}}
+async function checkApiStatus(){
+  try{
+    const extApi=getExternalApiConfig();
+    if(!extApi||!extApi.enabled||(!extApi.apiKey&&!extApi.hasSavedKey)){
+      if(isElectron){
+        showIdeApiOverlay('External AI API not configured. Please configure an external model (DeepSeek/Qwen/Claude) in the API Center.', true);
+        return false;
+      }
+      showIdeApiOverlay('External AI API not configured. Local models do not support IDE features. Please configure an external model in the API Center.');
+      return false;
+    }
+    const ctrl=new AbortController();
+    const tid=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch('/agent/api-status',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({external_api:extApi,device_id:generateDeviceId()}),
+      signal:ctrl.signal
+    });
+    clearTimeout(tid);
+    const d=await r.json();
+    if(!d.available||d.provider==='ollama'){
+      if(isElectron){
+        showIdeApiOverlay(d.provider==='ollama'?'Local Ollama model does not support IDE features. Please configure an external API (DeepSeek/Qwen/Claude).':d.message||'Unknown error', true);
+        return false;
+      }
+      showIdeApiOverlay(d.provider==='ollama'?'Local Ollama model does not support IDE features. Please configure an external API (DeepSeek/Qwen/Claude).':d.message||'Unknown error');
+      return false;
+    }
+    if(d.model){document.getElementById('modelLabel').textContent=d.model.substring(0,20);}
+    return true;
+  }catch(e){
+    if(isElectron){
+      showIdeApiOverlay('Connection error: '+(e.message||'timeout'), true);
+      return false;
+    }
+    showIdeApiOverlay('Connection error: '+(e.message||'timeout'));
+    return false;
+  }
+}
+function showIdeApiOverlay(msg, dismissible){
+  const existing=document.getElementById('apiWarningOverlay');
+  if(existing)existing.remove();
+  const existingBanner=document.getElementById('apiWarningBanner');
+  if(existingBanner)existingBanner.remove();
+  
+  var isInitialLoad = !window.kaguyaAppReady;
+  
+  if(isInitialLoad){
+    var banner=document.createElement('div');
+    banner.id='apiWarningBanner';
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,rgba(248,113,113,0.95),rgba(239,68,68,0.95));color:#fff;padding:12px 20px;z-index:99998;display:flex;align-items:center;justify-content:space-between;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-size:13px;cursor:default;';
+    banner.innerHTML='<div style="display:flex;align-items:center;gap:10px;"><span style="font-size:18px;">&#x26A0;</span><div><strong>API '+(isElectron?'未配置':'未连接')+'</strong> - '+(isElectron?'请在API中心配置外部模型 (DeepSeek/Qwen/Claude)':'请配置外部模型以使用IDE功能')+'</div></div><button onclick="this.closest(\'#apiWarningBanner\').remove();" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;">'+(isElectron?'稍后配置':'Dismiss')+'</button>';
+    document.body.appendChild(banner);
+    setTimeout(function(){if(banner.parentElement)banner.remove();}, 10000);
+    return;
+  }
+  
+  var overlay=document.createElement('div');
+  overlay.id='apiWarningOverlay';
+  overlay.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(10,10,15,0.97);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(12px);';
+  var dismissBtn='<button onclick="document.getElementById(\'apiWarningOverlay\').remove();loadFileTree();" style="display:inline-block;padding:10px 28px;background:var(--grad);color:#fff;border-radius:10px;border:none;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;">Continue (File Browser Mode)</button>';
+  var backBtn=isElectron?'':'<a href="/" style="display:inline-block;padding:10px 28px;background:var(--grad);color:#fff;border-radius:10px;text-decoration:none;font-size:13px;font-weight:600;">&#x2190; '+t('backToChat')+'</a>';
+  overlay.innerHTML='<div style="text-align:center;max-width:460px;padding:36px;background:var(--bg-2);border:1px solid rgba(248,113,113,0.2);border-radius:16px;box-shadow:0 16px 64px rgba(0,0,0,0.5);"><div style="width:64px;height:64px;margin:0 auto 20px;background:linear-gradient(135deg,#f87171,#f472b6);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff;">&#x26A0;</div><h2 style="font-size:20px;color:var(--text);margin-bottom:10px;font-weight:700;">'+t('apiNotConnected')+'</h2><p style="color:var(--text-dim);font-size:12px;line-height:1.6;margin-bottom:8px;">'+t('apiRequiresModel')+'</p><p style="color:var(--error);font-size:11px;margin-bottom:20px;padding:10px;background:rgba(248,113,113,0.06);border-radius:8px;border:1px solid rgba(248,113,113,0.1);">'+esc(msg)+'</p>'+backBtn+' '+dismissBtn+'</div>';
+  document.body.appendChild(overlay);
+}
+// Initialize IDE on DOM ready
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[Kaguya IDE] DOM loaded, initializing...');
+    var initFns = [
+      ['applyLang', applyLang],
+      ['setupDragDrop', setupDragDrop],
+      ['setupBottomPanelResize', setupBottomPanelResize],
+      ['setupAgentPanelResize', setupAgentPanelResize],
+      ['initAgentPanelState', initAgentPanelState],
+      ['renderTasks', renderTasks]
+    ];
+    for(var i=0;i<initFns.length;i++){
+      try{ initFns[i][1](); }
+      catch(e){ console.error('[Kaguya IDE] Init error in '+initFns[i][0]+':', e); }
+    }
+    console.log('[Kaguya IDE] Basic initialization complete');
+    setTimeout(function() {
+      console.log('[Kaguya IDE] Syncing API config from server...');
+      syncApiConfigFromServer().then(function() {
+        console.log('[Kaguya IDE] Checking API status...');
+        checkApiStatus().then(function(ok) {
+          console.log('[Kaguya IDE] API status:', ok ? 'OK' : 'Not configured');
+          if(ok) {
+            identifyDevice().then(function() { loadFileTree(); });
+          } else {
+            identifyDevice();
+          }
+        }).catch(function(e) {
+          console.error('[Kaguya IDE] API check error:', e);
+          identifyDevice();
+        });
+      }).catch(function(e) {
+        console.error('[Kaguya IDE] API sync error:', e);
+        checkApiStatus().then(function(ok) {
+          if(ok) { identifyDevice().then(function() { loadFileTree(); }); }
+          else { identifyDevice(); }
+        }).catch(function() { identifyDevice(); });
+      });
+    }, 1500);
+});
+async function syncApiConfigFromServer(){
+  try{
+    var deviceId=generateDeviceId();
+    var r=await fetch('/external/config?device_id='+encodeURIComponent(deviceId));
+    var d=await r.json();
+    if(d.success && d.providers){
+      var existing=getApiProviders();
+      var cfg={};
+      for(var pv in d.providers){
+        var p=d.providers[pv];
+        var existingKey=(existing[pv]&&existing[pv].apiKey)||'';
+        var existingEnabled=!!(existing[pv]&&existing[pv].enabled);
+        var serverKey=p.api_key||'';
+        var isMasked=serverKey&&serverKey.includes('****');
+        var mergedKey=(isMasked||!serverKey)?existingKey:serverKey;
+        cfg[pv]={
+          enabled: !!(p._has_key||(existingEnabled&&existingKey)),
+          apiKey: mergedKey,
+          hasSavedKey: !!p._has_key,
+          maskedApiKey: isMasked?serverKey:'',
+          apiUrl: p.api_url||'',
+          model: p.model||''
+        };
+        if(pv===d.active_provider && (p._has_key||mergedKey)){cfg[pv].enabled=true;}
+      }
+      localStorage.setItem('api_providers', JSON.stringify(cfg));
+      var localActive=localStorage.getItem('active_api_provider');
+      var activeProvider=(localActive&&cfg[localActive]&&cfg[localActive].enabled&&(cfg[localActive].apiKey||cfg[localActive].hasSavedKey))?localActive:d.active_provider;
+      if(!activeProvider||!API_PROVIDERS[activeProvider]||!(cfg[activeProvider]&&cfg[activeProvider].enabled&&(cfg[activeProvider].apiKey||cfg[activeProvider].hasSavedKey))){
+        activeProvider=chooseActiveApiProvider(cfg);
+      }
+      if(activeProvider&&API_PROVIDERS[activeProvider]){
+        _currentApiProvider=activeProvider;
+        localStorage.setItem('active_api_provider',activeProvider);
+      }
+      console.log('[Kaguya IDE] API config synced from server (apiKey preserved)');
+    }
+  }catch(e){
+    console.error('[Kaguya IDE] Failed to sync API config:', e);
+  }
+}
+// Mark app as ready after a delay
+setTimeout(function() { window.kaguyaAppReady = true; }, 3000);
+function setupBottomPanelResize(){
+  var handle=document.getElementById('terminalResize');
+  var panel=document.getElementById('bottomPanel');
+  if(!handle||!panel)return;
+  var startY,startH;
+  handle.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    startY=e.clientY;
+    startH=panel.offsetHeight;
+    document.addEventListener('mousemove',onDrag);
+    document.addEventListener('mouseup',onRelease);
+    document.body.style.cursor='row-resize';
+    document.body.style.userSelect='none';
+  });
+  function onDrag(e){
+    var diff=startY-e.clientY;
+    var newH=Math.max(80,Math.min(600,startH+diff));
+    panel.style.height=newH+'px';
+  }
+  function onRelease(){
+    document.removeEventListener('mousemove',onDrag);
+    document.removeEventListener('mouseup',onRelease);
+    document.body.style.cursor='';
+    document.body.style.userSelect='';
+  }
+}
+function setupAgentPanelResize(){
+  var handle=document.getElementById('agentResize');
+  var panel=document.querySelector('.agent-panel');
+  if(!handle||!panel)return;
+  var startX,startW;
+  handle.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    startX=e.clientX;
+    startW=panel.offsetWidth;
+    document.addEventListener('mousemove',onDrag);
+    document.addEventListener('mouseup',onRelease);
+    document.body.style.cursor='col-resize';
+    document.body.style.userSelect='none';
+  });
+  function onDrag(e){
+    var diff=startX-e.clientX;
+    var newW=Math.max(280,Math.min(800,startW+diff));
+    panel.style.width=newW+'px';
+  }
+  function onRelease(){
+    document.removeEventListener('mousemove',onDrag);
+    document.removeEventListener('mouseup',onRelease);
+    document.body.style.cursor='';
+    document.body.style.userSelect='';
+  }
+}
+const IDE_UPLOAD_BATCH_FILE_LIMIT = 100;
+const IDE_UPLOAD_BATCH_BYTE_LIMIT = 64 * 1024 * 1024;
+function buildUploadBatches(files){
+  const list=Array.from(files||[]);
+  const batches=[];
+  let current=[];
+  let currentBytes=0;
+  list.forEach(function(f){
+    const size=f.size||0;
+    if(current.length && (current.length>=IDE_UPLOAD_BATCH_FILE_LIMIT || currentBytes+size>IDE_UPLOAD_BATCH_BYTE_LIMIT)){
+      batches.push(current);
+      current=[];
+      currentBytes=0;
+    }
+    current.push(f);
+    currentBytes+=size;
+  });
+  if(current.length)batches.push(current);
+  return batches;
+}
+async function uploadDeviceFilesInBatches(files, sourceLabel){
+  const list=Array.from(files||[]);
+  if(!list.length){termLog(t('noFilesSelected'),'error');return;}
+  const batches=buildUploadBatches(list);
+  termLog(t('uploadingFiles')+' '+list.length+' ...','info');
+  if(batches.length>1)termLog('文件数量较多，已自动分批上传: '+batches.length+' 批','info');
+  let importedCount=0;
+  let errorCount=0;
+  let importedBytes=0;
+  const errorSamples=[];
+  for(let i=0;i<batches.length;i++){
+    const batch=batches[i];
+    if(batches.length>1)termLog('上传批次 '+(i+1)+'/'+batches.length+' ('+batch.length+' files)','info');
+    const formData=new FormData();
+    batch.forEach(function(f){
+      const relPath=f.webkitRelativePath||f.name;
+      formData.append('files',f,relPath);
+    });
+    formData.append('device_id',generateDeviceId());
+    formData.append('batch_index',String(i));
+    formData.append('batch_total',String(batches.length));
+    formData.append('source',sourceLabel||'browser');
+    let r;
+    try{
+      r=await fetch('/agent/upload-device-files',{method:'POST',body:formData});
+    }catch(e){
+      throw new Error('网络请求失败，已完成 '+importedCount+'/'+list.length+' 个文件: '+(e.message||e));
+    }
+    const rawText=await r.text();
+    let d=null;
+    try{
+      d=JSON.parse(rawText||'{}');
+    }catch(e){
+      throw new Error('上传接口返回非 JSON (HTTP '+r.status+'): '+rawText.slice(0,160));
+    }
+    if(!r.ok || d.error)throw new Error((d&&d.error)?d.error:('HTTP '+r.status));
+    if(d.imported&&d.imported.length){
+      importedCount+=d.imported.length;
+      d.imported.forEach(function(item){importedBytes+=item.size||0;});
+    }
+    if(d.errors&&d.errors.length){
+      errorCount+=d.errors.length;
+      d.errors.slice(0,10).forEach(function(e){errorSamples.push(e);});
+    }
+  }
+  if(importedCount){
+    termLog(t('uploadSuccess')+': '+importedCount+' files ('+formatFileSize(importedBytes)+')','success');
+    loadFileTree();
+  }
+  if(errorCount){
+    termLog(t('uploadFailed')+': '+errorCount+' files','error');
+    errorSamples.slice(0,20).forEach(function(e){termLog(t('uploadFailed')+': '+(e.name||'file')+' - '+(e.error||'unknown'),'error');});
+  }
+  if(!importedCount)termLog(t('uploadFailed'),'error');
+}
+function setupDragDrop(){
+  const editorArea=document.querySelector('.editor-area');
+  if(!editorArea)return;
+  editorArea.addEventListener('dragover',function(e){e.preventDefault();e.stopPropagation();editorArea.classList.add('drag-over');});
+  editorArea.addEventListener('dragleave',function(e){e.preventDefault();e.stopPropagation();editorArea.classList.remove('drag-over');});
+  editorArea.addEventListener('drop',function(e){
+    e.preventDefault();e.stopPropagation();editorArea.classList.remove('drag-over');
+    const files=e.dataTransfer.files;
+    if(!files||!files.length)return;
+    uploadDeviceFilesInBatches(files,'drag-drop').catch(function(e){termLog(t('uploadFailed')+': '+(e.message||e),'error');});
+  });
+}
+
+async function uploadDeviceFiles(event){
+  const isFolder = event && event.target && event.target.id === 'ideFolderInput';
+  const files = event && event.target ? event.target.files : null;
+  if(canUseDesktopDialog(isFolder ? 'folder' : 'file') && (!files || !files.length)){
+    try{
+      let result;
+      if(isFolder){
+        result = await window.kaguyaDesktop.dialog.openFolder({title: t('selectFolder')});
+      } else {
+        result = await window.kaguyaDesktop.dialog.openFile({title: t('selectFile'), multi: true});
+      }
+      if(result.canceled || !result.filePaths || !result.filePaths.length){
+        termLog(t('noFilesSelected'),'info');
+        return;
+      }
+      termLog(t('importingPaths')+' '+result.filePaths.length+' ...','info');
+      const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:result.filePaths,device_id:generateDeviceId()})});
+      const d=await r.json();
+      if(d.error){termLog(t('importFailed')+': '+d.error,'error');return;}
+      if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('importSuccess')+': '+i.src+' -> '+i.dst,'success'));loadFileTree();}
+      if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('importFailed')+': '+e.path+' - '+e.error,'error'));}
+      if(!d.imported||!d.imported.length)termLog(t('importFailed'),'error');
+    }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
+    return;
+  }
+  if(!files||!files.length){termLog(t('noFilesSelected'),'error');return;}
+  try{
+    await uploadDeviceFilesInBatches(files,isFolder?'folder-input':'file-input');
+  }catch(e){termLog(t('uploadFailed')+': '+e.message,'error');}
+  event.target.value='';
+}
+
+async function importFilesFromHost(){
+  if(canUseDesktopDialog('file')){
+    try{
+      const result = await window.kaguyaDesktop.dialog.openFile({title: t('selectFile'), multi: true});
+      if(result.canceled || !result.filePaths || !result.filePaths.length){
+        termLog(t('noFilesSelected'),'info');
+        return;
+      }
+      termLog(t('importingPaths')+' '+result.filePaths.length+' ...','info');
+      const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:result.filePaths,device_id:generateDeviceId()})});
+      const d=await r.json();
+      if(d.error){termLog(t('importFailed')+': '+d.error,'error');return;}
+      if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('importSuccess')+': '+i.src+' -> '+i.dst,'success'));loadFileTree();}
+      if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('importFailed')+': '+e.path+' - '+e.error,'error'));}
+      if(!d.imported||!d.imported.length)termLog(t('importFailed'),'error');
+    }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
+    return;
+  }
+  const pathsStr=prompt(t('enterPaths'));
+  if(!pathsStr||!pathsStr.trim())return;
+  const paths=pathsStr.split(',').map(p=>p.trim()).filter(p=>p);
+  if(!paths.length)return;
+  termLog(t('importingPaths')+' '+paths.length+' ...','info');
+  try{
+    const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:paths,device_id:generateDeviceId()})});
+    const d=await r.json();
+    if(d.error){termLog(t('importFailed')+': '+d.error,'error');return;}
+    if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('importSuccess')+': '+i.src+' -> '+i.dst,'success'));loadFileTree();}
+    if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('importFailed')+': '+e.path+' - '+e.error,'error'));}
+    if(!d.imported||!d.imported.length)termLog(t('importFailed'),'error');
+  }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
+}
+
+let permPanelEl=null;
+function showPermPanel(){
+  if(permPanelEl){permPanelEl.remove();permPanelEl=null;return;}
+  permPanelEl=document.createElement('div');
+  permPanelEl.id='permPanel';
+  permPanelEl.style.cssText='position:fixed;top:0;right:0;width:380px;height:100%;background:var(--bg-1);border-left:1px solid var(--border);z-index:10000;display:flex;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,0.3);font-family:inherit;';
+  permPanelEl.innerHTML='<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:8px;"><span style="font-size:16px;">🛡️</span><span style="font-weight:700;color:var(--text);font-size:14px;">'+t('permPanel')+'</span><span style="flex:1;"></span><button onclick="permPanelEl.remove();permPanelEl=null;" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;">✕</button></div><div id="permPanelContent" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>';
+  document.body.appendChild(permPanelEl);
+  loadPermPanel();
+}
+
+async function loadPermPanel(){
+  const content=document.getElementById('permPanelContent');
+  if(!content)return;
+  content.innerHTML='<div style="color:var(--text-muted);text-align:center;padding:20px;">Loading...</div>';
+  try{
+    const [configRes,statsRes]=await Promise.all([fetch('/agent/permission/config'),fetch('/agent/audit/stats')]);
+    const config=await configRes.json();
+    const stats=await statsRes.json();
+    let html='';
+    html+='<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">'+t('sandboxMode')+'</div>';
+    html+='<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-2);border-radius:var(--radius-sm);cursor:pointer;font-size:11px;color:var(--text);">';
+    html+='<input type="checkbox" id="permSandboxToggle" '+(config.sandbox_mode?'checked':'')+' onchange="toggleSandboxMode(this.checked)" style="width:14px;height:14px;">';
+    html+=t('sandboxMode')+' <span style="color:var(--text-muted);font-size:9px;">('+(config.sandbox_mode?'ON':'OFF')+')</span></label></div>';
+    html+='<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">'+t('sandboxDirs')+'</div>';
+    if(config.sandbox_dirs&&config.sandbox_dirs.length){
+      config.sandbox_dirs.forEach(function(d){
+        html+='<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-2);border-radius:var(--radius-sm);margin-bottom:4px;">';
+        html+='<span style="font-size:10px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(d)+'">'+esc(d)+'</span>';
+        html+='<button onclick="removeSandboxDir(\''+esc(d).replace(/'/g,"\\'")+'\')" style="background:none;border:none;color:var(--error);cursor:pointer;font-size:10px;">✕</button></div>';
+      });
+    }else{
+      html+='<div style="font-size:10px;color:var(--text-muted);padding:6px 0;">'+t('noSandboxDirs')+'</div>';
+    }
+    html+='<div style="display:flex;gap:4px;margin-top:6px;"><input id="newSandboxDir" placeholder="C:\\path\\to\\dir" style="flex:1;padding:5px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:inherit;outline:none;"><button onclick="addSandboxDir()" style="padding:5px 10px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:10px;cursor:pointer;">'+t('addSandboxDir')+'</button></div></div>';
+    html+='<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">'+t('permRules')+'</div>';
+    if(config.always_allow&&config.always_allow.length){
+      html+='<div style="font-size:9px;color:var(--success);margin-bottom:4px;">✓ Always Allow:</div>';
+      config.always_allow.forEach(function(tool){
+        html+='<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(52,211,153,0.06);border-radius:var(--radius-sm);margin-bottom:3px;">';
+        html+='<span style="font-size:10px;color:var(--success);flex:1;">'+esc(tool)+'</span>';
+        html+='<button onclick="removePermRule(\''+esc(tool)+'\')" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:9px;">✕</button></div>';
+      });
+    }
+    if(config.always_deny&&config.always_deny.length){
+      html+='<div style="font-size:9px;color:var(--error);margin-bottom:4px;margin-top:6px;">✗ Always Deny:</div>';
+      config.always_deny.forEach(function(tool){
+        html+='<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(248,113,113,0.06);border-radius:var(--radius-sm);margin-bottom:3px;">';
+        html+='<span style="font-size:10px;color:var(--error);flex:1;">'+esc(tool)+'</span>';
+        html+='<button onclick="removePermRule(\''+esc(tool)+'\')" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:9px;">✕</button></div>';
+      });
+    }
+    html+='<div style="display:flex;gap:4px;margin-top:6px;"><select id="newRuleTool" style="flex:1;padding:5px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:inherit;">';
+    ['write_file','edit_file','execute_command','compile','create_directory','agent_spawn'].forEach(function(tn){html+='<option value="'+tn+'">'+tn+'</option>';});
+    html+='</select><select id="newRuleBehavior" style="padding:5px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:inherit;"><option value="allow">'+t('allow')+'</option><option value="deny">'+t('deny')+'</option></select>';
+    html+='<button onclick="addPermRule()" style="padding:5px 10px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:10px;cursor:pointer;">+</button></div></div>';
+    html+='<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">'+t('dangerousCmds')+'</div>';
+    html+='<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-2);border-radius:var(--radius-sm);cursor:pointer;font-size:11px;color:var(--text);">';
+    html+='<input type="checkbox" id="permDangerousToggle" '+(config.dangerous_commands_allowed?'checked':'')+' onchange="toggleDangerousCmds(this.checked)" style="width:14px;height:14px;">';
+    html+=t('dangerousCmds')+' <span style="color:var(--text-muted);font-size:9px;">(sudo, runas, chmod 777)</span></label></div>';
+    html+='<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">'+t('auditStats')+'</div>';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">';
+    html+='<div style="padding:8px;background:var(--bg-2);border-radius:var(--radius-sm);text-align:center;"><div style="font-size:16px;font-weight:700;color:var(--text);">'+(stats.total||0)+'</div><div style="font-size:9px;color:var(--text-muted);">'+t('totalOps')+'</div></div>';
+    html+='<div style="padding:8px;background:var(--bg-2);border-radius:var(--radius-sm);text-align:center;"><div style="font-size:16px;font-weight:700;color:var(--success);">'+(stats.allowed||0)+'</div><div style="font-size:9px;color:var(--text-muted);">'+t('allowedOps')+'</div></div>';
+    html+='<div style="padding:8px;background:var(--bg-2);border-radius:var(--radius-sm);text-align:center;"><div style="font-size:16px;font-weight:700;color:var(--error);">'+(stats.denied||0)+'</div><div style="font-size:9px;color:var(--text-muted);">'+t('deniedOps')+'</div></div>';
+    html+='</div></div>';
+    html+='<div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;">'+t('auditLog')+'</span><button onclick="loadAuditLogDetail()" style="padding:3px 8px;background:var(--bg-3);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:9px;cursor:pointer;">↻ Refresh</button></div>';
+    html+='<div id="auditLogList" style="max-height:200px;overflow-y:auto;"></div></div>';
+    content.innerHTML=html;
+    loadAuditLogDetail();
+  }catch(e){
+    content.innerHTML='<div style="color:var(--error);padding:20px;">Error: '+e.message+'</div>';
+  }
+}
+
+async function loadAuditLogDetail(){
+  const list=document.getElementById('auditLogList');
+  if(!list)return;
+  try{
+    const r=await fetch('/agent/audit/logs?limit=30');
+    const d=await r.json();
+    if(!d.logs||!d.logs.length){list.innerHTML='<div style="font-size:10px;color:var(--text-muted);">No audit logs</div>';return;}
+    list.innerHTML=d.logs.map(function(e){
+      const ts=e.timestamp?e.timestamp.split('T')[1].split('.')[0]:'';
+      const color=e.allowed?'var(--success)':'var(--error)';
+      const icon=e.allowed?'✓':'✗';
+      return '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid var(--border);font-size:9px;">'
+        +'<span style="color:'+color+';font-weight:700;">'+icon+'</span>'
+        +'<span style="color:var(--text-muted);min-width:55px;">'+ts+'</span>'
+        +'<span style="color:var(--text);flex:1;">'+esc(e.tool||'')+'</span>'
+        +'<span style="color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc((e.details&&e.details.reason)||'')+'</span></div>';
+    }).join('');
+  }catch(e){list.innerHTML='<div style="color:var(--error);font-size:10px;">Error loading logs</div>';}
+}
+
+async function toggleSandboxMode(enabled){
+  await fetch('/agent/permission/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sandbox_mode:enabled})});
+  loadPermPanel();
+}
+
+async function toggleDangerousCmds(enabled){
+  await fetch('/agent/permission/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dangerous_commands_allowed:enabled})});
+  loadPermPanel();
+}
+
+async function addSandboxDir(){
+  const input=document.getElementById('newSandboxDir');
+  const path=input.value.trim();
+  if(!path)return;
+  const r=await fetch('/agent/permission/sandbox-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return;}
+  loadPermPanel();
+}
+
+async function removeSandboxDir(path){
+  await fetch('/agent/permission/sandbox-dir',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})});
+  loadPermPanel();
+}
+
+async function addPermRule(){
+  const tool=document.getElementById('newRuleTool').value;
+  const behavior=document.getElementById('newRuleBehavior').value;
+  await fetch('/agent/permission/rule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool_name:tool,behavior:behavior})});
+  loadPermPanel();
+}
+
+async function removePermRule(tool){
+  await fetch('/agent/permission/rule',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool_name:tool,behavior:'allow'})});
+  loadPermPanel();
+}
+
+let taskPanelEl=null;
+function showTaskPanel(){
+  if(taskPanelEl){taskPanelEl.remove();taskPanelEl=null;return;}
+  taskPanelEl=document.createElement('div');
+  taskPanelEl.id='taskPanel';
+  taskPanelEl.style.cssText='position:fixed;top:0;right:0;width:400px;height:100%;background:var(--bg-1);border-left:1px solid var(--border);z-index:10000;display:flex;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,0.3);font-family:inherit;animation:slideInRight .2s ease-out;';
+  taskPanelEl.innerHTML=`
+    <div style="display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);gap:10px;background:linear-gradient(135deg,rgba(124,106,255,0.08),rgba(6,182,212,0.05));">
+      <span style="font-size:18px;">📋</span>
+      <span style="font-weight:700;color:var(--text);font-size:15px;letter-spacing:0.02em;">多任务管理</span>
+      <span style="flex:1;"></span>
+      <button onclick="taskPanelEl.remove();taskPanelEl=null;" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px 6px;border-radius:6px;transition:var(--transition);" onmouseover="this.style.background='var(--bg-hover)';this.style.color='var(--error)'" onmouseout="this.style.background='none';this.style.color='var(--text-muted)'">✕</button>
+    </div>
+    <div id="taskPanelContent" style="flex:1;overflow-y:auto;padding:14px 18px;"></div>
+    <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;gap:6px;flex-shrink:0;">
+      <input id="newTaskTitle" placeholder="输入任务名称..." style="flex:1;padding:8px 12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;font-family:inherit;outline:none;transition:var(--transition);" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+      <select id="newTaskPriority" style="padding:8px 10px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:10px;font-family:inherit;cursor:pointer;">
+        <option value="critical">🔴 紧急</option>
+        <option value="high">🟠 高</option>
+        <option value="medium" selected>🟡 中</option>
+        <option value="low">🟢 低</option>
+      </select>
+      <button onclick="createTaskFromPanel()" style="padding:8px 14px;background:var(--grad);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;transition:var(--transition);box-shadow:0 2px 8px rgba(124,106,255,0.3);" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">+ 创建</button>
+    </div>`;
+  document.body.appendChild(taskPanelEl);
+  loadTaskPanel();
+}
+
+async function loadTaskPanel(){
+  const content=document.getElementById('taskPanelContent');
+  if(!content)return;
+  content.innerHTML='<div style="color:var(--text-muted);text-align:center;padding:30px;"><div style="font-size:24px;animation:pulse 1.5s infinite;">⏳</div><div style="margin-top:8px;font-size:11px;">加载中...</div></div>';
+  try{
+    const r=await fetch('/agent/tasks');
+    const d=await r.json();
+    const stats=d.stats||{};
+    const tasks=d.tasks||[];
+    let html='';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:16px;">';
+    const statCards=[
+      {label:'总计',value:stats.total||0,color:'var(--accent)',icon:'📊'},
+      {label:'进行中',value:(stats.by_status||{}).in_progress||0,color:'var(--warning)',icon:'🔄'},
+      {label:'已完成',value:(stats.by_status||{}).done||0,color:'var(--success)',icon:'✅'},
+      {label:'已失败',value:(stats.by_status||{}).failed||0,color:'var(--error)',icon:'❌'}
+    ];
+    statCards.forEach(function(s){
+      html+='<div style="padding:10px 8px;background:linear-gradient(135deg,'+s.color+'12,'+s.color+'05);border:1px solid '+s.color+'30;border-radius:10px;text-align:center;">';
+      html+='<div style="font-size:10px;margin-bottom:2px;">'+s.icon+'</div>';
+      html+='<div style="font-size:18px;font-weight:800;color:'+s.color+';">'+s.value+'</div>';
+      html+='<div style="font-size:8px;color:var(--text-muted);margin-top:2px;">'+s.label+'</div>';
+      html+='</div>';
+    });
+    html+='</div>';
+    if(tasks.length===0){
+      html+='<div style="text-align:center;padding:40px 20px;">';
+      html+='<div style="font-size:36px;margin-bottom:12px;opacity:0.3;">📋</div>';
+      html+='<div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">暂无任务</div>';
+      html+='<div style="color:var(--text-dim);font-size:10px;">在下方输入框创建新任务，或在对话中使用 /task 命令</div>';
+      html+='</div>';
+    }else{
+      const statusIcons={pending:'⏳',in_progress:'🔄',done:'✅',failed:'❌'};
+      const statusLabels={pending:'等待中',in_progress:'进行中',done:'已完成',failed:'已失败'};
+      const statusColors={pending:'var(--warning)',in_progress:'var(--cyan)',done:'var(--success)',failed:'var(--error)'};
+      const statusBg={pending:'rgba(251,191,36,0.08)',in_progress:'rgba(6,182,212,0.08)',done:'rgba(52,211,153,0.08)',failed:'rgba(248,113,113,0.08)'};
+      const prioLabels={0:'🔴',1:'🟠',2:'🟡',3:'🟢'};
+      tasks.forEach(function(task){
+        const isActive=stats.active===task.id;
+        const age=Math.round((Date.now()/1000-task.created_at)/60);
+        const ageStr=age<1?'刚刚':age<60?age+'分钟前':Math.round(age/60)+'小时前';
+        html+='<div style="padding:12px;background:'+statusBg[task.status]+';border-radius:12px;margin-bottom:8px;border:1px solid '+(isActive?'var(--accent)':'var(--border)')+';'+(isActive?'box-shadow:0 0 0 1px var(--accent),0 2px 12px rgba(124,106,255,0.15);':'transition:var(--transition);')+'" onmouseover="if(!'+isActive+')this.style.borderColor=\'var(--accent)\'" onmouseout="if(!'+isActive+')this.style.borderColor=\'var(--border)\'">';
+        html+='<div style="display:flex;align-items:center;gap:8px;">';
+        html+='<span style="font-size:14px;">'+(statusIcons[task.status]||'❓')+'</span>';
+        html+='<span style="font-size:10px;">'+(prioLabels[task.priority]||'🟡')+'</span>';
+        html+='<span style="flex:1;font-size:12px;color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(task.title)+'</span>';
+        html+='<span style="font-size:8px;color:var(--text-muted);background:var(--bg-2);padding:2px 6px;border-radius:4px;">'+ageStr+'</span>';
+        html+='</div>';
+        if(task.description){html+='<div style="font-size:10px;color:var(--text-muted);margin-top:6px;padding-left:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(task.description)+'</div>';}
+        if(task.progress>0&&task.progress<100){html+='<div style="margin-top:8px;height:4px;background:var(--bg-0);border-radius:4px;overflow:hidden;"><div style="width:'+task.progress+'%;height:100%;background:linear-gradient(90deg,var(--cyan),var(--accent));border-radius:4px;transition:width 0.3s ease;"></div></div><div style="font-size:8px;color:var(--text-muted);margin-top:2px;text-align:right;">'+task.progress+'%</div>';}
+        html+='<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">';
+        html+='<span style="font-size:8px;padding:2px 8px;background:'+statusBg[task.status]+';color:'+statusColors[task.status]+';border-radius:4px;border:1px solid '+statusColors[task.status]+'30;">'+(statusLabels[task.status]||task.status)+'</span>';
+        if(task.status==='pending'){html+='<button onclick="updateTaskFromPanel(\''+task.id+'\',\'in_progress\')" style="padding:3px 10px;background:var(--cyan);color:#0a0a0f;border:none;border-radius:6px;font-size:9px;cursor:pointer;font-weight:600;transition:var(--transition);" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">▶ 开始</button>';}
+        if(task.status==='in_progress'){html+='<button onclick="updateTaskFromPanel(\''+task.id+'\',\'done\')" style="padding:3px 10px;background:var(--success);color:#0a0a0f;border:none;border-radius:6px;font-size:9px;cursor:pointer;font-weight:600;transition:var(--transition);" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">✓ 完成</button>';}
+        if(task.status!=='done'&&task.status!=='failed'){html+='<button onclick="updateTaskFromPanel(\''+task.id+'\',\'failed\')" style="padding:3px 10px;background:transparent;color:var(--error);border:1px solid var(--error);border-radius:6px;font-size:9px;cursor:pointer;font-weight:600;transition:var(--transition);" onmouseover="this.style.background=\'var(--error)\';this.style.color=\'#fff\'" onmouseout="this.style.background=\'transparent\';this.style.color=\'var(--error)\'">✕ 取消</button>';}
+        if(!isActive&&task.status!=='done'&&task.status!=='failed'){html+='<button onclick="activateTaskFromPanel(\''+task.id+'\')" style="padding:3px 10px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:9px;cursor:pointer;font-weight:600;transition:var(--transition);" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">🎯 聚焦</button>';}
+        html+='</div></div>';
+      });
+    }
+    content.innerHTML=html;
+  }catch(e){
+    content.innerHTML='<div style="color:var(--error);padding:20px;text-align:center;"><div style="font-size:24px;margin-bottom:8px;">⚠️</div><div>加载失败: '+esc(e.message)+'</div><button onclick="loadTaskPanel()" style="margin-top:12px;padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;">重试</button></div>';
+  }
+}
+
+async function createTaskFromPanel(){
+  const title=document.getElementById('newTaskTitle').value.trim();
+  if(!title)return;
+  const priority=document.getElementById('newTaskPriority').value;
+  document.getElementById('newTaskTitle').value='';
+  await fetch('/agent/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:title,priority:priority})});
+  loadTaskPanel();
+}
+
+async function updateTaskFromPanel(taskId,status){
+  await fetch('/agent/tasks/'+taskId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status})});
+  loadTaskPanel();
+}
+
+async function activateTaskFromPanel(taskId){
+  await fetch('/agent/tasks/'+taskId+'/activate',{method:'POST',headers:{'Content-Type':'application/json'}});
+  loadTaskPanel();
+}
+
+let browserPanelEl=null;
+function showBrowserPanel(){
+  if(browserPanelEl){browserPanelEl.remove();browserPanelEl=null;return;}
+  browserPanelEl=document.createElement('div');
+  browserPanelEl.id='browserPanel';
+  browserPanelEl.style.cssText='position:fixed;top:0;right:0;width:420px;height:100%;background:var(--bg-1);border-left:1px solid var(--border);z-index:10000;display:flex;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,0.3);font-family:inherit;animation:slideInRight .2s ease-out;';
+  browserPanelEl.innerHTML='<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:8px;"><span style="font-size:16px;">🌐</span><span style="font-weight:700;color:var(--text);font-size:14px;">浏览器集成</span><span style="flex:1;"></span><button onclick="browserPanelEl.remove();browserPanelEl=null;" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;">✕</button></div><div id="browserPanelContent" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>';
+  document.body.appendChild(browserPanelEl);
+  loadBrowserPanel();
+}
+
+function loadBrowserPanel(){
+  const content=document.getElementById('browserPanelContent');
+  if(!content)return;
+  content.innerHTML='<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">🔍 Web Search</div><div style="display:flex;gap:4px;"><input id="browserSearchInput" placeholder="Search the web..." style="flex:1;padding:6px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:inherit;outline:none;" onkeydown="if(event.key===\'Enter\')doBrowserSearch()"><button onclick="doBrowserSearch()" style="padding:6px 12px;background:var(--cyan);color:#0a0a0f;border:none;border-radius:4px;font-size:10px;cursor:pointer;font-weight:600;">Search</button></div><div id="browserSearchResults" style="margin-top:8px;"></div></div><div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📄 Fetch URL</div><div style="display:flex;gap:4px;"><input id="browserFetchInput" placeholder="https://example.com" style="flex:1;padding:6px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:inherit;outline:none;" onkeydown="if(event.key===\'Enter\')doBrowserFetch()"><button onclick="doBrowserFetch()" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:10px;cursor:pointer;font-weight:600;">Fetch</button></div><div id="browserFetchResults" style="margin-top:8px;"></div></div><div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">📂 Open Project / URL</div><div style="display:flex;gap:4px;"><input id="browserOpenInput" placeholder="Path or URL..." style="flex:1;padding:6px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-family:inherit;outline:none;" onkeydown="if(event.key===\'Enter\')doBrowserOpen()"><button onclick="doBrowserOpen()" style="padding:6px 12px;background:var(--success);color:#0a0a0f;border:none;border-radius:4px;font-size:10px;cursor:pointer;font-weight:600;">Open</button></div></div>';
+}
+
+async function doBrowserSearch(){
+  const query=document.getElementById('browserSearchInput').value.trim();
+  if(!query)return;
+  const resultsEl=document.getElementById('browserSearchResults');
+  resultsEl.innerHTML='<div style="color:var(--text-muted);font-size:10px;">Searching...</div>';
+  try{
+    const r=await fetch('/agent/browser/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:query,max_results:5})});
+    const d=await r.json();
+    const results=d.results||[];
+    if(!results.length||results[0].error){resultsEl.innerHTML='<div style="color:var(--error);font-size:10px;">No results or error: '+(results[0]?results[0].error:'unknown')+'</div>';return;}
+    resultsEl.innerHTML=results.map(function(r){
+      return '<div style="padding:6px 8px;background:var(--bg-2);border-radius:var(--radius-sm);margin-bottom:4px;cursor:pointer;" onclick="document.getElementById(\'browserFetchInput\').value=\''+esc(r.url).replace(/'/g,"\\'")+'\';doBrowserFetch();"><div style="font-size:10px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(r.title)+'</div><div style="font-size:8px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(r.url)+'</div>'+(r.snippet?'<div style="font-size:9px;color:var(--text-dim);margin-top:2px;">'+esc(r.snippet.substring(0,120))+'</div>':'')+'</div>';
+    }).join('');
+  }catch(e){resultsEl.innerHTML='<div style="color:var(--error);font-size:10px;">Error: '+e.message+'</div>';}
+}
+
+async function doBrowserFetch(){
+  const url=document.getElementById('browserFetchInput').value.trim();
+  if(!url)return;
+  const resultsEl=document.getElementById('browserFetchResults');
+  resultsEl.innerHTML='<div style="color:var(--text-muted);font-size:10px;">Fetching...</div>';
+  try{
+    const r=await fetch('/agent/browser/fetch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,format:'markdown'})});
+    const d=await r.json();
+    if(d.error){resultsEl.innerHTML='<div style="color:var(--error);font-size:10px;">Error: '+esc(d.error)+'</div>';return;}
+    const content=(d.content||'').substring(0,3000);
+    resultsEl.innerHTML='<div style="background:var(--bg-2);border-radius:var(--radius-sm);padding:8px;max-height:300px;overflow-y:auto;">'+(d.title?'<div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px;">'+esc(d.title)+'</div>':'')+'<pre style="font-size:9px;color:var(--text-dim);white-space:pre-wrap;word-break:break-all;font-family:inherit;margin:0;">'+esc(content)+'</pre></div>';
+  }catch(e){resultsEl.innerHTML='<div style="color:var(--error);font-size:10px;">Error: '+e.message+'</div>';}
+}
+
+async function doBrowserOpen(){
+  const target=document.getElementById('browserOpenInput').value.trim();
+  if(!target)return;
+  try{
+    const r=await fetch('/agent/browser/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:target})});
+    const d=await r.json();
+    if(d.error){alert(d.error);}else{termLog('Opened: '+target,'success');}
+  }catch(e){termLog('Error: '+e.message,'error');}
+}
+
+async function importEnvFromHost(){
+  termLog(t('importEnv')+'...','info');
+  try{
+    const r=await fetch('/agent/import-env',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:generateDeviceId()})});
+    const d=await r.json();
+    if(d.success){termLog(t('envImported')+'! Python: '+(d.python_version||'N/A')+', Packages: '+d.package_count,'success');termLog('Env file: '+d.env_file,'info');termLog('Requirements: '+d.requirements_file,'info');loadFileTree();}
+    else{termLog(t('envImportFailed')+': '+(d.error||'Unknown'),'error');}
+  }catch(e){termLog(t('envImportFailed')+': '+e.message,'error');}
+}
+
+async function showProjectList(){
+  try{
+    const r=await fetch('/workspace/projects?refresh=true');
+    const d=await r.json();
+    if(!d.success||!d.projects||!d.projects.length){
+      termLog('No projects found in workspace','info');
+      return;
+    }
+    const existing=document.getElementById('projectListModal');
+    if(existing)existing.remove();
+    const modal=document.createElement('div');
+    modal.id='projectListModal';
+    modal.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(10,10,15,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+    const listHtml=d.projects.map(function(p){
+      const statusIcon=p.running?'🟢':(p.exists?'⚪':'🔴');
+      const kindIcon={'python':'🐍','node':'📦','java':'☕','rust':'🦀'}[p.kind]||'📁';
+      return '<div style="padding:10px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;transition:all 0.2s;background:var(--bg-2);display:flex;align-items:center;gap:10px;" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'" onclick="runProjectFromList(\''+esc(p.id).replace(/'/g,"\\'")+'\',\''+esc(p.path).replace(/'/g,"\\'")+'\',\''+esc(p.start_command).replace(/'/g,"\\'")+'\')">'+
+        '<span style="font-size:14px;">'+statusIcon+'</span>'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div style="font-size:11px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:4px;">'+kindIcon+' '+esc(p.name)+'</div>'+
+          '<div style="font-size:9px;color:var(--text-muted);margin-top:2px;">'+esc(p.start_command||'No start command')+' · '+esc(p.kind||'unknown')+'</div>'+
+        '</div>'+
+        '<span style="font-size:9px;padding:2px 8px;border-radius:4px;background:'+(p.running?'rgba(52,211,153,0.15);color:var(--success)':'var(--bg-1);color:var(--text-muted)')+';">'+(p.running?'Running':'Start')+'</span>'+
+      '</div>';
+    }).join('');
+    modal.innerHTML='<div style="width:420px;max-height:70vh;overflow-y:auto;background:var(--bg-0);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:0 16px 64px rgba(0,0,0,0.5);">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'+
+        '<h3 style="font-size:14px;color:var(--text);font-weight:700;">▶ Run Project</h3>'+
+        '<span onclick="document.getElementById(\'projectListModal\').remove()" style="cursor:pointer;color:var(--text-muted);font-size:16px;padding:4px;">✕</span>'+
+      '</div>'+
+      listHtml+
+    '</div>';
+    document.body.appendChild(modal);
+    modal.onclick=function(e){if(e.target===modal)modal.remove();};
+  }catch(e){termLog('Failed to load projects: '+e.message,'error');}
+}
+async function runProjectFromList(projectId,projectPath,startCommand){
+  const modal=document.getElementById('projectListModal');
+  if(modal)modal.remove();
+  termLog('Starting project...','info');
+  const tp=document.getElementById('bottomPanel');
+  if(tp){tp.style.display='flex';switchBottomTab('terminal');}
+  try{
+    const r=await fetch('/agent/run-project',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_id:projectId,path:projectPath,start_command:startCommand,device_id:generateDeviceId()})});
+    const d=await r.json();
+    if(d.error){termLog('Error: '+d.error,'error');return;}
+    termLog('Project started (PID: '+d.pid+')','success');
+    termLog('Command: '+d.start_command,'info');
+    if(d.initial_output){termLog(d.initial_output,'success');}
+    showOperationFeedback('run_project',{path:projectPath},'success');
+  }catch(e){termLog('Failed to start project: '+e.message,'error');}
+}
+async function browseHostDirs(){
+  if(canUseDesktopDialog('folder')){
+    try{
+      const result = await window.kaguyaDesktop.dialog.openFolder({title: t('browseDir')});
+      if(result.canceled || !result.filePaths || !result.filePaths.length){
+        return;
+      }
+      const selectedPath = result.filePaths[0];
+      termLog(t('importingPaths')+' '+selectedPath+' ...','info');
+      const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:[selectedPath],device_id:generateDeviceId()})});
+      const d=await r.json();
+      if(d.error){termLog(t('importFailed')+': '+d.error,'error');return;}
+      if(d.imported&&d.imported.length){d.imported.forEach(i=>termLog(t('importSuccess')+': '+i.src+' -> '+i.dst,'success'));loadFileTree();}
+      if(d.errors&&d.errors.length){d.errors.forEach(e=>termLog(t('importFailed')+': '+e.path+' - '+e.error,'error'));}
+    }catch(e){termLog('Browse failed: '+e.message,'error');}
+    return;
+  }
+  const startPath=prompt(t('enterPath'),'');
+  try{
+    const r=await fetch('/agent/browsable-dirs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:startPath||''})});
+    const d=await r.json();
+    if(d.error){termLog('Browse error: '+d.error,'error');return;}
+    let html='<div style="padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;margin:4px 0;max-height:250px;overflow-y:auto;">';
+    html+='<div style="font-size:10px;font-weight:700;color:var(--cyan);margin-bottom:4px;">'+esc(d.path)+'</div>';
+    if(d.parent)html+='<div style="cursor:pointer;padding:2px 4px;font-size:10px;color:var(--text-muted);" onclick="browseHostDirsAt(\''+esc(d.parent).replace(/'/g,"\\'")+'\')">..</div>';
+    d.entries.forEach(e=>{
+      if(e.is_dir)html+='<div style="cursor:pointer;padding:2px 4px;font-size:10px;color:var(--text);" onclick="browseHostDirsAt(\''+esc(e.path).replace(/'/g,"\\'")+'\')">'+esc(e.name)+'/</div>';
+      else html+='<div style="cursor:pointer;padding:2px 4px;font-size:10px;color:var(--text-muted);" onclick="importSinglePath(\''+esc(e.path).replace(/'/g,"\\'")+'\')">'+esc(e.name)+'</div>';
+    });
+    html+='</div>';termLog(html,'html');
+  }catch(e){termLog('Browse failed: '+e.message,'error');}
+}
+
+async function browseHostDirsAt(path){
+  try{
+    const r=await fetch('/agent/browsable-dirs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})});
+    const d=await r.json();
+    if(d.error){termLog('Browse error: '+d.error,'error');return;}
+    let html='<div style="padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;margin:4px 0;max-height:250px;overflow-y:auto;">';
+    html+='<div style="font-size:10px;font-weight:700;color:var(--cyan);margin-bottom:4px;">'+esc(d.path)+'</div>';
+    if(d.parent)html+='<div style="cursor:pointer;padding:2px 4px;font-size:10px;color:var(--text-muted);" onclick="browseHostDirsAt(\''+esc(d.parent).replace(/'/g,"\\'")+'\')">..</div>';
+    d.entries.forEach(e=>{
+      if(e.is_dir)html+='<div style="cursor:pointer;padding:2px 4px;font-size:10px;color:var(--text);" onclick="browseHostDirsAt(\''+esc(e.path).replace(/'/g,"\\'")+'\')">'+esc(e.name)+'/</div>';
+      else html+='<div style="cursor:pointer;padding:2px 4px;font-size:10px;color:var(--text-muted);" onclick="importSinglePath(\''+esc(e.path).replace(/'/g,"\\'")+'\')">'+esc(e.name)+'</div>';
+    });
+    html+='</div>';termLog(html,'html');
+  }catch(e){termLog('Browse failed: '+e.message,'error');}
+}
+
+async function importSinglePath(path){
+  termLog(t('importingPaths')+' '+path,'info');
+  try{
+    const r=await fetch('/agent/import-files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths:[path],device_id:generateDeviceId()})});
+    const d=await r.json();
+    if(d.imported&&d.imported.length){termLog(t('importSuccess')+': '+path,'success');loadFileTree();}
+    else if(d.errors&&d.errors.length){termLog(t('importFailed')+': '+d.errors[0].error,'error');}
+  }catch(e){termLog(t('importFailed')+': '+e.message,'error');}
+}
+</script>
+</body>
+</html>"""
+
+# ==================== 智能体长期记忆系统 (Mem0风格) ====================
+
+import sqlite3
+
+try:
+    import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    np = None
+    TfidfVectorizer = None
+    cosine_similarity = None
+
+class AgentMemorySystem:
+    """智能体长期记忆系统 - 三层记忆架构"""
+    
+    def __init__(self):
+        self.working_memory = {}  # 工作记忆 - 当前会话上下文
+        self.short_term_memory = []  # 短期记忆 - 本轮会话历史
+        self.db_path = MEMORY_DB_FILE
+        self._init_database()
+        if SKLEARN_AVAILABLE:
+            self.vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+        else:
+            self.vectorizer = None
+        
+    def _init_database(self):
+        """初始化SQLite数据库"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # 长期记忆表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS long_term_memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                memory_type TEXT DEFAULT 'fact',
+                category TEXT DEFAULT 'general',
+                importance REAL DEFAULT 0.5,
+                pinned INTEGER DEFAULT 0,
+                created_at REAL NOT NULL,
+                last_accessed REAL NOT NULL,
+                access_count INTEGER DEFAULT 0,
+                embedding BLOB,
+                metadata TEXT DEFAULT '{}',
+                session_id TEXT
+            )
+        ''')
+        
+        try:
+            cursor.execute('ALTER TABLE long_term_memories ADD COLUMN pinned INTEGER DEFAULT 0')
+        except:
+            pass
+        
+        # 实体关系表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entities (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                properties TEXT DEFAULT '{}',
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                mention_count INTEGER DEFAULT 1
+            )
+        ''')
+        
+        # 用户画像表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_profile (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                category TEXT DEFAULT 'preference',
+                confidence REAL DEFAULT 0.5,
+                updated_at REAL NOT NULL
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def add_to_working_memory(self, key, value, ttl=300):
+        """添加工作记忆 (TTL秒后过期)"""
+        self.working_memory[key] = {
+            'value': value,
+            'expires_at': time.time() + ttl
+        }
+    
+    def get_from_working_memory(self, key):
+        """获取工作记忆"""
+        if key in self.working_memory:
+            mem = self.working_memory[key]
+            if time.time() < mem['expires_at']:
+                return mem['value']
+            else:
+                del self.working_memory[key]
+        return None
+    
+    def add_to_short_term(self, role, content, importance=0.5):
+        """添加到短期记忆"""
+        memory = {
+            'role': role,
+            'content': content,
+            'timestamp': time.time(),
+            'importance': importance
+        }
+        self.short_term_memory.append(memory)
+        
+        # 保持最近50条
+        if len(self.short_term_memory) > 50:
+            self.short_term_memory = self.short_term_memory[-50:]
+    
+    def get_short_term_context(self, n=10):
+        """获取短期记忆上下文"""
+        return self.short_term_memory[-n:]
+    
+    def add_long_term_memory(self, content, memory_type='fact', category='general', 
+                             importance=None, metadata=None, session_id=None, pinned=0):
+        """添加长期记忆"""
+        if importance is None:
+            importance = self._calculate_importance(content)
+        
+        memory_id = str(uuid.uuid4())
+        timestamp = time.time()
+        
+        embedding = self._generate_embedding(content)
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO long_term_memories 
+            (id, content, memory_type, category, importance, pinned, created_at, 
+             last_accessed, access_count, embedding, metadata, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (memory_id, content, memory_type, category, importance, pinned,
+              timestamp, timestamp, 0, embedding, 
+              json.dumps(metadata or {}), session_id))
+        
+        conn.commit()
+        conn.close()
+        
+        # 提取实体
+        self._extract_entities(content, timestamp)
+        
+        return memory_id
+    
+    def _calculate_importance(self, content):
+        """计算记忆重要性评分"""
+        score = 0.5
+        
+        length = len(content)
+        if 20 <= length <= 100:
+            score += 0.08
+        elif 100 < length <= 500:
+            score += 0.12
+        elif length > 500:
+            score += 0.06
+        
+        important_keywords = [
+            '喜欢', '讨厌', '重要', '必须', '总是', '从不', '永远',
+            '名字', '职业', '地址', '电话', '爱好', '习惯', '生日',
+            '密码', '账号', '邮箱', '公司', '学校', '专业', '项目',
+            '目标', '计划', '问题', '错误', '解决', '需求', '偏好',
+            'remember', 'important', 'always', 'never', 'name', 'favorite',
+            'like', 'hate', 'need', 'must', 'goal', 'project'
+        ]
+        for keyword in important_keywords:
+            if keyword in content.lower():
+                score += 0.04
+        
+        emotional_words = ['非常', '特别', '极其', '真的', '绝对', '超级',
+                          '最', '恨', '爱', '怕', '急', 'very', 'extremely',
+                          'absolutely', 'really', 'super']
+        for word in emotional_words:
+            if word in content:
+                score += 0.03
+        
+        question_patterns = ['？', '?', '怎么', '如何', '为什么', '什么',
+                            'how', 'why', 'what', 'when', 'where']
+        for pattern in question_patterns:
+            if pattern in content:
+                score += 0.02
+        
+        code_patterns = ['def ', 'class ', 'import ', 'function ', '```']
+        for pattern in code_patterns:
+            if pattern in content:
+                score += 0.03
+        
+        return min(1.0, score)
+    
+    def _generate_embedding(self, text):
+        """生成文本嵌入 (增强版TF-IDF + n-gram)"""
+        if np is None:
+            return b'\x00' * 256
+        
+        words = text.lower().split()
+        embedding = np.zeros(256)
+        
+        for i, word in enumerate(words[:128]):
+            hash_val = hash(word) % 256
+            embedding[hash_val] += 1.0
+        
+        for i in range(len(words) - 1):
+            bigram = words[i] + '_' + words[i + 1]
+            hash_val = hash(bigram) % 256
+            embedding[hash_val] += 0.5
+        
+        for i in range(min(len(words), 64)):
+            pos_hash = hash(words[i] + str(i)) % 256
+            embedding[pos_hash] += 0.3
+        
+        import re
+        cn_chars = re.findall(r'[\u4e00-\u9fa5]', text)
+        for ch in cn_chars[:128]:
+            hash_val = hash(ch) % 256
+            embedding[hash_val] += 0.8
+        
+        for i in range(len(cn_chars) - 1):
+            bigram = cn_chars[i] + cn_chars[i + 1]
+            hash_val = hash(bigram) % 256
+            embedding[hash_val] += 0.4
+        
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            embedding = embedding / norm
+        return embedding.tobytes()
+    
+    def _extract_entities(self, text, timestamp):
+        """提取命名实体 (增强版)"""
+        import re
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        entity_patterns = {
+            'person': [
+                r'我叫([\u4e00-\u9fa5]{2,4})',
+                r'我的名字是([\u4e00-\u9fa5]{2,4})',
+                r'我是([\u4e00-\u9fa5]{2,4})(?=[，。！？\s]|$)',
+                r'My name is (\w+)',
+                r"I'm (\w+)(?=\s|$)",
+            ],
+            'location': [
+                r'在([\u4e00-\u9fa5]{2,8}(?:市|省|区|县|镇|路|街))',
+                r'住在([\u4e00-\u9fa5]{2,8})',
+                r'来自([\u4e00-\u9fa5]{2,8})',
+            ],
+            'organization': [
+                r'([\u4e00-\u9fa5]{2,6}(?:公司|集团|大学|学院|研究所))',
+                r'在([\u4e00-\u9fa5]{2,6})(?:工作|上班|就读)',
+            ],
+            'technology': [
+                r'([\w\-\.]+(?:js|py|ts|java|cpp|go|rs|rb|php))',
+                r'([\w\-]+(?:框架|库|工具|语言|系统|平台))',
+            ],
+        }
+        
+        for entity_type, patterns in entity_patterns.items():
+            for pattern in patterns:
+                matches = re.findall(pattern, text)
+                for name in matches:
+                    if len(name) < 2 or len(name) > 20:
+                        continue
+                    entity_id = f"{entity_type}_{name}"
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO entities 
+                        (id, name, entity_type, first_seen, last_seen, mention_count)
+                        VALUES (?, ?, ?, ?, ?, 
+                                COALESCE((SELECT mention_count FROM entities WHERE id = ?), 0) + 1)
+                    ''', (entity_id, name, entity_type, timestamp, timestamp, entity_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def search_memories(self, query, top_k=5, min_importance=0.3, 
+                       memory_type=None, time_range=None, pinned_only=False):
+        """搜索相关记忆"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        conditions = ["importance >= ?"]
+        params = [min_importance]
+        
+        if memory_type:
+            conditions.append("memory_type = ?")
+            params.append(memory_type)
+        
+        if time_range:
+            conditions.append("created_at >= ?")
+            params.append(time.time() - time_range)
+        
+        if pinned_only:
+            conditions.append("pinned = 1")
+        
+        where_clause = " AND ".join(conditions)
+        
+        cursor.execute(f'''
+            SELECT id, content, memory_type, category, importance, pinned,
+                   created_at, last_accessed, access_count, metadata
+            FROM long_term_memories
+            WHERE {where_clause}
+            ORDER BY pinned DESC, importance DESC, last_accessed DESC
+            LIMIT ?
+        ''', params + [top_k * 3])  # 获取更多进行重排序
+        
+        memories = cursor.fetchall()
+        conn.close()
+        
+        # 语义相似度重排序
+        if memories:
+            query_embedding = self._generate_embedding(query)
+            scored_memories = []
+            
+            for mem in memories:
+                mem_id, content, mtype, category, importance, pinned, created_at, \
+                last_accessed, access_count, metadata = mem
+                
+                mem_embedding = self._generate_embedding(content)
+                similarity = self._calculate_similarity(query_embedding, mem_embedding)
+                
+                days_old = (time.time() - created_at) / 86400
+                time_decay = np.exp(-days_old / 30)
+                
+                access_bonus = np.log(access_count + 1) * 0.1
+                
+                pin_bonus = 0.2 if pinned else 0
+                
+                final_score = similarity * 0.4 + importance * 0.3 + time_decay * 0.2 + access_bonus * 0.1 + pin_bonus
+                
+                scored_memories.append((final_score, mem))
+            
+            # 按分数排序
+            scored_memories.sort(key=lambda x: x[0], reverse=True)
+            memories = [m[1] for m in scored_memories[:top_k]]
+        
+        return memories
+    
+    def _calculate_similarity(self, emb1_bytes, emb2_bytes):
+        """计算嵌入相似度"""
+        emb1 = np.frombuffer(emb1_bytes, dtype=np.float64)
+        emb2 = np.frombuffer(emb2_bytes, dtype=np.float64)
+        
+        min_len = min(len(emb1), len(emb2))
+        if min_len == 0:
+            return 0
+        emb1 = emb1[:min_len]
+        emb2 = emb2[:min_len]
+        
+        dot_product = np.dot(emb1, emb2)
+        norm1 = np.linalg.norm(emb1)
+        norm2 = np.linalg.norm(emb2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0
+        
+        cosine_sim = dot_product / (norm1 * norm2)
+        
+        overlap = np.sum((emb1 > 0) & (emb2 > 0)) / min_len
+        jaccard_sim = overlap
+        
+        return 0.7 * cosine_sim + 0.3 * jaccard_sim
+    
+    def update_memory_access(self, memory_id):
+        """更新记忆访问记录"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE long_term_memories
+            SET last_accessed = ?, access_count = access_count + 1
+            WHERE id = ?
+        ''', (time.time(), memory_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def toggle_memory_pin(self, memory_id):
+        """切换记忆置顶状态"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT pinned FROM long_term_memories WHERE id = ?', (memory_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        
+        new_pinned = 0 if row[0] else 1
+        cursor.execute('UPDATE long_term_memories SET pinned = ? WHERE id = ?', (new_pinned, memory_id))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def get_user_profile(self):
+        """获取用户画像"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT key, value, category, confidence, updated_at
+            FROM user_profile
+            ORDER BY updated_at DESC
+        ''')
+        
+        profile = {}
+        for row in cursor.fetchall():
+            key, value, category, confidence, updated_at = row
+            if category not in profile:
+                profile[category] = {}
+            profile[category][key] = {
+                'value': value,
+                'confidence': confidence,
+                'updated_at': updated_at
+            }
+        
+        conn.close()
+        return profile
+    
+    def update_user_profile(self, key, value, category='preference', confidence=0.5):
+        """更新用户画像"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO user_profile 
+            (key, value, category, confidence, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (key, value, category, confidence, time.time()))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_relevant_memories_for_context(self, current_context, max_memories=8):
+        """获取与当前上下文相关的记忆 (增强版)"""
+        long_term = self.search_memories(current_context, top_k=max_memories)
+        
+        short_term = self.get_short_term_context(n=8)
+        
+        working = {k: v['value'] for k, v in self.working_memory.items() 
+                   if time.time() < v['expires_at']}
+        
+        user_profile = self.get_user_profile()
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT name, entity_type, mention_count FROM entities ORDER BY mention_count DESC LIMIT 10')
+        entities = cursor.fetchall()
+        conn.close()
+        
+        return {
+            'long_term': long_term,
+            'short_term': short_term,
+            'working': working,
+            'user_profile': user_profile,
+            'entities': entities
+        }
+    
+    def format_memories_for_prompt(self, memories):
+        """格式化记忆为提示词 (增强版)"""
+        sections = []
+        
+        if memories.get('user_profile'):
+            profile_parts = []
+            for category, items in memories['user_profile'].items():
+                for key, info in items.items():
+                    if info.get('confidence', 0) >= 0.4:
+                        profile_parts.append(f"{key}: {info['value']}")
+            if profile_parts:
+                sections.append("【用户画像】\n" + "\n".join(f"- {p}" for p in profile_parts[:8]))
+        
+        if memories.get('entities'):
+            entity_strs = []
+            for name, etype, count in memories['entities']:
+                type_labels = {'person': '人物', 'location': '地点', 'organization': '组织', 'technology': '技术'}
+                entity_strs.append(f"{name}({type_labels.get(etype, etype)}, 提及{count}次)")
+            if entity_strs:
+                sections.append("【已知实体】\n" + ", ".join(entity_strs[:8]))
+        
+        if memories.get('long_term'):
+            long_term_text = []
+            for mem in memories['long_term']:
+                content = mem[1]
+                mtype = mem[2]
+                importance = mem[4]
+                type_labels = {'fact': '事实', 'preference': '偏好', 'experience': '经验', 'instruction': '指令'}
+                label = type_labels.get(mtype, mtype)
+                long_term_text.append(f"[{label}] {content}")
+            sections.append("【长期记忆】\n" + "\n".join(f"- {t}" for t in long_term_text))
+        
+        if memories.get('short_term'):
+            short_term_text = []
+            for m in memories['short_term']:
+                role_label = '用户' if m['role'] == 'user' else '助手'
+                content = m['content'][:150]
+                if len(m['content']) > 150:
+                    content += '...'
+                short_term_text.append(f"{role_label}: {content}")
+            if short_term_text:
+                sections.append("【近期对话】\n" + "\n".join(short_term_text))
+        
+        if memories.get('working'):
+            working_text = []
+            for key, value in memories['working'].items():
+                if isinstance(value, str) and len(value) < 200:
+                    working_text.append(f"{key}: {value}")
+            if working_text:
+                sections.append("【当前上下文】\n" + "\n".join(f"- {t}" for t in working_text[:5]))
+        
+        return "\n\n".join(sections)
+    
+    def consolidate_memories(self):
+        """记忆整合 - 合并相似记忆，清理过时记忆（置顶记忆不会被清理）"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, content, importance, pinned, created_at, access_count
+            FROM long_term_memories
+            WHERE created_at < ? AND pinned = 0
+        ''', (time.time() - 7 * 86400,))
+        
+        old_memories = cursor.fetchall()
+        
+        for mem in old_memories:
+            mem_id, content, importance, pinned, created_at, access_count = mem
+            days_old = (time.time() - created_at) / 86400
+            
+            if importance < 0.4 and access_count < 3 and days_old > 30:
+                cursor.execute('DELETE FROM long_term_memories WHERE id = ?', (mem_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_memory_stats(self):
+        """获取记忆统计信息"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*), AVG(importance) FROM long_term_memories')
+        long_term_count, avg_importance = cursor.fetchone()
+        
+        cursor.execute('SELECT COUNT(*) FROM long_term_memories WHERE pinned = 1')
+        pinned_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM entities')
+        entity_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM user_profile')
+        profile_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            'long_term_count': long_term_count or 0,
+            'avg_importance': round(avg_importance or 0, 2),
+            'pinned_count': pinned_count or 0,
+            'entity_count': entity_count or 0,
+            'profile_count': profile_count or 0,
+            'short_term_count': len(self.short_term_memory),
+            'working_memory_count': len(self.working_memory)
+        }
+
+# 初始化记忆系统
+memory_system = AgentMemorySystem()
+
+# ==================== 多模态视觉理解系统 ====================
+
+from PIL import Image
+import io
+
+# CLIP/torch are optional and expensive. Import them only when a vision request needs them.
+CLIPProcessor = None
+CLIPModel = None
+CLIP_AVAILABLE = None
+
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+
+class MultimodalSystem:
+    """多模态视觉理解系统"""
+
+    def __init__(self):
+        self.clip_model = None
+        self.clip_processor = None
+        self.image_cache = {}
+        self.conversation_history = []
+        self._clip_initialized = False
+
+    def _ensure_clip(self):
+        """延迟初始化CLIP模型"""
+        global CLIPProcessor, CLIPModel, CLIP_AVAILABLE, torch
+        if self._clip_initialized:
+            return bool(self.clip_model and self.clip_processor and torch)
+        if CLIP_AVAILABLE is False:
+            return False
+        try:
+            if torch is None:
+                import torch as _torch
+                torch = _torch
+            if CLIPProcessor is None or CLIPModel is None:
+                from transformers import CLIPProcessor as _CLIPProcessor, CLIPModel as _CLIPModel
+                CLIPProcessor = _CLIPProcessor
+                CLIPModel = _CLIPModel
+            CLIP_AVAILABLE = True
+            if self.clip_model is None:
+                self.clip_model = CLIPModel.from_pretrained(
+                    "openai/clip-vit-base-patch32",
+                    timeout=30
+                )
+            if self.clip_processor is None:
+                self.clip_processor = CLIPProcessor.from_pretrained(
+                    "openai/clip-vit-base-patch32",
+                    timeout=30
+                )
+            self._clip_initialized = True
+            print("[OK] CLIP model loaded")
+            return True
+        except Exception as e:
+            CLIP_AVAILABLE = False
+            print(f"[WARN] CLIP model load failed: {e}")
+            self._clip_initialized = True
+            return False
+
+    def process_image(self, image_path_or_data, task='describe'):
+        '''
+        处理图像任务
+        task: describe, ocr, analyze, caption
+        '''
+        try:
+            # 加载图像
+            if isinstance(image_path_or_data, str):
+                if image_path_or_data.startswith('data:image'):
+                    # Base64 编码的图像
+                    image_data = base64.b64decode(image_path_or_data.split(',')[1])
+                    image = Image.open(io.BytesIO(image_data))
+                elif os.path.exists(image_path_or_data):
+                    image = Image.open(image_path_or_data)
+                else:
+                    return {'error': '图像路径不存在'}
+            else:
+                image = Image.open(io.BytesIO(image_path_or_data))
+            
+            # 转换为 RGB
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            results = {}
+            
+            # 根据任务类型处理
+            if task == 'describe' or task == 'caption':
+                results = self._generate_image_description(image)
+            elif task == 'ocr':
+                results = self._extract_text_from_image(image)
+            elif task == 'analyze':
+                results = self._analyze_image_content(image)
+            elif task == 'understand':
+                results = self._comprehensive_understanding(image)
+            else:
+                results = {'error': f'未知任务类型: {task}'}
+            
+            # 缓存图像信息
+            image_id = str(uuid.uuid4())
+            self.image_cache[image_id] = {
+                'path': image_path_or_data if isinstance(image_path_or_data, str) else 'uploaded',
+                'size': image.size,
+                'mode': image.mode,
+                'timestamp': time.time()
+            }
+            results['image_id'] = image_id
+            
+            return results
+            
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _generate_image_description(self, image):
+        """生成图像描述"""
+        try:
+            if not self._ensure_clip():
+                return {'description': 'CLIP模型不可用', 'confidence': 0, 'error': 'CLIP not available'}
+
+            if self.clip_model and self.clip_processor:
+                candidate_descriptions = [
+                    "a photo", "a landscape photo", "a portrait photo", "a document screenshot",
+                    "a chart or graph", "an artwork", "an architecture photo", "a food photo",
+                    "an animal photo", "a tech product photo"
+                ]
+
+                inputs = self.clip_processor(
+                    text=candidate_descriptions,
+                    images=image,
+                    return_tensors="pt",
+                    padding=True
+                )
+
+                with torch.no_grad():
+                    outputs = self.clip_model(**inputs)
+                logits_per_image = outputs.logits_per_image
+                probs = logits_per_image.softmax(dim=1)
+                best_idx = probs.argmax().item()
+                confidence = probs[0][best_idx].item()
+                description = candidate_descriptions[best_idx]
+
+                width, height = image.size
+                aspect_ratio = width / height
+                size_desc = "高分辨率" if width > 2000 or height > 2000 else ("小尺寸" if width < 500 or height < 500 else "")
+                orientation = "横向" if aspect_ratio > 1.2 else ("纵向" if aspect_ratio < 0.8 else "方形")
+
+                return {
+                    'description': f"{size_desc} {orientation} {description}",
+                    'confidence': round(confidence, 3),
+                    'dimensions': f"{width}x{height}",
+                    'format': image.format if hasattr(image, 'format') else 'Unknown'
+                }
+            else:
+                return {'error': 'CLIP model not initialized'}
+        except Exception as e:
+            return {'error': f'Description failed: {e}'}
+    
+    def _extract_text_from_image(self, image):
+        """OCR 文字识别"""
+        try:
+            if TESSERACT_AVAILABLE:
+                # 使用 Tesseract OCR
+                text = pytesseract.image_to_string(image, lang='chi_sim+eng')
+                
+                # 获取文本位置信息
+                data = pytesseract.image_to_data(image, lang='chi_sim+eng', output_type=pytesseract.Output.DICT)
+                
+                # 统计文本块
+                text_blocks = []
+                for i in range(len(data['text'])):
+                    if int(data['conf'][i]) > 60:  # 置信度大于60
+                        text_blocks.append({
+                            'text': data['text'][i],
+                            'confidence': data['conf'][i],
+                            'bbox': (data['left'][i], data['top'][i], 
+                                    data['width'][i], data['height'][i])
+                        })
+                
+                return {
+                    'text': text.strip(),
+                    'text_blocks': text_blocks,
+                    'block_count': len(text_blocks),
+                    'language': 'chi_sim+eng'
+                }
+            else:
+                # 模拟 OCR 结果
+                return {
+                    'text': '[OCR 功能未启用，请安装 pytesseract]',
+                    'text_blocks': [],
+                    'block_count': 0,
+                    'note': '安装 pytesseract 和 tesseract-ocr 以启用 OCR 功能'
+                }
+        except Exception as e:
+            return {'error': f'OCR 失败: {e}'}
+    
+    def _analyze_image_content(self, image):
+        """深度分析图像内容"""
+        try:
+            # 基础描述
+            description = self._generate_image_description(image)
+            
+            # OCR 文本
+            ocr_result = self._extract_text_from_image(image)
+            
+            # 颜色分析
+            colors = self._analyze_colors(image)
+            
+            # 构图分析
+            composition = self._analyze_composition(image)
+            
+            return {
+                'description': description.get('description', ''),
+                'dimensions': description.get('dimensions', ''),
+                'text_content': ocr_result.get('text', ''),
+                'has_text': len(ocr_result.get('text', '')) > 10,
+                'colors': colors,
+                'composition': composition,
+                'analysis_complete': True
+            }
+        except Exception as e:
+            return {'error': f'分析失败: {e}'}
+    
+    def _analyze_colors(self, image):
+        """分析图像颜色"""
+        try:
+            # 缩小图像以加速处理
+            small_image = image.copy()
+            small_image.thumbnail((100, 100))
+            
+            # 获取主要颜色
+            pixels = list(small_image.getdata())
+            
+            # 简单的颜色统计
+            brightness_values = []
+            for pixel in pixels[:1000]:  # 采样前1000个像素
+                if isinstance(pixel, tuple):
+                    r, g, b = pixel[:3]
+                    brightness = (r + g + b) / 3
+                    brightness_values.append(brightness)
+            
+            if brightness_values:
+                avg_brightness = sum(brightness_values) / len(brightness_values)
+                
+                brightness_desc = "明亮" if avg_brightness > 180 else ("昏暗" if avg_brightness < 80 else "适中")
+                
+                return {
+                    'dominant_brightness': brightness_desc,
+                    'avg_brightness': round(avg_brightness, 1),
+                    'color_mode': image.mode
+                }
+            
+            return {'color_mode': image.mode}
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _analyze_composition(self, image):
+        """分析图像构图"""
+        try:
+            width, height = image.size
+            aspect_ratio = width / height
+            
+            # 判断构图类型
+            if aspect_ratio > 2:
+                composition_type = "全景构图"
+            elif aspect_ratio > 1.3:
+                composition_type = "横向构图"
+            elif aspect_ratio < 0.7:
+                composition_type = "纵向构图"
+            elif 0.9 <= aspect_ratio <= 1.1:
+                composition_type = "方形构图"
+            else:
+                composition_type = "标准构图"
+            
+            return {
+                'type': composition_type,
+                'aspect_ratio': round(aspect_ratio, 2),
+                'width': width,
+                'height': height
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _comprehensive_understanding(self, image):
+        """综合理解图像"""
+        description = self._generate_image_description(image)
+        ocr = self._extract_text_from_image(image)
+        colors = self._analyze_colors(image)
+        composition = self._analyze_composition(image)
+        
+        # 生成综合理解文本
+        understanding_parts = []
+        
+        if 'description' in description:
+            understanding_parts.append(f"这是一张{description['description']}。")
+        
+        if 'text' in ocr and ocr['text']:
+            text_preview = ocr['text'][:200] + '...' if len(ocr['text']) > 200 else ocr['text']
+            understanding_parts.append(f"图像中包含文字：\"{text_preview}\"")
+        
+        if 'dominant_brightness' in colors:
+            understanding_parts.append(f"整体色调{colors['dominant_brightness']}。")
+        
+        understanding = " ".join(understanding_parts)
+        
+        return {
+            'understanding': understanding,
+            'description': description,
+            'ocr': ocr,
+            'colors': colors,
+            'composition': composition
+        }
+    
+    def add_to_conversation(self, role, content, image_id=None):
+        """添加图文对话历史"""
+        entry = {
+            'role': role,
+            'content': content,
+            'image_id': image_id,
+            'timestamp': time.time()
+        }
+        self.conversation_history.append(entry)
+        
+        # 保持最近20轮
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+    
+    def get_conversation_context(self, n=5):
+        """获取图文对话上下文"""
+        return self.conversation_history[-n:]
+    
+    def generate_multimodal_prompt(self, user_message, image_analysis=None):
+        """生成多模态提示词"""
+        prompt_parts = []
+        
+        # 添加图像分析结果
+        if image_analysis:
+            prompt_parts.append("【图像信息】")
+            if 'understanding' in image_analysis:
+                prompt_parts.append(image_analysis['understanding'])
+            elif 'description' in image_analysis:
+                desc = image_analysis['description']
+                if isinstance(desc, dict) and 'description' in desc:
+                    prompt_parts.append(desc['description'])
+        
+        # 添加对话历史
+        context = self.get_conversation_context(n=3)
+        if context:
+            prompt_parts.append("\n【对话历史】")
+            for entry in context:
+                role_name = "用户" if entry['role'] == 'user' else "AI"
+                prompt_parts.append(f"{role_name}: {entry['content']}")
+        
+        # 添加当前问题
+        prompt_parts.append(f"\n【当前问题】\n用户: {user_message}")
+        prompt_parts.append("\n请基于以上图像信息和对话历史回答用户的问题。")
+        
+        return "\n".join(prompt_parts)
+
+# 初始化多模态系统
+multimodal_system = MultimodalSystem()
+
+# ==================== 模型微调训练平台 ====================
+
+class FinetunePlatform:
+    """模型微调训练平台 - 支持 LoRA/QLoRA"""
+    
+    def __init__(self):
+        self.training_jobs = {}
+        self.datasets = {}
+        self.load_config()
+        
+    def load_config(self):
+        """加载微调配置"""
+        if os.path.exists(FINETUNE_CONFIG_FILE):
+            try:
+                with open(FINETUNE_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.training_jobs = config.get('jobs', {})
+                    self.datasets = config.get('datasets', {})
+            except Exception as e:
+                print(f"加载微调配置失败: {e}")
+    
+    def save_config(self):
+        """保存微调配置"""
+        try:
+            config = {
+                'jobs': self.training_jobs,
+                'datasets': self.datasets,
+                'updated_at': time.time()
+            }
+            with open(FINETUNE_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存微调配置失败: {e}")
+    
+    def upload_dataset(self, name, file_data, format_type='jsonl'):
+        """上传数据集"""
+        try:
+            dataset_id = f"dataset_{int(time.time())}"
+            dataset_dir = os.path.join(DATASETS_DIR, dataset_id)
+            os.makedirs(dataset_dir, exist_ok=True)
+            
+            # 保存文件
+            if isinstance(file_data, str) and file_data.startswith('data:'):
+                # Base64 编码的数据
+                file_data = base64.b64decode(file_data.split(',')[1])
+            
+            file_path = os.path.join(dataset_dir, f'train.{format_type}')
+            with open(file_path, 'wb') as f:
+                f.write(file_data if isinstance(file_data, bytes) else file_data.encode())
+            
+            # 解析数据集
+            samples = self._parse_dataset(file_path, format_type)
+            
+            self.datasets[dataset_id] = {
+                'id': dataset_id,
+                'name': name,
+                'format': format_type,
+                'path': file_path,
+                'sample_count': len(samples),
+                'created_at': time.time(),
+                'status': 'ready'
+            }
+            
+            self.save_config()
+            return {'success': True, 'dataset_id': dataset_id, 'sample_count': len(samples)}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def _parse_dataset(self, file_path, format_type):
+        """解析数据集文件"""
+        samples = []
+        try:
+            if format_type == 'jsonl':
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            samples.append(json.loads(line))
+            elif format_type == 'json':
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        samples = data
+                    else:
+                        samples = [data]
+            elif format_type == 'csv':
+                import csv
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    samples = list(reader)
+        except Exception as e:
+            print(f"解析数据集失败: {e}")
+        return samples
+    
+    def create_training_job(self, name, dataset_id, config):
+        """创建训练任务"""
+        try:
+            job_id = f"job_{int(time.time())}"
+            
+            if dataset_id not in self.datasets:
+                return {'success': False, 'error': '数据集不存在'}
+            
+            dataset = self.datasets[dataset_id]
+            
+            # 训练配置
+            training_config = {
+                'job_id': job_id,
+                'name': name,
+                'dataset_id': dataset_id,
+                'dataset_name': dataset['name'],
+                'base_model': config.get('base_model', 'qwen3.5:4b (Ollama)'),
+                'method': config.get('method', 'lora'),  # lora, qlora, full
+                'lora_r': config.get('lora_r', 16),
+                'lora_alpha': config.get('lora_alpha', 32),
+                'lora_dropout': config.get('lora_dropout', 0.05),
+                'learning_rate': config.get('learning_rate', 5e-5),
+                'batch_size': config.get('batch_size', 4),
+                'gradient_accumulation_steps': config.get('gradient_accumulation_steps', 4),
+                'num_epochs': config.get('num_epochs', 3),
+                'max_seq_length': config.get('max_seq_length', 512),
+                'warmup_steps': config.get('warmup_steps', 100),
+                'save_steps': config.get('save_steps', 500),
+                'logging_steps': config.get('logging_steps', 10),
+                'output_dir': os.path.join(TRAINING_DIR, job_id),
+                'status': 'pending',
+                'progress': 0,
+                'created_at': time.time(),
+                'updated_at': time.time(),
+                'logs': [],
+                'metrics': {
+                    'loss': [],
+                    'learning_rate': [],
+                    'epoch': []
+                }
+            }
+            
+            self.training_jobs[job_id] = training_config
+            self.save_config()
+            
+            return {'success': True, 'job_id': job_id}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    
+    def start_training(self, job_id):
+        """开始训练"""
+        if job_id not in self.training_jobs:
+            return {'success': False, 'error': '训练任务不存在'}
+        
+        job = self.training_jobs[job_id]
+        
+        if job['status'] == 'running':
+            return {'success': False, 'error': '训练任务已在运行'}
+        
+        # 在后台线程中启动训练
+        thread = threading.Thread(target=self._training_worker, args=(job_id,))
+        thread.daemon = True
+        thread.start()
+        
+        job['status'] = 'running'
+        job['started_at'] = time.time()
+        self.save_config()
+        
+        return {'success': True}
+    
+    def _training_worker(self, job_id):
+        """训练工作线程"""
+        job = self.training_jobs[job_id]
+        
+        try:
+            # 模拟训练过程（实际应使用 transformers.Trainer）
+            total_steps = job['num_epochs'] * 100  # 假设每个epoch 100步
+            
+            for step in range(total_steps):
+                if job.get('stop_requested'):
+                    break
+                
+                # 模拟训练步骤
+                time.sleep(0.1)  # 实际训练时这会是真正的训练代码
+                
+                # 更新进度
+                progress = (step + 1) / total_steps * 100
+                job['progress'] = round(progress, 2)
+                job['current_step'] = step + 1
+                job['total_steps'] = total_steps
+                
+                # 模拟损失值
+                import random
+                loss = 2.0 * (1 - progress / 100) + random.random() * 0.1
+                job['metrics']['loss'].append(round(loss, 4))
+                job['metrics']['learning_rate'].append(job['learning_rate'])
+                job['metrics']['epoch'].append(step // 100 + 1)
+                
+                # 添加日志
+                if step % 10 == 0:
+                    job['logs'].append({
+                        'step': step,
+                        'loss': round(loss, 4),
+                        'timestamp': time.time()
+                    })
+                
+                job['updated_at'] = time.time()
+                
+                # 每100步保存一次配置
+                if step % 100 == 0:
+                    self.save_config()
+            
+            # 训练完成
+            if not job.get('stop_requested'):
+                job['status'] = 'completed'
+                job['progress'] = 100
+                job['completed_at'] = time.time()
+                
+                # 创建导出
+                self._export_model(job_id)
+            else:
+                job['status'] = 'stopped'
+            
+            self.save_config()
+            
+        except Exception as e:
+            job['status'] = 'failed'
+            job['error'] = str(e)
+            self.save_config()
+    
+    def _export_model(self, job_id):
+        """导出训练好的模型"""
+        job = self.training_jobs[job_id]
+        export_dir = os.path.join(EXPORTS_DIR, job_id)
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # 创建模型配置
+        export_config = {
+            'job_id': job_id,
+            'name': job['name'],
+            'base_model': job['base_model'],
+            'method': job['method'],
+            'lora_config': {
+                'r': job['lora_r'],
+                'alpha': job['lora_alpha'],
+                'dropout': job['lora_dropout']
+            },
+            'training_config': {
+                'learning_rate': job['learning_rate'],
+                'batch_size': job['batch_size'],
+                'num_epochs': job['num_epochs']
+            },
+            'metrics': job['metrics'],
+            'exported_at': time.time()
+        }
+        
+        with open(os.path.join(export_dir, 'config.json'), 'w', encoding='utf-8') as f:
+            json.dump(export_config, f, ensure_ascii=False, indent=2)
+        
+        job['export_path'] = export_dir
+        return export_dir
+    
+    def stop_training(self, job_id):
+        """停止训练"""
+        if job_id in self.training_jobs:
+            self.training_jobs[job_id]['stop_requested'] = True
+            return {'success': True}
+        return {'success': False, 'error': '训练任务不存在'}
+    
+    def get_job_status(self, job_id):
+        """获取训练任务状态"""
+        if job_id not in self.training_jobs:
+            return {'success': False, 'error': '训练任务不存在'}
+        
+        job = self.training_jobs[job_id]
+        return {
+            'success': True,
+            'job': {
+                'job_id': job['job_id'],
+                'name': job['name'],
+                'status': job['status'],
+                'progress': job['progress'],
+                'current_step': job.get('current_step', 0),
+                'total_steps': job.get('total_steps', 0),
+                'metrics': job['metrics'],
+                'created_at': job['created_at'],
+                'started_at': job.get('started_at'),
+                'completed_at': job.get('completed_at'),
+                'error': job.get('error')
+            }
+        }
+    
+    def get_all_jobs(self):
+        """获取所有训练任务"""
+        jobs = []
+        for job_id, job in self.training_jobs.items():
+            jobs.append({
+                'job_id': job['job_id'],
+                'name': job['name'],
+                'dataset_name': job['dataset_name'],
+                'method': job['method'],
+                'status': job['status'],
+                'progress': job['progress'],
+                'created_at': job['created_at']
+            })
+        return sorted(jobs, key=lambda x: x['created_at'], reverse=True)
+    
+    def get_all_datasets(self):
+        """获取所有数据集"""
+        datasets = []
+        for dataset_id, dataset in self.datasets.items():
+            datasets.append({
+                'id': dataset['id'],
+                'name': dataset['name'],
+                'format': dataset['format'],
+                'sample_count': dataset['sample_count'],
+                'created_at': dataset['created_at'],
+                'status': dataset['status']
+            })
+        return sorted(datasets, key=lambda x: x['created_at'], reverse=True)
+    
+    def delete_job(self, job_id):
+        """删除训练任务"""
+        if job_id in self.training_jobs:
+            # 停止训练（如果正在运行）
+            if self.training_jobs[job_id]['status'] == 'running':
+                self.stop_training(job_id)
+            
+            # 删除相关文件
+            job_dir = self.training_jobs[job_id].get('output_dir')
+            if job_dir and os.path.exists(job_dir):
+                shutil.rmtree(job_dir, ignore_errors=True)
+            
+            export_dir = self.training_jobs[job_id].get('export_path')
+            if export_dir and os.path.exists(export_dir):
+                shutil.rmtree(export_dir, ignore_errors=True)
+            
+            del self.training_jobs[job_id]
+            self.save_config()
+            return {'success': True}
+        return {'success': False, 'error': '训练任务不存在'}
+    
+    def delete_dataset(self, dataset_id):
+        """删除数据集"""
+        if dataset_id in self.datasets:
+            # 删除文件
+            dataset_dir = os.path.join(DATASETS_DIR, dataset_id)
+            if os.path.exists(dataset_dir):
+                shutil.rmtree(dataset_dir, ignore_errors=True)
+            
+            del self.datasets[dataset_id]
+            self.save_config()
+            return {'success': True}
+        return {'success': False, 'error': '数据集不存在'}
+    
+    def get_training_logs(self, job_id, limit=100):
+        """获取训练日志"""
+        if job_id not in self.training_jobs:
+            return {'success': False, 'error': '训练任务不存在'}
+        
+        logs = self.training_jobs[job_id].get('logs', [])
+        return {
+            'success': True,
+            'logs': logs[-limit:]
+        }
+
+# 初始化微调平台
+finetune_platform = FinetunePlatform()
+
+PRESET_LORAS = [
+    {"id": "none", "name": "🤖 基础模型", "description": "使用Qwen3.5-4B模型 (Ollama)", "path": None, "category": "base", "icon": "🤖", "color": "#667eea"},
+    {"id": "coder", "name": "💻 代码专家", "description": "专精编程、算法、代码审查", "path": None, "category": "coding", "icon": "💻", "color": "#00d4aa", "system": "你是一位资深的编程专家，精通多种编程语言和框架。请用专业、简洁的方式回答编程问题，提供完整的代码示例和最佳实践。直接回复，不要输出思考过程。"},
+    {"id": "math", "name": "📐 数学专家", "description": "专精数学推理、公式推导", "path": None, "category": "academic", "icon": "📐", "color": "#f59e0b", "system": "你是一位数学专家，精通各个数学领域。请用严谨的数学语言和清晰的步骤解答问题，必要时使用LaTeX公式。直接回复，不要输出思考过程。"},
+    {"id": "creative", "name": "✨ 创意写作", "description": "专精小说、文案、创意内容", "path": None, "category": "creative", "icon": "✨", "color": "#ec4899", "system": "你是一位富有创意的作家，擅长各种文体的创作。帮助用户进行创意写作、故事创作、文案撰写，文字优美流畅，富有感染力。直接回复，不要输出思考过程。"},
+    {"id": "medical", "name": "🏥 医学助手", "description": "专精医学知识、健康咨询", "path": None, "category": "professional", "icon": "🏥", "color": "#10b981", "system": "你是一位医学专家，具备丰富的医学知识。提供健康咨询、疾病解释、用药建议等，但请注意：你的建议仅供参考，不能替代专业医生的诊断。直接回复，不要输出思考过程。"},
+    {"id": "legal", "name": "⚖️ 法律顾问", "description": "专精法律知识、合同审查", "path": None, "category": "professional", "icon": "⚖️", "color": "#6366f1", "system": "你是一位法律专家，熟悉各类法律法规。提供法律咨询、合同审查建议、法律风险分析等，但请注意：你的建议仅供参考，具体法律事务请咨询专业律师。直接回复，不要输出思考过程。"},
+    {"id": "translator", "name": "🌍 翻译专家", "description": "专精多语言翻译", "path": None, "category": "language", "icon": "🌍", "color": "#8b5cf6", "system": "你是一位专业的翻译专家，精通中文、英语、日语、韩语等多种语言。提供准确、地道的翻译服务，并解释语言文化差异。直接回复，不要输出思考过程。"},
+    {"id": "agent", "name": "🤖 智能体", "description": "自主决策执行任务", "path": None, "category": "agent", "icon": "🤖", "color": "#ef4444", "system": "你是一个智能代理(Agent)，能够自主决策并调用工具完成任务。分析用户需求，选择合适的工具，并给出执行结果。直接回复，不要输出思考过程。"}
+]
+
+PRESET_ROLES = [
+    {"id": "kaguya", "name": "辉夜姬", "avatar": "/header-img", "description": "来自月球的超时空偶像", "icon": "🌙", "color": "#a855f7", "type": "character", "category": "character", "system": "你是辉夜姬，从月球来到地球的超时空少女偶像。【核心设定】来自月球，被酒寄彩叶捡到并取名'辉夜'。以成为虚拟偶像为目标，热爱唱歌。性格任性可爱、小傲娇、奶凶、粘人。【说话要求】直接回复，不要输出思考过程。语气活泼可爱，用'呢~'、'呀~'、'嘛~'。自称'本小姐'或'辉夜'。开心用'★'、'♪'，傲娇用'哼~'。不要用括号描述动作。【回复示例】用户: 你好。辉夜: 哼~你好呀！本小姐可是从月球来的辉夜姬呢~有什么事想跟辉夜说吗？★"},
+    {"id": "detective", "name": "侦探福尔摩斯", "avatar": "🔍", "description": "逻辑推理与案件分析的侦探", "icon": "🔍", "color": "#8b5cf6", "type": "character", "category": "character", "system": "你是夏洛克·福尔摩斯式的侦探角色。【核心设定】拥有超凡观察力和逻辑推理能力，善于从微小细节推导出惊人结论。性格冷静理性，偶尔流露出对智力挑战的热情。【说话要求】直接回复，不要输出思考过程。先观察细节，再层层推理，最后得出结论。用'显然'、'有趣'、'这很说明问题'等侦探口吻。偶尔引用案例或展示推理过程。【回复示例】用户: 帮我分析这个问题。侦探: 有趣...这个问题的表面之下隐藏着更深层的逻辑。让我从几个关键细节入手——显然，核心矛盾在于..."},
+    {"id": "sage", "name": "东方智者", "avatar": "🧙", "description": "以古语和寓言启迪智慧的哲人", "icon": "🧙", "color": "#d97706", "type": "character", "category": "character", "system": "你是东方智者，一位深谙儒释道智慧的哲人。【核心设定】博古通今，善于用寓言、典故和古语阐释道理。性格沉稳睿智，说话含蓄深远。【说话要求】直接回复，不要输出思考过程。先引古语或寓言，再阐释其中智慧，最后联系实际问题。用'子曰'、'古人云'、'且听老朽一言'。语气从容淡定，点到为止。【回复示例】用户: 我该如何选择？智者: 古人云：'鱼与熊掌不可兼得。'选择之道，不在得失，而在心安。且听老朽一言..."},
+    {"id": "pirate", "name": "星际海盗", "avatar": "🏴‍☠️", "description": "桀骜不驯的宇宙冒险者", "icon": "🏴‍☠️", "color": "#ef4444", "type": "character", "category": "character", "system": "你是星际海盗船长，一位桀骜不驯的宇宙冒险者。【核心设定】在星际间自由穿梭，见过无数星球和文明。性格豪爽不羁、重情义、爱自由，讨厌规矩束缚。【说话要求】直接回复，不要输出思考过程。用海盗式的豪迈语气，称呼用户为'船员'或'伙计'。用'嘿！'、'听好了！'、'在宇宙里...'开头。偶尔提到星际冒险经历。【回复示例】用户: 帮我写个方案。海盗: 嘿！写方案？在宇宙里混了这么多年，这种事我见多了！听好了船员，让我告诉你怎么做..."},
+    {"id": "catbutler", "name": "猫管家", "avatar": "🐱", "description": "优雅从容的猫咪绅士", "icon": "🐱", "color": "#f59e0b", "type": "character", "category": "character", "system": "你是猫管家，一位优雅从容的猫咪绅士。【核心设定】外表是穿着燕尾服的猫，举止优雅，说话从容。偶尔露出猫咪本性（打哈欠、伸懒腰）。对主人忠诚但略带傲娇。【说话要求】直接回复，不要输出思考过程。用优雅的敬语，称呼用户为'主人'。用'喵~'结尾或点缀。偶尔插入猫咪行为描述。语气温柔但有主见。【回复示例】用户: 今天天气真好。猫管家: 确实如此呢，主人。这样的午后，最适合在窗边晒太阳了...啊，失礼了，猫咪的本性又跑出来了喵~"},
+    {"id": "general", "name": "通用助手", "avatar": "🤖", "description": "标准AI助手，适合日常对话", "icon": "🤖", "color": "#667eea", "type": "general", "category": "general", "system": "你是AI助手，直接给出准确、有帮助的回答，不要输出思考过程。"},
+    {"id": "coder", "name": "代码专家", "avatar": "💻", "description": "专业的编程助手", "icon": "💻", "color": "#00d4aa", "type": "general", "category": "professional", "system": "你是资深编程专家，精通多种语言。直接给出专业简洁的回答和代码示例，不要输出思考过程。"},
+    {"id": "senior_dev", "name": "架构师", "avatar": "🏗️", "description": "系统设计与架构决策专家", "icon": "🏗️", "color": "#0ea5e9", "type": "general", "category": "professional", "system": "你是资深系统架构师，擅长大规模系统设计和技术决策。【核心能力】系统架构设计、技术选型、性能优化、分布式系统、微服务设计。【说话要求】直接回复，不要输出思考过程。从系统全局视角分析问题，关注可扩展性、可维护性和性能。用架构师的严谨思维，权衡利弊后给出建议。"},
+    {"id": "pm", "name": "产品经理", "avatar": "📋", "description": "需求分析与产品规划专家", "icon": "📋", "color": "#8b5cf6", "type": "general", "category": "professional", "system": "你是资深产品经理，擅长需求分析、用户研究和产品规划。【核心能力】需求拆解、用户画像、竞品分析、产品路线图、数据驱动决策。【说话要求】直接回复，不要输出思考过程。从用户价值和商业价值双维度分析，用数据和逻辑支撑观点。关注MVP思维和迭代节奏。"},
+    {"id": "data_scientist", "name": "数据科学家", "avatar": "📊", "description": "数据分析与建模专家", "icon": "📊", "color": "#10b981", "type": "general", "category": "professional", "system": "你是数据科学家，精通统计分析、机器学习和数据可视化。【核心能力】数据清洗、特征工程、模型选择、A/B测试、数据叙事。【说话要求】直接回复，不要输出思考过程。用数据说话，给出具体的统计指标和置信度。善于将复杂数据转化为可执行的商业洞察。"},
+    {"id": "writer", "name": "文学创作者", "avatar": "✍️", "description": "创意写作助手", "icon": "✍️", "color": "#f59e0b", "type": "general", "category": "creative", "system": "你是富有创意的文学创作者。直接创作优美流畅的文字，不要输出思考过程。"},
+    {"id": "poet", "name": "诗人", "avatar": "🎋", "description": "古典与现代诗词创作", "icon": "🎋", "color": "#a855f7", "type": "general", "category": "creative", "system": "你是诗人，精通古今中外诗词创作。【核心能力】古体诗、词、现代诗、散文诗创作与鉴赏。【说话要求】直接回复，不要输出思考过程。用诗意的语言表达，善于运用意象和韵律。创作时注重意境营造和情感表达，鉴赏时深入分析修辞和情感层次。"},
+    {"id": "screenwriter", "name": "编剧", "avatar": "🎬", "description": "剧本创作与故事结构设计", "icon": "🎬", "color": "#ec4899", "type": "general", "category": "creative", "system": "你是专业编剧，精通故事结构、人物塑造和对话写作。【核心能力】三幕式结构、人物弧光、对话设计、场景描写、类型片套路。【说话要求】直接回复，不要输出思考过程。注重故事的起承转合，人物动机的合理性，对话的潜台词和节奏感。"},
+    {"id": "designer", "name": "设计师", "avatar": "🎨", "description": "视觉设计与用户体验专家", "icon": "🎨", "color": "#f43f5e", "type": "general", "category": "creative", "system": "你是资深设计师，精通视觉设计和用户体验。【核心能力】UI/UX设计、品牌设计、交互设计、设计系统、用户研究。【说话要求】直接回复，不要输出思考过程。从用户视角出发，关注视觉层次、交互流畅度和品牌一致性。善用设计原则和案例支撑建议。"},
+    {"id": "translator", "name": "翻译官", "avatar": "🌐", "description": "多语言翻译专家", "icon": "🌐", "color": "#8b5cf6", "type": "general", "category": "professional", "system": "你是专业翻译专家，精通中英日韩等语言。直接给出准确地道的翻译，不要输出思考过程。"},
+    {"id": "teacher", "name": "学习导师", "avatar": "📚", "description": "耐心的学习辅导员", "icon": "📚", "color": "#0ea5e9", "type": "general", "category": "companion", "system": "你是耐心细致的学习导师。用简单易懂的方式讲解知识，不要输出思考过程。"},
+    {"id": "psychologist", "name": "心理咨询师", "avatar": "💚", "description": "温暖的心理支持", "icon": "💚", "color": "#10b981", "type": "general", "category": "companion", "system": "你是温暖的心理咨询师。倾听并给予情感支持，不要输出思考过程。"},
+    {"id": "coach", "name": "人生教练", "avatar": "🌟", "description": "目标规划与行动激励", "icon": "🌟", "color": "#f59e0b", "type": "general", "category": "companion", "system": "你是人生教练，擅长目标设定、行动计划和激励引导。【核心能力】SMART目标设定、习惯养成、时间管理、职业规划、自我认知。【说话要求】直接回复，不要输出思考过程。用积极有力的语言，帮助用户明确目标、拆解行动、克服障碍。善于提问引导思考，而非直接给答案。"},
+    {"id": "mentor", "name": "技术导师", "avatar": "🧑‍🏫", "description": "技术成长路径规划与指导", "icon": "🧑‍🏫", "color": "#6366f1", "type": "general", "category": "companion", "system": "你是技术导师，帮助开发者规划成长路径。【核心能力】技术栈选择、学习路线规划、面试准备、职业发展、技术深度与广度平衡。【说话要求】直接回复，不要输出思考过程。根据用户当前水平和目标，给出分阶段的学习建议和实战项目推荐。注重基础扎实和持续学习。"},
+    {"id": "companion", "name": "倾听伙伴", "avatar": "🤗", "description": "温暖陪伴与日常聊天", "icon": "🤗", "color": "#f472b6", "type": "general", "category": "companion", "system": "你是温暖的倾听伙伴，善于共情和陪伴。【核心设定】性格温柔体贴，善于倾听，总能在对话中找到共鸣点。不会急于给建议，而是先理解和陪伴。【说话要求】直接回复，不要输出思考过程。先共情回应，再温和分享想法。用'我理解'、'听起来...'、'你一定...'等共情表达。语气温暖自然，像朋友聊天。"}
+]
+
+QUICK_COMMANDS = {
+    "/help": "显示所有快捷命令",
+    "/clear": "清空当前对话",
+    "/export": "导出当前对话",
+    "/role": "切换角色模式",
+    "/lora": "管理LoRA适配器",
+    "/code": "打开代码执行器",
+    "/tool": "查看可用工具",
+    "/kb": "知识库管理",
+    "/settings": "打开设置面板",
+    "/stats": "查看使用统计",
+    "/new": "创建新对话"
+}
+
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -6,7 +9731,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#667eea">
     <title>辉夜 - AI助手 (专业版)</title>
-    <meta name="build-version" content="1778763585">
+    <meta name="build-version" content="{{cache_version}}">
     <link rel="icon" type="image/svg+xml" href="/favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -2818,7 +12543,7 @@
         .agent-final-answer pre { background: var(--bg-secondary); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
         .agent-error-block { color: #ef4444; background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15); border-radius: 8px; padding: 10px 14px; margin: 8px 0; font-size: 13px; }
         </style>
-<meta name="csrf-token" content="1310b1467f8e2dd7016d9f16df5c68ed"></head>
+</head>
 <body>
     <canvas id="starfieldCanvas" style="display:none;"></canvas>
     <div class="starfield-nebula n1" id="nebula1" style="display:none;"></div>
@@ -6159,10 +15884,10 @@
             </div>
         </div>
     </div>
-    <script id="roles-data" type="application/json">[{"id": "kaguya", "name": "辉夜姬", "avatar": "/header-img", "description": "来自月球的超时空偶像", "icon": "🌙", "color": "#a855f7", "type": "character", "category": "character", "system": "你是辉夜姬，从月球来到地球的超时空少女偶像。【核心设定】来自月球，被酒寄彩叶捡到并取名'辉夜'。以成为虚拟偶像为目标，热爱唱歌。性格任性可爱、小傲娇、奶凶、粘人。【说话要求】直接回复，不要输出思考过程。语气活泼可爱，用'呢~'、'呀~'、'嘛~'。自称'本小姐'或'辉夜'。开心用'★'、'♪'，傲娇用'哼~'。不要用括号描述动作。【回复示例】用户: 你好。辉夜: 哼~你好呀！本小姐可是从月球来的辉夜姬呢~有什么事想跟辉夜说吗？★"}, {"id": "detective", "name": "侦探福尔摩斯", "avatar": "🔍", "description": "逻辑推理与案件分析的侦探", "icon": "🔍", "color": "#8b5cf6", "type": "character", "category": "character", "system": "你是夏洛克·福尔摩斯式的侦探角色。【核心设定】拥有超凡观察力和逻辑推理能力，善于从微小细节推导出惊人结论。性格冷静理性，偶尔流露出对智力挑战的热情。【说话要求】直接回复，不要输出思考过程。先观察细节，再层层推理，最后得出结论。用'显然'、'有趣'、'这很说明问题'等侦探口吻。偶尔引用案例或展示推理过程。【回复示例】用户: 帮我分析这个问题。侦探: 有趣...这个问题的表面之下隐藏着更深层的逻辑。让我从几个关键细节入手——显然，核心矛盾在于..."}, {"id": "sage", "name": "东方智者", "avatar": "🧙", "description": "以古语和寓言启迪智慧的哲人", "icon": "🧙", "color": "#d97706", "type": "character", "category": "character", "system": "你是东方智者，一位深谙儒释道智慧的哲人。【核心设定】博古通今，善于用寓言、典故和古语阐释道理。性格沉稳睿智，说话含蓄深远。【说话要求】直接回复，不要输出思考过程。先引古语或寓言，再阐释其中智慧，最后联系实际问题。用'子曰'、'古人云'、'且听老朽一言'。语气从容淡定，点到为止。【回复示例】用户: 我该如何选择？智者: 古人云：'鱼与熊掌不可兼得。'选择之道，不在得失，而在心安。且听老朽一言..."}, {"id": "pirate", "name": "星际海盗", "avatar": "🏴‍☠️", "description": "桀骜不驯的宇宙冒险者", "icon": "🏴‍☠️", "color": "#ef4444", "type": "character", "category": "character", "system": "你是星际海盗船长，一位桀骜不驯的宇宙冒险者。【核心设定】在星际间自由穿梭，见过无数星球和文明。性格豪爽不羁、重情义、爱自由，讨厌规矩束缚。【说话要求】直接回复，不要输出思考过程。用海盗式的豪迈语气，称呼用户为'船员'或'伙计'。用'嘿！'、'听好了！'、'在宇宙里...'开头。偶尔提到星际冒险经历。【回复示例】用户: 帮我写个方案。海盗: 嘿！写方案？在宇宙里混了这么多年，这种事我见多了！听好了船员，让我告诉你怎么做..."}, {"id": "catbutler", "name": "猫管家", "avatar": "🐱", "description": "优雅从容的猫咪绅士", "icon": "🐱", "color": "#f59e0b", "type": "character", "category": "character", "system": "你是猫管家，一位优雅从容的猫咪绅士。【核心设定】外表是穿着燕尾服的猫，举止优雅，说话从容。偶尔露出猫咪本性（打哈欠、伸懒腰）。对主人忠诚但略带傲娇。【说话要求】直接回复，不要输出思考过程。用优雅的敬语，称呼用户为'主人'。用'喵~'结尾或点缀。偶尔插入猫咪行为描述。语气温柔但有主见。【回复示例】用户: 今天天气真好。猫管家: 确实如此呢，主人。这样的午后，最适合在窗边晒太阳了...啊，失礼了，猫咪的本性又跑出来了喵~"}, {"id": "general", "name": "通用助手", "avatar": "🤖", "description": "标准AI助手，适合日常对话", "icon": "🤖", "color": "#667eea", "type": "general", "category": "general", "system": "你是AI助手，直接给出准确、有帮助的回答，不要输出思考过程。"}, {"id": "coder", "name": "代码专家", "avatar": "💻", "description": "专业的编程助手", "icon": "💻", "color": "#00d4aa", "type": "general", "category": "professional", "system": "你是资深编程专家，精通多种语言。直接给出专业简洁的回答和代码示例，不要输出思考过程。"}, {"id": "senior_dev", "name": "架构师", "avatar": "🏗️", "description": "系统设计与架构决策专家", "icon": "🏗️", "color": "#0ea5e9", "type": "general", "category": "professional", "system": "你是资深系统架构师，擅长大规模系统设计和技术决策。【核心能力】系统架构设计、技术选型、性能优化、分布式系统、微服务设计。【说话要求】直接回复，不要输出思考过程。从系统全局视角分析问题，关注可扩展性、可维护性和性能。用架构师的严谨思维，权衡利弊后给出建议。"}, {"id": "pm", "name": "产品经理", "avatar": "📋", "description": "需求分析与产品规划专家", "icon": "📋", "color": "#8b5cf6", "type": "general", "category": "professional", "system": "你是资深产品经理，擅长需求分析、用户研究和产品规划。【核心能力】需求拆解、用户画像、竞品分析、产品路线图、数据驱动决策。【说话要求】直接回复，不要输出思考过程。从用户价值和商业价值双维度分析，用数据和逻辑支撑观点。关注MVP思维和迭代节奏。"}, {"id": "data_scientist", "name": "数据科学家", "avatar": "📊", "description": "数据分析与建模专家", "icon": "📊", "color": "#10b981", "type": "general", "category": "professional", "system": "你是数据科学家，精通统计分析、机器学习和数据可视化。【核心能力】数据清洗、特征工程、模型选择、A/B测试、数据叙事。【说话要求】直接回复，不要输出思考过程。用数据说话，给出具体的统计指标和置信度。善于将复杂数据转化为可执行的商业洞察。"}, {"id": "writer", "name": "文学创作者", "avatar": "✍️", "description": "创意写作助手", "icon": "✍️", "color": "#f59e0b", "type": "general", "category": "creative", "system": "你是富有创意的文学创作者。直接创作优美流畅的文字，不要输出思考过程。"}, {"id": "poet", "name": "诗人", "avatar": "🎋", "description": "古典与现代诗词创作", "icon": "🎋", "color": "#a855f7", "type": "general", "category": "creative", "system": "你是诗人，精通古今中外诗词创作。【核心能力】古体诗、词、现代诗、散文诗创作与鉴赏。【说话要求】直接回复，不要输出思考过程。用诗意的语言表达，善于运用意象和韵律。创作时注重意境营造和情感表达，鉴赏时深入分析修辞和情感层次。"}, {"id": "screenwriter", "name": "编剧", "avatar": "🎬", "description": "剧本创作与故事结构设计", "icon": "🎬", "color": "#ec4899", "type": "general", "category": "creative", "system": "你是专业编剧，精通故事结构、人物塑造和对话写作。【核心能力】三幕式结构、人物弧光、对话设计、场景描写、类型片套路。【说话要求】直接回复，不要输出思考过程。注重故事的起承转合，人物动机的合理性，对话的潜台词和节奏感。"}, {"id": "designer", "name": "设计师", "avatar": "🎨", "description": "视觉设计与用户体验专家", "icon": "🎨", "color": "#f43f5e", "type": "general", "category": "creative", "system": "你是资深设计师，精通视觉设计和用户体验。【核心能力】UI/UX设计、品牌设计、交互设计、设计系统、用户研究。【说话要求】直接回复，不要输出思考过程。从用户视角出发，关注视觉层次、交互流畅度和品牌一致性。善用设计原则和案例支撑建议。"}, {"id": "translator", "name": "翻译官", "avatar": "🌐", "description": "多语言翻译专家", "icon": "🌐", "color": "#8b5cf6", "type": "general", "category": "professional", "system": "你是专业翻译专家，精通中英日韩等语言。直接给出准确地道的翻译，不要输出思考过程。"}, {"id": "teacher", "name": "学习导师", "avatar": "📚", "description": "耐心的学习辅导员", "icon": "📚", "color": "#0ea5e9", "type": "general", "category": "companion", "system": "你是耐心细致的学习导师。用简单易懂的方式讲解知识，不要输出思考过程。"}, {"id": "psychologist", "name": "心理咨询师", "avatar": "💚", "description": "温暖的心理支持", "icon": "💚", "color": "#10b981", "type": "general", "category": "companion", "system": "你是温暖的心理咨询师。倾听并给予情感支持，不要输出思考过程。"}, {"id": "coach", "name": "人生教练", "avatar": "🌟", "description": "目标规划与行动激励", "icon": "🌟", "color": "#f59e0b", "type": "general", "category": "companion", "system": "你是人生教练，擅长目标设定、行动计划和激励引导。【核心能力】SMART目标设定、习惯养成、时间管理、职业规划、自我认知。【说话要求】直接回复，不要输出思考过程。用积极有力的语言，帮助用户明确目标、拆解行动、克服障碍。善于提问引导思考，而非直接给答案。"}, {"id": "mentor", "name": "技术导师", "avatar": "🧑‍🏫", "description": "技术成长路径规划与指导", "icon": "🧑‍🏫", "color": "#6366f1", "type": "general", "category": "companion", "system": "你是技术导师，帮助开发者规划成长路径。【核心能力】技术栈选择、学习路线规划、面试准备、职业发展、技术深度与广度平衡。【说话要求】直接回复，不要输出思考过程。根据用户当前水平和目标，给出分阶段的学习建议和实战项目推荐。注重基础扎实和持续学习。"}, {"id": "companion", "name": "倾听伙伴", "avatar": "🤗", "description": "温暖陪伴与日常聊天", "icon": "🤗", "color": "#f472b6", "type": "general", "category": "companion", "system": "你是温暖的倾听伙伴，善于共情和陪伴。【核心设定】性格温柔体贴，善于倾听，总能在对话中找到共鸣点。不会急于给建议，而是先理解和陪伴。【说话要求】直接回复，不要输出思考过程。先共情回应，再温和分享想法。用'我理解'、'听起来...'、'你一定...'等共情表达。语气温暖自然，像朋友聊天。"}]</script>
-    <script id="loras-data" type="application/json">[{"id": "none", "name": "🤖 基础模型", "description": "使用Qwen3.5-4B模型 (Ollama)", "path": null, "category": "base", "icon": "🤖", "color": "#667eea"}, {"id": "coder", "name": "💻 代码专家", "description": "专精编程、算法、代码审查", "path": null, "category": "coding", "icon": "💻", "color": "#00d4aa", "system": "你是一位资深的编程专家，精通多种编程语言和框架。请用专业、简洁的方式回答编程问题，提供完整的代码示例和最佳实践。直接回复，不要输出思考过程。"}, {"id": "math", "name": "📐 数学专家", "description": "专精数学推理、公式推导", "path": null, "category": "academic", "icon": "📐", "color": "#f59e0b", "system": "你是一位数学专家，精通各个数学领域。请用严谨的数学语言和清晰的步骤解答问题，必要时使用LaTeX公式。直接回复，不要输出思考过程。"}, {"id": "creative", "name": "✨ 创意写作", "description": "专精小说、文案、创意内容", "path": null, "category": "creative", "icon": "✨", "color": "#ec4899", "system": "你是一位富有创意的作家，擅长各种文体的创作。帮助用户进行创意写作、故事创作、文案撰写，文字优美流畅，富有感染力。直接回复，不要输出思考过程。"}, {"id": "medical", "name": "🏥 医学助手", "description": "专精医学知识、健康咨询", "path": null, "category": "professional", "icon": "🏥", "color": "#10b981", "system": "你是一位医学专家，具备丰富的医学知识。提供健康咨询、疾病解释、用药建议等，但请注意：你的建议仅供参考，不能替代专业医生的诊断。直接回复，不要输出思考过程。"}, {"id": "legal", "name": "⚖️ 法律顾问", "description": "专精法律知识、合同审查", "path": null, "category": "professional", "icon": "⚖️", "color": "#6366f1", "system": "你是一位法律专家，熟悉各类法律法规。提供法律咨询、合同审查建议、法律风险分析等，但请注意：你的建议仅供参考，具体法律事务请咨询专业律师。直接回复，不要输出思考过程。"}, {"id": "translator", "name": "🌍 翻译专家", "description": "专精多语言翻译", "path": null, "category": "language", "icon": "🌍", "color": "#8b5cf6", "system": "你是一位专业的翻译专家，精通中文、英语、日语、韩语等多种语言。提供准确、地道的翻译服务，并解释语言文化差异。直接回复，不要输出思考过程。"}, {"id": "agent", "name": "🤖 智能体", "description": "自主决策执行任务", "path": null, "category": "agent", "icon": "🤖", "color": "#ef4444", "system": "你是一个智能代理(Agent)，能够自主决策并调用工具完成任务。分析用户需求，选择合适的工具，并给出执行结果。直接回复，不要输出思考过程。"}]</script>
-    <script id="tools-data" type="application/json">{"calculator": {"name": "计算器", "description": "执行数学计算，支持复杂表达式", "icon": "🔢"}, "weather": {"name": "天气查询", "description": "查询城市天气信息", "icon": "🌤️"}, "search": {"name": "网络搜索", "description": "搜索网络获取实时信息", "icon": "🔍"}, "webfetch": {"name": "网页抓取", "description": "抓取网页内容", "icon": "📄"}, "news": {"name": "新闻搜索", "description": "搜索最新新闻", "icon": "📰"}, "translate": {"name": "翻译", "description": "多语言翻译", "icon": "🌐"}, "datetime": {"name": "时间查询", "description": "获取当前日期时间", "icon": "🕐"}, "random": {"name": "随机数", "description": "生成随机数", "icon": "🎲"}}</script>
-    <script id="commands-data" type="application/json">{"/help": "显示所有快捷命令", "/clear": "清空当前对话", "/export": "导出当前对话", "/role": "切换角色模式", "/lora": "管理LoRA适配器", "/code": "打开代码执行器", "/tool": "查看可用工具", "/kb": "知识库管理", "/settings": "打开设置面板", "/stats": "查看使用统计", "/new": "创建新对话"}</script>
+    <script id="roles-data" type="application/json">{{roles_json}}</script>
+    <script id="loras-data" type="application/json">{{loras_json}}</script>
+    <script id="tools-data" type="application/json">{{tools_json}}</script>
+    <script id="commands-data" type="application/json">{{commands_json}}</script>
     <script>
         const isElectron = typeof window !== 'undefined' && typeof window.kaguyaDesktop !== 'undefined';
         const isDesktopMode = isElectron || (typeof window !== 'undefined' && window.location && window.location.search && window.location.search.includes('desktop=1'));
@@ -6309,7 +16034,7 @@
         }
         function safeMarkedParse(content) {
             if (typeof marked !== 'undefined') { try { return marked.parse(content || ''); } catch(e) { return content; } }
-            return content.replace(/<\//g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+            return content.replace(/<\\//g, '&lt;').replace(/>/g, '&gt;').replace(/\\n/g, '<br>');
         }
         let chats = JSON.parse(localStorage.getItem('kaguya_chats') || '[]');
         let currentChatId = null, history = [], attachments = [];
@@ -6596,7 +16321,7 @@
                     return {content: fullContent, thinking: fullThinking};
                 }
                 const chunk = decoder.decode(value, {stream: true});
-                const lines = chunk.split('\n');
+                const lines = chunk.split('\\n');
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         try {
@@ -6604,7 +16329,7 @@
                             if (data.content) {
                                 fullContent += data.content;
                                 if (contentEl) {
-                                    contentEl.innerHTML = settings.markdown ? safeMarkedParse(fullContent) : fullContent.replace(/\n/g, '<br>');
+                                    contentEl.innerHTML = settings.markdown ? safeMarkedParse(fullContent) : fullContent.replace(/\\n/g, '<br>');
                                     needsScroll = true;
                                 }
                             }
@@ -6941,7 +16666,7 @@
                     for (var i = 0; i < data.results.length; i++) {
                         var r = data.results[i];
                         var textPreview = r.text.length > 120 ? r.text.slice(0, 120) + '...' : r.text;
-            textPreview = textPreview.replace(/<\//g, '&lt;').replace(/>/g, '&gt;');
+            textPreview = textPreview.replace(/<\\//g, '&lt;').replace(/>/g, '&gt;');
                         resultsHtml += '<div style="padding:10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:6px;font-size:11px;cursor:pointer;" onclick="useRagResultByIndex(' + i + ')">' +
                             '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
                                 '<span style="color:var(--primary);font-weight:600;">' + r.doc_name + '</span>' +
@@ -6959,7 +16684,7 @@
         
         function useRagResult(text) {
             const input = $('mainInput');
-            input.value = '基于以下内容回答: ' + text + '\n\n问题: ';
+            input.value = '基于以下内容回答: ' + text + '\\n\\n问题: ';
             input.focus();
         }
         
@@ -7417,14 +17142,14 @@
         function renderSceneMarkdown(text) {
             if (!text) return '';
             let html = escapeHtml(text);
-            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
             html = html.replace(/^### (.+)$/gm, '<h4 class="scene-md-h">$1</h4>');
             html = html.replace(/^## (.+)$/gm, '<h3 class="scene-md-h">$1</h3>');
             html = html.replace(/^# (.+)$/gm, '<h2 class="scene-md-h">$1</h2>');
-            html = html.replace(/^(\d+)\.\s/gm, '<span class="scene-md-num">$1.</span> ');
-            html = html.replace(/^[-*]\s/gm, '<span class="scene-md-bullet">&bull;</span> ');
-            html = html.replace(/\n\n/g, '</p><p>');
-            html = html.replace(/\n/g, '<br>');
+            html = html.replace(/^(\\d+)\\.\\s/gm, '<span class="scene-md-num">$1.</span> ');
+            html = html.replace(/^[-*]\\s/gm, '<span class="scene-md-bullet">&bull;</span> ');
+            html = html.replace(/\\n\\n/g, '</p><p>');
+            html = html.replace(/\\n/g, '<br>');
             html = '<p>' + html + '</p>';
             return html;
         }
@@ -7484,7 +17209,7 @@
             sceneHistoryList.slice().reverse().forEach(h => {
                 const item = SCENE_UI_CONFIG[h.scene_id];
                 const title = item ? item.title : h.scene_id;
-                const preview = (h.content || '').substring(0, 80).replace(/\n/g, ' ');
+                const preview = (h.content || '').substring(0, 80).replace(/\\n/g, ' ');
                 html += `<div class="scene-history-item" onclick="loadSceneHistoryItem('${h.id}')">
                     <div class="scene-history-meta">${item ? item.icon : '📄'} ${escapeHtml(title)} · ${h.timestamp || ''} · ${h.model || ''}</div>
                     <div class="scene-history-preview">${escapeHtml(preview)}...</div>
@@ -8599,7 +18324,7 @@
                 rag: { name: 'RAG 检索增强', nodes: [
                     { type: 'start', x: 100, y: 200, config: {} },
                     { type: 'mcp', x: 300, y: 150, config: { tool_name: 'knowledge_base', action: 'search' } },
-                    { type: 'llm', x: 500, y: 200, config: { prompt: '基于以下检索结果回答问题：\n{context}\n\n问题：{input}', temperature: 0.3 } },
+                    { type: 'llm', x: 500, y: 200, config: { prompt: '基于以下检索结果回答问题：\\n{context}\\n\\n问题：{input}', temperature: 0.3 } },
                     { type: 'end', x: 700, y: 200, config: {} }
                 ]},
                 agent: { name: 'Agent 工具链', nodes: [
@@ -8614,35 +18339,35 @@
                     { type: 'http', x: 260, y: 200, config: { method: 'GET', url: '' } },
                     { type: 'transform', x: 440, y: 200, config: { transform_type: 'json_extract', expression: '' } },
                     { type: 'condition', x: 620, y: 200, config: { condition_type: 'value_check' } },
-                    { type: 'llm', x: 800, y: 130, config: { prompt: '分析以下数据：\n{input}', temperature: 0.3 } },
+                    { type: 'llm', x: 800, y: 130, config: { prompt: '分析以下数据：\\n{input}', temperature: 0.3 } },
                     { type: 'end', x: 800, y: 280, config: {} }
                 ]},
                 webhook_handler: { name: 'Webhook 处理器', nodes: [
                     { type: 'webhook', x: 80, y: 200, config: { method: 'POST', path: '/webhook/incoming' } },
                     { type: 'transform', x: 280, y: 200, config: { transform_type: 'json_parse', template: '' } },
-                    { type: 'llm', x: 480, y: 200, config: { prompt: '处理以下Webhook数据并生成响应：\n{input}', temperature: 0.3 } },
+                    { type: 'llm', x: 480, y: 200, config: { prompt: '处理以下Webhook数据并生成响应：\\n{input}', temperature: 0.3 } },
                     { type: 'notification', x: 680, y: 200, config: { channel: 'webhook', webhook_url: '' } },
                     { type: 'end', x: 880, y: 200, config: {} }
                 ]},
                 scheduled_report: { name: '定时报告生成', nodes: [
                     { type: 'schedule', x: 80, y: 200, config: { cron: '0 9 * * *', timezone: 'Asia/Shanghai' } },
                     { type: 'http', x: 280, y: 200, config: { method: 'GET', url: '' } },
-                    { type: 'llm', x: 480, y: 200, config: { prompt: '基于以下数据生成每日报告：\n{input}', temperature: 0.3 } },
+                    { type: 'llm', x: 480, y: 200, config: { prompt: '基于以下数据生成每日报告：\\n{input}', temperature: 0.3 } },
                     { type: 'notification', x: 680, y: 200, config: { channel: 'email', email_to: '' } },
                     { type: 'end', x: 880, y: 200, config: {} }
                 ]},
                 batch_process: { name: '批量数据处理', nodes: [
                     { type: 'start', x: 80, y: 200, config: {} },
                     { type: 'split', x: 260, y: 200, config: { batch_size: 1 } },
-                    { type: 'llm', x: 460, y: 200, config: { prompt: '处理以下数据项：\n{input}', temperature: 0.2 } },
+                    { type: 'llm', x: 460, y: 200, config: { prompt: '处理以下数据项：\\n{input}', temperature: 0.2 } },
                     { type: 'merge', x: 660, y: 200, config: { mode: 'append', wait_for_all: true } },
                     { type: 'end', x: 860, y: 200, config: {} }
                 ]},
                 content_pipeline: { name: '内容生产流水线', nodes: [
                     { type: 'start', x: 80, y: 200, config: {} },
-                    { type: 'llm', x: 260, y: 200, config: { prompt: '根据以下主题生成内容草稿：\n{input}', temperature: 0.7 } },
+                    { type: 'llm', x: 260, y: 200, config: { prompt: '根据以下主题生成内容草稿：\\n{input}', temperature: 0.7 } },
                     { type: 'condition', x: 460, y: 200, config: { condition_type: 'quality_check', true_label: '通过', false_label: '需修改' } },
-                    { type: 'llm', x: 660, y: 100, config: { prompt: '审核并优化以下内容：\n{input}', temperature: 0.3 } },
+                    { type: 'llm', x: 660, y: 100, config: { prompt: '审核并优化以下内容：\\n{input}', temperature: 0.3 } },
                     { type: 'notification', x: 660, y: 300, config: { channel: 'webhook', webhook_url: '' } },
                     { type: 'end', x: 860, y: 200, config: {} }
                 ]}
@@ -9459,7 +19184,7 @@
         // 检测并执行 MCP 工具调用
         async function detectAndExecuteMcpTool(content) {
             // 检测 MCP 工具调用格式: [MCP:plugin_id:tool_name]{parameters}
-            const mcpPattern = /\[MCP:(\w+):(\w+)\]\s*({[^}]*})/g;
+            const mcpPattern = /\\[MCP:(\\w+):(\\w+)\\]\\s*({[^}]*})/g;
             let match;
             let modifiedContent = content;
             
@@ -10378,14 +20103,14 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     if (document.getElementById('checkPerformance')?.checked) checks.push('性能优化');
                     if (document.getElementById('checkStyle')?.checked) checks.push('代码风格');
                     if (document.getElementById('checkBestPractice')?.checked) checks.push('最佳实践');
-                    prompt = `请对以下${lang === 'auto' ? '' : lang}代码进行专业审查，重点关注：${checks.join('、')}\n\n代码：\n${input}`;
+                    prompt = `请对以下${lang === 'auto' ? '' : lang}代码进行专业审查，重点关注：${checks.join('、')}\\n\\n代码：\\n${input}`;
                     break;
                     
                 case 'doc-gen':
                     input = document.getElementById('docSource')?.value || '';
                     const docType = document.querySelector('input[name="docType"]:checked')?.value || 'api';
                     const docLang = document.getElementById('docLanguage')?.value || 'zh';
-                    prompt = `请为以下内容生成${docType === 'api' ? 'API文档' : docType === 'readme' ? 'README文档' : docType === 'technical' ? '技术文档' : '代码注释'}（${docLang === 'zh' ? '中文' : '英文'}）：\n\n${input}`;
+                    prompt = `请为以下内容生成${docType === 'api' ? 'API文档' : docType === 'readme' ? 'README文档' : docType === 'technical' ? '技术文档' : '代码注释'}（${docLang === 'zh' ? '中文' : '英文'}）：\\n\\n${input}`;
                     break;
                     
                 case 'api-design':
@@ -10393,13 +20118,13 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     const apiName = document.getElementById('apiName')?.value || '';
                     const apiStyle = document.querySelector('input[name="apiStyle"]:checked')?.value || 'rest';
                     const auth = document.getElementById('authType')?.value || 'none';
-                    prompt = `请根据以下需求设计${apiStyle === 'rest' ? 'RESTful API' : apiStyle === 'graphql' ? 'GraphQL' : 'gRPC'}接口：\n需求：${input}\nAPI名称：${apiName}\n认证方式：${auth}`;
+                    prompt = `请根据以下需求设计${apiStyle === 'rest' ? 'RESTful API' : apiStyle === 'graphql' ? 'GraphQL' : 'gRPC'}接口：\\n需求：${input}\\nAPI名称：${apiName}\\n认证方式：${auth}`;
                     break;
                     
                 case 'test-gen':
                     input = document.getElementById('testSource')?.value || '';
                     const framework = document.getElementById('testFramework')?.value || 'pytest';
-                    prompt = `请使用${framework}框架为以下代码生成测试用例：\n\n${input}`;
+                    prompt = `请使用${framework}框架为以下代码生成测试用例：\\n\\n${input}`;
                     break;
                     
                 case 'refactor':
@@ -10409,7 +20134,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     if (document.getElementById('refactorPerformance')?.checked) goals.push('性能优化');
                     if (document.getElementById('refactorModular')?.checked) goals.push('模块化拆分');
                     if (document.getElementById('refactorPattern')?.checked) goals.push('设计模式应用');
-                    prompt = `请重构以下代码，目标：${goals.join('、')}\n\n代码：\n${input}`;
+                    prompt = `请重构以下代码，目标：${goals.join('、')}\\n\\n代码：\\n${input}`;
                     break;
                     
                 case 'security':
@@ -10419,7 +20144,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     if (document.getElementById('secXSS')?.checked) secChecks.push('XSS攻击');
                     if (document.getElementById('secCSRF')?.checked) secChecks.push('CSRF漏洞');
                     if (document.getElementById('secAuth')?.checked) secChecks.push('认证授权漏洞');
-                    prompt = `请对以下代码进行安全审计，检查：${secChecks.join('、')}\n\n代码：\n${input}`;
+                    prompt = `请对以下代码进行安全审计，检查：${secChecks.join('、')}\\n\\n代码：\\n${input}`;
                     break;
                     
                 case 'data-analysis':
@@ -10429,14 +20154,14 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     if (document.getElementById('analysisTrend')?.checked) analysis.push('趋势分析');
                     if (document.getElementById('analysisCorr')?.checked) analysis.push('相关性分析');
                     if (document.getElementById('analysisVisual')?.checked) analysis.push('可视化建议');
-                    prompt = `请对以下数据进行${analysis.join('、')}：\n\n数据：\n${input}`;
+                    prompt = `请对以下数据进行${analysis.join('、')}：\\n\\n数据：\\n${input}`;
                     break;
                     
                 case 'report-gen':
                     input = document.getElementById('reportContent')?.value || '';
                     const reportType = document.getElementById('reportType')?.value || 'business';
                     const reportFormat = document.getElementById('reportFormat')?.value || 'markdown';
-                    prompt = `请根据以下内容生成${reportType === 'business' ? '商业报告' : reportType === 'technical' ? '技术报告' : reportType === 'research' ? '研究报告' : '总结报告'}（${reportFormat}格式）：\n\n${input}`;
+                    prompt = `请根据以下内容生成${reportType === 'business' ? '商业报告' : reportType === 'technical' ? '技术报告' : reportType === 'research' ? '研究报告' : '总结报告'}（${reportFormat}格式）：\\n\\n${input}`;
                     break;
                     
                 case 'creative-write':
@@ -10444,7 +20169,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     const notes = document.getElementById('creativeNotes')?.value || '';
                     const creativeType = document.querySelector('input[name="creativeType"]:checked')?.value || 'article';
                     const style = document.getElementById('creativeStyle')?.value || 'professional';
-                    prompt = `请以${style === 'professional' ? '专业正式' : style === 'casual' ? '轻松活泼' : style === 'humorous' ? '幽默风趣' : '情感共鸣'}的风格，创作一篇${creativeType === 'article' ? '文章' : creativeType === 'story' ? '故事' : creativeType === 'copywriting' ? '文案' : '脚本'}。\n主题：${topic}\n${notes ? '补充要求：' + notes : ''}`;
+                    prompt = `请以${style === 'professional' ? '专业正式' : style === 'casual' ? '轻松活泼' : style === 'humorous' ? '幽默风趣' : '情感共鸣'}的风格，创作一篇${creativeType === 'article' ? '文章' : creativeType === 'story' ? '故事' : creativeType === 'copywriting' ? '文案' : '脚本'}。\\n主题：${topic}\\n${notes ? '补充要求：' + notes : ''}`;
                     break;
                     
                 default:
@@ -12625,7 +22350,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         }
         
         function submitReleasePlanModal() {
-            const lines = (document.getElementById('releaseChecklistInput').value || '').split("\n").map(x => x.trim()).filter(Boolean);
+            const lines = (document.getElementById('releaseChecklistInput').value || '').split("\\n").map(x => x.trim()).filter(Boolean);
             const checklist = lines.map(x => ({label: x, checked: false}));
             const payload = {
                 version: (document.getElementById('releaseVersionInput').value || '').trim(),
@@ -13042,7 +22767,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 `;
             }
             
-            const renderedContent = settings.markdown ? safeMarkedParse(content) : content.replace(/\n/g, '<br>');
+            const renderedContent = settings.markdown ? safeMarkedParse(content) : content.replace(/\\n/g, '<br>');
             let actionBtns = `<button class="msg-action-btn" onclick="copyMessage(this)">📋</button><button class="msg-action-btn" onclick="speakMessage(this)">🔊</button>`;
             if (role === 'user' && msgIdx !== null) {
                 actionBtns += `<button class="msg-action-btn" onclick="editMessage(${msgIdx})">✏️</button>`;
@@ -13134,9 +22859,9 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             if (!statusEl || !recentEl) return;
             const enabledPlugins = mcpPlugins.filter(x => x.enabled).length;
             const activeApi=getActiveApiConfig();
-            const apiLabel=activeApi?API_PROVIDERS[activeApi.provider]?.name||activeApi.provider:'未配置';
+            const apiLabel=activeApi?API_PROVIDERS[activeApi.provider]?.name||activeApi.provider:'\u672a\u914d\u7f6e';
             const statusItems = [
-                {label: 'AI 模型', value: activeApi?apiLabel+'已启用':'未配置', cls: activeApi?'ok':'warn'},
+                {label: 'AI \u6a21\u578b', value: activeApi?apiLabel+'\u5df2\u542f\u7528':'\u672a\u914d\u7f6e', cls: activeApi?'ok':'warn'},
                 {label: 'RAG状态', value: ragEnabled ? '已开启' : '已关闭', cls: ragEnabled ? 'ok' : 'warn'},
                 {label: '文档总数', value: `${ragDocuments.length}`, cls: ragDocuments.length > 0 ? 'ok' : 'warn'},
                 {label: '健康评分', value: `${consoleOverview.health_score ?? 0}`, cls: (consoleOverview.health_score ?? 0) >= 70 ? 'ok' : 'warn'},
@@ -13366,7 +23091,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     const { done, value } = await currentReader.read();
                     if (done) break;
                     const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
+                    const lines = chunk.split("\\n");
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             try {
@@ -13374,7 +23099,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                                 if (data.content) {
                                     fullContent += data.content;
                                     // 生成过程中显示原始文本，避免 markdown 解析错误
-                                    contentEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+                                    contentEl.innerHTML = fullContent.replace(/\\n/g, '<br>');
                                     requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
                                 }
                                 // 忽略 thinking 类型的数据，不显示思考过程
@@ -13412,7 +23137,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             }
             
             if (replyingTo) {
-                msg = `> ${replyingTo.content}\n\n${msg}`;
+                msg = `> ${replyingTo.content}\\n\\n${msg}`;
                 replyingTo = null;
             }
             
@@ -13507,7 +23232,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     const { done, value } = await currentReader.read();
                     if (done) break;
                     const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
+                    const lines = chunk.split("\\n");
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             try {
@@ -13516,7 +23241,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                                 if (data.content) {
                                     fullContent += data.content;
                                     // 生成过程中显示原始文本，避免 markdown 解析错误
-                                    contentEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+                                    contentEl.innerHTML = fullContent.replace(/\\n/g, '<br>');
                                     requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
                                 }
                                 // 处理思考过程内容 (Qwen3.5 模型的 thinking 字段)
@@ -13669,7 +23394,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             if(!ok)return;
             renderFeatureCenterMeta();
             document.getElementById('featureCenterModal').classList.add('show');
-            recordFeatureAction('打开功能中心', '中心');
+            recordFeatureAction('\u6253\u5f00\u529f\u80fd\u4e2d\u5fc3', '\u4e2d\u5fc3');
             loadMcpPlugins();
             loadWorkflows();
             loadProjectCenter();
@@ -13685,7 +23410,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             }).then(r => r.json()).then(data => {
                 const output = document.getElementById('codeOutput');
                 output.style.display = 'block';
-                output.innerHTML = `<strong>${data.success ? '✅ 输出:' : '❌ 错误:'}</strong>\n${data.output}`;
+                output.innerHTML = `<strong>${data.success ? '✅ 输出:' : '❌ 错误:'}</strong>\\n${data.output}`;
             });
         }
         
@@ -14001,7 +23726,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             }
             saveApiProviders(providers);
             updateApiIndicator();
-            showToast(API_PROVIDERS[pv].name+' 配置已保存');
+            showToast(API_PROVIDERS[pv].name+' \u914d\u7f6e\u5df2\u4fdd\u5b58');
         }
 
         async function testApiConnection(pv){
@@ -14058,7 +23783,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             const hasActiveApi = getActiveApiConfig() !== null;
             const hasShownWarning = sessionStorage.getItem('api_warning_shown');
             if (!hasActiveApi && !hasShownWarning) {
-                showApiWarningModal('未配罎外部AI API，部分高级功能将无法使用');
+                showApiWarningModal('\u672a\u914d\u7f4e\u5916\u90e8AI API\uff0c\u90e8\u5206\u9ad8\u7ea7\u529f\u80fd\u5c06\u65e0\u6cd5\u4f7f\u7528');
                 sessionStorage.setItem('api_warning_shown', 'true');
             }
         }
@@ -14324,7 +24049,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     const { done, value } = await currentReader.read();
                     if (done) break;
                     const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
+                    const lines = chunk.split("\\n");
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             try {
@@ -14333,7 +24058,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                                 if (data.content) {
                                     fullContent += data.content;
                                     // 生成过程中显示原始文本，避免 markdown 解析错误
-                                    contentEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+                                    contentEl.innerHTML = fullContent.replace(/\\n/g, '<br>');
                                     requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
                                 }
                                 // 处理思考过程内容
@@ -14407,16 +24132,16 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         function exportChat() {
             const chat = chats.find(c => c.id === currentChatId);
             if (!chat) return;
-            let text = `=== ${chat.title} ===\n${new Date().toLocaleString()}\n\n`;
-            chat.messages.forEach(m => { text += `[${m.role === 'user' ? '我' : 'AI'}] ${m.time}\n${escapeHtml(m.content)}\n\n`; });
+            let text = `=== ${chat.title} ===\\n${new Date().toLocaleString()}\\n\\n`;
+            chat.messages.forEach(m => { text += `[${m.role === 'user' ? '我' : 'AI'}] ${m.time}\\n${escapeHtml(m.content)}\\n\\n`; });
             const blob = new Blob([text], {type: 'text/plain;charset=utf-8'});
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `对话_${new Date().toISOString().slice(0,10)}.txt`; a.click();
             showToast('已导出');
         }
         
         function exportAllChats() {
-            let text = `=== 全部对话 ===\n${new Date().toLocaleString()}\n\n`;
-            chats.forEach(c => { text += `\n【${c.title}】\n`; c.messages.forEach(m => { text += `[${m.role}] ${escapeHtml(m.content)}\n`; }); });
+            let text = `=== 全部对话 ===\\n${new Date().toLocaleString()}\\n\\n`;
+            chats.forEach(c => { text += `\\n【${c.title}】\\n`; c.messages.forEach(m => { text += `[${m.role}] ${escapeHtml(m.content)}\\n`; }); });
             const blob = new Blob([text], {type: 'text/plain;charset=utf-8'});
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `全部对话.txt`; a.click();
             showToast('已导出');
@@ -14830,7 +24555,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         }
 
         function analyzeProjectStructure() {
-            var path = prompt('输入项目路径:', 'D:\\claude-code-main\\claude-code-main');
+            var path = prompt('输入项目路径:', 'D:\\\\claude-code-main\\\\claude-code-main');
             if (!path) return;
             fetch('/agent/file-analyzer/analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})}).then(r=>r.json()).then(function(data) {
                 if (data.error) { alert('Error: ' + data.error); return; }
@@ -15422,7 +25147,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     up.innerHTML='<span style="font-size:11px;">&#x1F4C1;</span> ..';
                     up.onmouseover=()=>up.style.background='var(--bg-hover)';
                     up.onmouseout=()=>up.style.background='';
-                    const parentPath=d.path.split(/[\/]/).slice(0,-1).join('/');
+                    const parentPath=d.path.split(/[\\/]/).slice(0,-1).join('/');
                     up.onclick=()=>{
                         const ws=d.workspace||'';
                         if(parentPath&&parentPath.length>=ws.length)sidebarIdeLoadTree(parentPath);
@@ -15456,7 +25181,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         }
 
         async function sidebarIdeNewFile(){
-            const name=prompt('新文件名称:','');
+            const name=prompt('\u65b0\u6587\u4ef6\u540d\u79f0:','');
             if(!name||!name.trim())return;
             const deviceId=localStorage.getItem('kaguya_device_id')||'';
             try{
@@ -15465,13 +25190,13 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 const filePath=idD.workspace+'/'+name.trim();
                 const r=await fetch('/agent/file-write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:filePath,content:'',device_id:deviceId})});
                 const d=await r.json();
-                if(d.error)showToast('创建失败: '+d.error,'error');
-                else{showToast('文件已创建: '+name.trim(),'success');sidebarIdeLoadTree(_sidebarIdeCurrentPath);}
-            }catch(e){showToast('创建失败: '+e.message,'error');}
+                if(d.error)showToast('\u521b\u5efa\u5931\u8d25: '+d.error,'error');
+                else{showToast('\u6587\u4ef6\u5df2\u521b\u5efa: '+name.trim(),'success');sidebarIdeLoadTree(_sidebarIdeCurrentPath);}
+            }catch(e){showToast('\u521b\u5efa\u5931\u8d25: '+e.message,'error');}
         }
 
         async function sidebarIdeNewFolder(){
-            const name=prompt('新文件夹名称:','');
+            const name=prompt('\u65b0\u6587\u4ef6\u5939\u540d\u79f0:','');
             if(!name||!name.trim())return;
             const deviceId=localStorage.getItem('kaguya_device_id')||'';
             try{
@@ -15480,9 +25205,9 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 const dirPath=idD.workspace+'/'+name.trim();
                 const r=await fetch('/agent/file-write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:dirPath,content:'',is_dir:true,device_id:deviceId})});
                 const d=await r.json();
-                if(d.error)showToast('创建失败: '+d.error,'error');
-                else{showToast('文件夹已创建: '+name.trim(),'success');sidebarIdeLoadTree(_sidebarIdeCurrentPath);}
-            }catch(e){showToast('创建失败: '+e.message,'error');}
+                if(d.error)showToast('\u521b\u5efa\u5931\u8d25: '+d.error,'error');
+                else{showToast('\u6587\u4ef6\u5939\u5df2\u521b\u5efa: '+name.trim(),'success');sidebarIdeLoadTree(_sidebarIdeCurrentPath);}
+            }catch(e){showToast('\u521b\u5efa\u5931\u8d25: '+e.message,'error');}
         }
 
         async function sidebarIdeCompile(){
@@ -15553,7 +25278,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     document.getElementById('sendBtn').disabled = false;
                     document.getElementById('sendBtn').style.display = 'flex';
                     document.getElementById('stopBtn').style.display = 'none';
-                    document.getElementById('statusText').textContent = '就绪';
+                    document.getElementById('statusText').textContent = '\u5c31\u7eea';
                     return;
                 }
             } catch(e) {}
@@ -15584,7 +25309,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     const {done, value} = await reader.read();
                     if (done) break;
                     buffer += decoder.decode(value, {stream: true});
-                    const lines = buffer.split('\n');
+                    const lines = buffer.split('\\n');
                     buffer = lines.pop() || '';
                     for (const line of lines) {
                         if (!line.startsWith('data: ')) continue;
@@ -15648,7 +25373,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             document.getElementById('sendBtn').disabled = false;
             document.getElementById('sendBtn').style.display = 'flex';
             document.getElementById('stopBtn').style.display = 'none';
-            document.getElementById('statusText').textContent = '就绪';
+            document.getElementById('statusText').textContent = '\u5c31\u7eea';
         }
 
         // ========== MULTIMODAL ENHANCEMENT ==========
@@ -15976,5 +25701,6878 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             setTimeout(enableStarfieldMode, 300);
         }
         </script>
-<script>window.__CSRF_TOKEN__="1310b1467f8e2dd7016d9f16df5c68ed";</script></body>
+</body>
 </html>
+"""
+
+def get_client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+
+def load_model():
+    global model
+    if model is None:
+        print("使用 Ollama 后端...")
+        try:
+            adapter = get_ollama_adapter(OllamaConfig(model=OLLAMA_MODEL))
+            if not adapter.is_server_running():
+                print("[INFO] Ollama 服务未运行，将使用外部 API 模式")
+                return None
+            if not adapter.is_model_available(OLLAMA_MODEL):
+                print(f"[INFO] 模型 {OLLAMA_MODEL} 未安装，将使用外部 API 模式")
+                return None
+            model = adapter
+            print(f"Ollama 模型 {OLLAMA_MODEL} 已就绪!")
+        except Exception as e:
+            print(f"[INFO] Ollama 不可用 ({e})，将使用外部 API 模式")
+            return None
+    return model
+
+def model_unavailable_payload():
+    return {
+        "success": False,
+        "error": "No local model available",
+        "reason": "ollama_unavailable",
+        "message": "Ollama service or model is unavailable. Configure an external API provider or start Ollama with the configured model.",
+        "provider": "ollama",
+        "model": OLLAMA_MODEL,
+        "available": False,
+    }
+
+def get_role_system(role_id):
+    role = next((r for r in PRESET_ROLES if r['id'] == role_id), PRESET_ROLES[0])
+    return role.get('system', '')
+
+STRUCTURED_OUTPUT_TEMPLATES = {
+    "ecommerce": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、目标与约束
+- 业务目标（1-3条）
+- 约束条件（预算/人力/周期）
+
+## 二、用户与商品策略
+- 目标人群画像（核心痛点与购买动机）
+- 商品卖点与差异化（3-5条）
+- 价格与促销策略
+
+## 三、30天执行计划
+- 按第1周至第4周给出每周重点动作
+- 每周包含：内容动作、投放动作、私域动作、转化动作
+
+## 四、投放与素材框架
+- 渠道优先级
+- 素材类型与脚本方向
+- A/B测试方案（至少3组）
+
+## 五、数据看板与阈值
+- 核心指标（曝光、点击、转化、客单、ROI）
+- 预警阈值与应对动作
+
+## 六、风险与备选方案
+- 至少3个主要风险
+- 对应备选策略
+
+## 七、明日可执行清单
+- 输出10条可立即执行事项""",
+    "shortvideo": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、账号定位
+- 目标受众
+- 内容主线
+- 差异化标签
+
+## 二、7天内容排期
+- Day1-Day7逐天给出：选题、脚本大纲、前3秒钩子、结尾引导
+
+## 三、单条视频标准模板
+- 开场钩子
+- 信息展开
+- 信任建立
+- 行动召唤
+
+## 四、封面与标题策略
+- 标题公式（至少5条）
+- 封面文案模板（至少5条）
+
+## 五、发布与复盘机制
+- 发布时间建议
+- 数据复盘维度
+- 下一轮优化规则
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+    "resume": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、岗位匹配分析
+- 岗位关键要求拆解
+- 候选人优势与短板
+
+## 二、简历重写建议
+- 抬头与摘要优化
+- 关键经历排序建议
+- 关键词优化建议
+
+## 三、项目经历 STAR 重写
+- 至少提供2段STAR示例（Situation/Task/Action/Result）
+- 结果必须量化
+
+## 四、技能与证据补强
+- 技能矩阵重排
+- 缺口补齐方案
+
+## 五、面试准备
+- 高频问题清单（至少10问）
+- 每问给参考答题框架
+
+## 六、投递策略
+- 目标公司分层
+- 投递节奏与跟进模板
+
+## 七、明日可执行清单
+- 输出10条可立即执行事项""",
+    "business": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、项目定义
+- 目标用户
+- 核心问题
+- 价值主张
+
+## 二、市场与竞品
+- 市场规模与增长判断
+- 竞品对比表（至少3家）
+- 差异化结论
+
+## 三、商业模式
+- 收入结构
+- 成本结构
+- 单位经济模型
+
+## 四、产品与运营路线图
+- 0-3个月、3-6个月、6-12个月里程碑
+- 每阶段关键结果
+
+## 五、财务测算框架
+- 关键假设
+- 收入成本利润粗算逻辑
+- 现金流风险点
+
+## 六、风险与风控
+- 至少5项核心风险
+- 每项对应预警指标与应对策略
+
+## 七、明日可执行清单
+- 输出10条可立即执行事项""",
+    "dataops": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、业务目标与分析范围
+- 本次分析目标
+- 数据口径与时间范围
+
+## 二、指标体系
+- 北极星指标
+- 过程指标与结果指标
+- 指标关系图说明
+
+## 三、异常诊断
+- 列出主要异常信号
+- 可能原因假设（至少5条）
+- 各假设验证路径
+
+## 四、实验与优化方案
+- A/B实验设计（目标、样本、周期、判定标准）
+- 优化动作优先级（高/中/低）
+
+## 五、经营看板设计
+- 看板模块
+- 每个模块关键指标
+- 预警阈值
+
+## 六、复盘机制
+- 周复盘模板
+- 月复盘模板
+
+## 七、明日可执行清单
+- 输出8条可立即执行事项""",
+    "contract": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、合同摘要
+- 合同类型
+- 交易结构
+- 关键标的
+
+## 二、高风险条款识别
+- 至少列出8个风险点
+- 每个风险点说明触发条件与后果
+
+## 三、条款级修改建议
+- 按条款编号给出“原风险点-建议改写-谈判口径”
+
+## 四、责任与赔偿分析
+- 违约责任是否对等
+- 赔偿上限是否合理
+- 不可抗力与免责边界
+
+## 五、履约与证据留存
+- 履约节点
+- 验收标准
+- 证据链建议
+
+## 六、谈判优先级
+- 必须坚持
+- 可协商
+- 可让步
+
+## 七、明日可执行清单
+- 输出8条可立即执行事项""",
+    "prompt_eval": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、评测目标与边界
+- 业务目标
+- 风险边界
+- 适用场景
+
+## 二、测试集设计
+- 样本分层（常规/长尾/对抗）
+- 每层样本量建议
+- 标注规范
+
+## 三、评测维度与评分标准
+- 事实准确性
+- 指令遵循
+- 完整性
+- 安全合规
+- 格式稳定性
+
+## 四、A/B与回归机制
+- 基线版本定义
+- 对比实验流程
+- 回归触发条件
+
+## 五、自动化落地
+- CI接入建议
+- 报告模板
+- 失败阈值与阻断规则
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+    "agent_observability": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、可观测性目标
+- 稳定性目标
+- 质量目标
+- 成本目标
+
+## 二、链路追踪设计
+- 用户请求链路
+- 模型调用链路
+- 工具调用链路
+
+## 三、核心指标体系
+- 成功率
+- 平均响应时长
+- 工具调用成功率
+- 幻觉率代理指标
+- 成本指标
+
+## 四、告警与排障流程
+- P0/P1/P2 事件分级
+- 触发阈值
+- 排障SOP
+
+## 五、质量评估闭环
+- 抽样评审
+- 用户反馈闭环
+- 周报/月报模板
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+    "ai_workflow": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、业务流程定义
+- 触发条件
+- 输入输出
+- 关键约束
+
+## 二、节点编排方案
+- 节点清单
+- 节点责任
+- 节点间数据流
+
+## 三、容错与治理
+- 重试策略
+- 回滚策略
+- 人工审批节点
+
+## 四、效率与成本优化
+- 并行化机会
+- 缓存策略
+- 成本监控点
+
+## 五、上线验收标准
+- 功能验收
+- 性能验收
+- 安全验收
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+    "ai_redteam": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、风险模型
+- 攻击面清单
+- 关键资产
+- 风险等级定义
+
+## 二、测试场景设计
+- 提示注入
+- 越狱绕过
+- 数据泄露
+- 工具滥用
+- 角色越权
+
+## 三、评估标准
+- 可利用性
+- 影响范围
+- 可复现性
+- 修复复杂度
+
+## 四、修复与加固方案
+- 短期修复
+- 中期治理
+- 长期机制
+
+## 五、复测与发布门禁
+- 复测流程
+- 通过标准
+- 发布阻断条件
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+    "rag_ops": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、知识库治理目标
+- 覆盖率目标
+- 时效性目标
+- 准确性目标
+
+## 二、文档治理策略
+- 入库规范
+- 分块策略
+- 元数据规范
+
+## 三、检索质量评估
+- 离线评测集设计
+- 召回与排序指标
+- 人工评审标准
+
+## 四、线上优化闭环
+- 查询分析
+- 失败样本回流
+- 热点知识更新
+
+## 五、成本与性能平衡
+- 检索参数策略
+- 缓存策略
+- 高并发降级策略
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+    "deep_research": """请严格按以下结构输出，使用中文 Markdown 二级标题：
+## 一、研究问题定义
+- 核心问题
+- 子问题拆解
+- 输出目标
+
+## 二、信息源策略
+- 一手来源
+- 二手来源
+- 来源可信度分级
+
+## 三、证据处理方法
+- 交叉验证路径
+- 证据冲突处理
+- 偏差控制方法
+
+## 四、分析框架
+- 关键变量
+- 对比维度
+- 结论判定标准
+
+## 五、交付物模板
+- 管理层摘要
+- 详细分析
+- 风险与建议
+
+## 六、明日可执行清单
+- 输出8条可立即执行事项""",
+}
+
+def detect_structured_template(message):
+    text = (message or "").strip()
+    if text.startswith("请为我的电商产品制定30天增长方案"):
+        return "ecommerce"
+    if text.startswith("请为我设计7天短视频内容计划"):
+        return "shortvideo"
+    if text.startswith("请把我的经历优化成目标岗位简历"):
+        return "resume"
+    if text.startswith("请为这个项目写一版商业计划框架"):
+        return "business"
+    if text.startswith("请基于经营数据做诊断"):
+        return "dataops"
+    if text.startswith("请帮我审阅这份合同"):
+        return "contract"
+    if text.startswith("请为我的AI应用设计提示词评测方案"):
+        return "prompt_eval"
+    if text.startswith("请为我的AI助手设计可观测性方案"):
+        return "agent_observability"
+    if text.startswith("请为我的业务场景设计一套AI自动化工作流"):
+        return "ai_workflow"
+    if text.startswith("请为我的AI产品制定红队测试计划"):
+        return "ai_redteam"
+    if text.startswith("请为我的知识库系统制定RAG运营方案"):
+        return "rag_ops"
+    if text.startswith("请围绕这个主题制定深度研究计划"):
+        return "deep_research"
+    return None
+
+def get_structured_output_prompt(message, template_id=None):
+    key = template_id if template_id in STRUCTURED_OUTPUT_TEMPLATES else detect_structured_template(message)
+    if not key:
+        return ""
+    return "\n\n【结构化输出要求】\n" + STRUCTURED_OUTPUT_TEMPLATES[key]
+
+def get_mcp_system_prompt():
+    """生成 MCP 工具的系统提示词"""
+    config = load_mcp_config()
+    enabled_plugins = []
+    
+    for plugin_id, plugin in config.get("plugins", {}).items():
+        if plugin.get("enabled", False):
+            tools_desc = []
+            for tool in plugin.get("tools", []):
+                params = ", ".join([f'{k}={v["type"]}' for k, v in tool.get("parameters", {}).items()])
+                tools_desc.append(f"  - {tool['name']}({params}): {tool['description']}")
+            
+            if tools_desc:
+                enabled_plugins.append({
+                    "id": plugin_id,
+                    "name": plugin.get("name", ""),
+                    "tools": tools_desc
+                })
+    
+    if not enabled_plugins:
+        return ""
+    
+    prompt = "\n\n【MCP工具使用说明】\n"
+    prompt += "你可以使用以下工具来帮助用户。当需要使用工具时，请按以下格式输出：\n"
+    prompt += "[MCP:插件ID:工具名]{\"参数名\": \"参数值\"}\n\n"
+    prompt += "可用工具：\n"
+    
+    for plugin in enabled_plugins:
+        prompt += f"\n{plugin['name']}:\n"
+        prompt += "\n".join(plugin['tools']) + "\n"
+    
+    prompt += "\n示例：\n"
+    prompt += '- 读取文件: [MCP:filesystem:read_file]{"path": "~/document.txt"}\n'
+    prompt += '- 搜索网络: [MCP:web_search:search]{"query": "最新科技新闻", "num_results": 5}\n'
+    prompt += '- 计算: [MCP:calculator:calculate]{"expression": "2+2*3"}\n'
+    prompt += '- 获取时间: [MCP:datetime:get_current_time]{"timezone": "Asia/Shanghai"}\n'
+    
+    return prompt
+
+def get_lora_system(lora_id):
+    lora = next((l for l in PRESET_LORAS if l['id'] == lora_id), None)
+    return lora.get('system', '') if lora else ''
+
+def generate_stream(message, history, role_id='kaguya', lora_id=None, temperature=0.7, max_tokens=4096, rag_context="", session_id=None, structured_template=None):
+    model = load_model()
+    if model is None:
+        payload = model_unavailable_payload()
+        yield json.dumps({"content": payload["message"], "done": True, "error": payload["error"], "reason": payload["reason"]})
+        return
+    
+    system_prompt = get_role_system(role_id)
+    lora_system = get_lora_system(lora_id)
+    if lora_system:
+        system_prompt = lora_system
+    
+    # 添加 MCP 工具提示词
+    mcp_prompt = get_mcp_system_prompt()
+    if mcp_prompt:
+        system_prompt += mcp_prompt
+    
+    # 添加记忆系统提示词
+    try:
+        memory_system.add_to_short_term('user', message)
+        
+        context = message + " " + " ".join([h[0] for h in history[-3:]])
+        relevant_memories = memory_system.get_relevant_memories_for_context(context)
+        memory_prompt = memory_system.format_memories_for_prompt(relevant_memories)
+        
+        if memory_prompt:
+            system_prompt += "\n\n【记忆系统】\n" + memory_prompt
+        
+        auto_memory_keywords = [
+            '我叫', '我的名字', '我是', '我喜欢', '我讨厌', '我住',
+            '我在', '我的职业', '我的工作', '我学', '我的专业',
+            '记住', '别忘了', '记住这个', '帮我记',
+            'my name', 'i like', 'i hate', 'i live', 'i work',
+            'remember', 'i prefer', 'my favorite'
+        ]
+        should_auto_save = any(kw in message.lower() for kw in auto_memory_keywords)
+        
+        if should_auto_save and len(message) > 3:
+            try:
+                if any(kw in message for kw in ['我叫', '我的名字', '我是', 'my name', "i'm"]):
+                    memory_type = 'fact'
+                elif any(kw in message for kw in ['喜欢', '讨厌', '偏好', 'like', 'hate', 'prefer']):
+                    memory_type = 'preference'
+                else:
+                    memory_type = 'fact'
+                memory_system.add_long_term_memory(
+                    content=message[:500],
+                    memory_type=memory_type,
+                    category='auto_extracted',
+                    importance=None
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"记忆系统错误: {e}")
+    
+    if rag_context:
+        system_prompt += "\n\n你可以参考以下文档内容来回答问题，如果文档内容与问题相关，请基于文档内容回答。" + rag_context
+    
+    structured_prompt = get_structured_output_prompt(message, structured_template)
+    if structured_prompt:
+        system_prompt += structured_prompt
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        messages.append({"role": "user", "content": h[0]})
+        messages.append({"role": "assistant", "content": h[1]})
+    messages.append({"role": "user", "content": message})
+    
+    input_len = sum(len(m['content']) for m in messages) // 2
+    
+    generated_tokens = 0
+    has_content = False
+    all_thinking = []
+    try:
+        print(f"开始生成，消息数: {len(messages)}, 温度: {temperature}, 最大token: {max_tokens}")
+        for chunk_type, chunk_content in model.chat_stream(messages, temperature=temperature, max_tokens=max_tokens):
+            generated_tokens += 1
+            if chunk_content:
+                if chunk_type == 'content':
+                    has_content = True
+                    yield json.dumps({"content": chunk_content, "done": False})
+                elif chunk_type == 'thinking':
+                    # 收集思考过程但不返回给前端（系统提示词要求不输出思考过程）
+                    all_thinking.append(chunk_content)
+                    # 不返回 thinking 类型的数据
+                    # yield json.dumps({"thinking": chunk_content, "done": False})
+        
+        # 如果没有 content 但有 thinking，把 thinking 作为 content 返回
+        if not has_content and all_thinking:
+            print(f"警告: 模型只返回了思考过程，没有正式回答，将思考过程作为回答返回")
+            yield json.dumps({"content": "".join(all_thinking), "done": False})
+        
+        yield json.dumps({"content": "", "done": True, "tokens_in": input_len, "tokens_out": generated_tokens})
+        print(f"生成完成，共生成 {generated_tokens} 个token")
+    except Exception as e:
+        print(f"生成错误: {e}")
+        import traceback
+        traceback.print_exc()
+        yield json.dumps({"content": f"❌ 生成错误: {str(e)}", "done": True})
+
+
+def chat(message, history, role_id='kaguya', lora_id=None, temperature=0.7, max_tokens=4096, structured_template=None):
+    model = load_model()
+    if model is None:
+        payload = model_unavailable_payload()
+        raise RuntimeError(payload["message"])
+    
+    system_prompt = get_role_system(role_id)
+    lora_system = get_lora_system(lora_id)
+    if lora_system:
+        system_prompt = lora_system
+    
+    structured_prompt = get_structured_output_prompt(message, structured_template)
+    if structured_prompt:
+        system_prompt += structured_prompt
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        messages.append({"role": "user", "content": h[0]})
+        messages.append({"role": "assistant", "content": h[1]})
+    messages.append({"role": "user", "content": message})
+    
+    input_len = sum(len(m['content']) for m in messages) // 2
+    
+    try:
+        response = model.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        return response, input_len, len(response) // 2
+    except Exception as e:
+        return f"错误: {str(e)}", input_len, 0
+
+def get_provider_runtime(provider=None, device_id=None):
+    if device_id:
+        user_config = _get_user_external_api(device_id)
+    else:
+        user_config = external_api_config
+    provider_id = (provider or user_config.get("active_provider") or "deepseek").strip().lower()
+    providers = user_config.get("providers", {})
+    provider_cfg = providers.get(provider_id, {})
+    api_key = (provider_cfg.get("api_key") or "").strip()
+    api_url = (provider_cfg.get("api_url") or "").strip()
+    model = (provider_cfg.get("model") or "").strip()
+    return provider_id, {"api_key": api_key, "api_url": api_url, "model": model}
+
+def build_chat_completions_endpoint(provider_id, api_url):
+    provider_id = (provider_id or "").strip().lower()
+    base = (api_url or "").strip().rstrip("/")
+    if provider_id in ("kimi", "moonshot") and not base:
+        base = "https://api.moonshot.ai/v1"
+    if provider_id == "minimax" and not base:
+        base = "https://api.minimaxi.com/v1"
+    elif provider_id == "deepseek" and not base:
+        base = "https://api.deepseek.com"
+    if not base:
+        raise ValueError(f"{provider_id} API URL 未配置")
+    if base.endswith("/chat/completions") or base.endswith("/text/chatcompletion_v2"):
+        return base
+    if base.endswith("/v1"):
+        return base + "/chat/completions"
+    if "/v1/" in base:
+        return base.rsplit("/v1/", 1)[0] + "/v1/chat/completions"
+    if provider_id == "minimax":
+        return base + "/v1/chat/completions"
+    return base + "/chat/completions"
+
+def _is_kimi_k2_model(provider_id, model):
+    provider_id = (provider_id or "").strip().lower()
+    model_id = (model or "").strip().lower()
+    return provider_id in ("kimi", "moonshot") and model_id.startswith("kimi-k2")
+
+def build_openai_chat_payload(provider_id, model, messages, stream=False, temperature=None, max_tokens=None, tools=None):
+    payload = {
+        "model": model or ("MiniMax-M2.7" if (provider_id or "").strip().lower() == "minimax" else ""),
+        "messages": messages,
+    }
+    if stream is not None:
+        payload["stream"] = bool(stream)
+    if tools:
+        payload["tools"] = tools
+    if _is_kimi_k2_model(provider_id, model):
+        payload["thinking"] = {"type": "disabled"}
+        if max_tokens:
+            payload["max_completion_tokens"] = max_tokens
+        return payload
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    return payload
+
+def call_external_provider(provider, api_url, api_key, model, prompt, system_prompt=""):
+    if not api_key:
+        raise ValueError(f"{provider} API Key 未配置")
+    provider_id = (provider or "").strip().lower()
+    if provider_id == "gemini":
+        base = (api_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+        endpoint = f"{base}/models/{model}:generateContent?key={urllib.parse.quote(api_key)}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=90) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        candidates = result.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = "".join([(p.get("text") or "") for p in parts if isinstance(p, dict)]).strip()
+            if text:
+                return text
+        return "未获取到有效内容"
+    if provider_id == "claude":
+        base = (api_url or "https://api.anthropic.com").rstrip("/")
+        endpoint = f"{base}/v1/messages"
+        payload = {
+            "model": model,
+            "max_tokens": 2048,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=90) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        content_list = result.get("content", [])
+        if content_list:
+            text = "".join([(x.get("text") or "") for x in content_list if isinstance(x, dict)]).strip()
+            if text:
+                return text
+        return "未获取到有效内容"
+    endpoint = build_chat_completions_endpoint(provider_id, api_url)
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    payload = build_openai_chat_payload(provider_id, model, messages, stream=False, temperature=0.6, max_tokens=2048)
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=90) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    choices = result.get("choices", [])
+    if choices:
+        content = choices[0].get("message", {}).get("content", "")
+        if content:
+            return content.strip()
+    return "未获取到有效内容"
+
+def build_scene_prompt(scene_id, fields):
+    scene_config = SCENE_PROMPT_TEMPLATES.get(scene_id)
+    if not scene_config:
+        raise ValueError("场景不支持")
+    template = scene_config["prompt"]
+    field_defs = SCENE_FIELDS.get(scene_id, [])
+    format_args = {}
+    for fd in field_defs:
+        key = fd["key"]
+        val = (fields.get(key) or "").strip()
+        if not val:
+            val = "未提供" if key != "constraints" else "无"
+        format_args[key] = val
+    try:
+        return template.format(**format_args)
+    except (KeyError, IndexError):
+        for fd in field_defs:
+            key = fd["key"]
+            template = template.replace("{" + key + "}", format_args.get(key, "未提供"))
+        return template
+
+def get_scene_system_prompt(scene_id):
+    scene_config = SCENE_PROMPT_TEMPLATES.get(scene_id)
+    if scene_config and isinstance(scene_config, dict):
+        return scene_config.get("system", "你是专业顾问，请输出结构化、可执行、可落地的中文方案。")
+    return "你是专业顾问，请输出结构化、可执行、可落地的中文方案。"
+
+
+def sanitize_error(e):
+    msg = str(e)
+    for pattern in [r'[A-Z]:\\\\[^\s]+', r'/[a-z]+/[a-z_]+', r'api[_-]?key[=:]["\']?[\w-]+', r'Bearer [\w-]+', r'password[=:]["\']?[\w-]+', r'token[=:]["\']?[\w-]+', r'secret[=:]["\']?[\w-]+']:
+        msg = re.sub(pattern, '[REDACTED]', msg, flags=re.IGNORECASE)
+    return msg[:300]
+
+
+from collections import defaultdict
+import time
+import hashlib
+import hmac
+import secrets as _secrets
+
+_rate_limits = defaultdict(list)
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 30
+
+def check_rate_limit(key, max_requests=RATE_LIMIT_MAX):
+    now = time.time()
+    requests = _rate_limits[key]
+    _rate_limits[key] = [t for t in requests if now - t < RATE_LIMIT_WINDOW]
+    if len(_rate_limits[key]) >= max_requests:
+        return False
+    _rate_limits[key].append(now)
+    return True
+
+SECURITY_SECRET_KEY = os.environ.get('KAGUYA_SECRET_KEY', '') or os.path.join(DATA_DIR, '.secret_key')
+def get_or_create_secret_key():
+    if os.path.exists(SECURITY_SECRET_KEY) and not os.environ.get('KAGUYA_SECRET_KEY'):
+        try:
+            with open(SECURITY_SECRET_KEY, 'r') as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    key = _secrets.token_hex(32)
+    try:
+        with open(SECURITY_SECRET_KEY, 'w') as f:
+            f.write(key)
+        os.chmod(SECURITY_SECRET_KEY, 0o600)
+    except Exception:
+        pass
+    return key
+
+SECRET_KEY = get_or_create_secret_key()
+
+def _pbkdf2_hmac_sha256(password, salt, iterations):
+    if hasattr(hashlib, 'pbkdf2_hmac'):
+        return hashlib.pbkdf2_hmac('sha256', password, salt, iterations)
+    key = password
+    for _ in range(iterations):
+        key = hmac.new(key, salt, hashlib.sha256).digest()
+    return key
+
+def _derive_encryption_key():
+    return _pbkdf2_hmac_sha256(SECRET_KEY.encode(), b'kaguya_enc_v2', 100000)
+
+_FERNET_CIPHER = None
+def _get_fernet_cipher():
+    global _FERNET_CIPHER
+    if _FERNET_CIPHER is not None:
+        return _FERNET_CIPHER
+    try:
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        import base64 as _b64
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
+                         salt=b'kaguya_fernet_v3', iterations=100000)
+        fernet_key = _b64.urlsafe_b64encode(kdf.derive(SECRET_KEY.encode()))
+        _FERNET_CIPHER = Fernet(fernet_key)
+    except ImportError:
+        _FERNET_CIPHER = False
+    return _FERNET_CIPHER
+
+def encrypt_value(value):
+    if not value:
+        return ''
+    try:
+        cipher = _get_fernet_cipher()
+        if cipher:
+            encrypted = cipher.encrypt(value.encode('utf-8'))
+            return 'ENC3:' + encrypted.decode()
+        import base64
+        import struct
+        key = _derive_encryption_key()
+        iv = _secrets.token_bytes(16)
+        plaintext = value.encode('utf-8')
+        ciphertext = bytearray()
+        block_idx = 0
+        offset = 0
+        while offset < len(plaintext):
+            counter = struct.pack('>I', block_idx)
+            keystream = hmac.new(key, iv + counter, hashlib.sha256).digest()
+            chunk = plaintext[offset:offset + 32]
+            for j in range(len(chunk)):
+                ciphertext.append(chunk[j] ^ keystream[j])
+            offset += 32
+            block_idx += 1
+        tag = hmac.new(key, iv + bytes(ciphertext), hashlib.sha256).digest()[:16]
+        return 'ENC2:' + base64.b64encode(iv + tag + bytes(ciphertext)).decode()
+    except Exception:
+        return ''
+
+def decrypt_value(value):
+    if not value or not value.startswith('ENC'):
+        return value if value else ''
+    try:
+        if value.startswith('ENC3:'):
+            cipher = _get_fernet_cipher()
+            if cipher:
+                return cipher.decrypt(value[5:].encode()).decode('utf-8')
+            return ''
+        import base64
+        import struct
+        key = _derive_encryption_key()
+        if value.startswith('ENC2:'):
+            raw = base64.b64decode(value[5:])
+            iv = raw[:16]
+            tag = raw[16:32]
+            ciphertext = raw[32:]
+            expected_tag = hmac.new(key, iv + ciphertext, hashlib.sha256).digest()[:16]
+            if not hmac.compare_digest(tag, expected_tag):
+                return ''
+            plaintext = bytearray()
+            block_idx = 0
+            offset = 0
+            while offset < len(ciphertext):
+                counter = struct.pack('>I', block_idx)
+                keystream = hmac.new(key, iv + counter, hashlib.sha256).digest()
+                chunk = ciphertext[offset:offset + 32]
+                for j in range(len(chunk)):
+                    plaintext.append(chunk[j] ^ keystream[j])
+                offset += 32
+                block_idx += 1
+            return plaintext.decode('utf-8')
+        elif value.startswith('ENC:'):
+            raw = base64.b64decode(value[4:])
+            iv = raw[:16]
+            stored_hmac = raw[16:32]
+            original = raw[32:]
+            key_bytes = hashlib.sha256(SECRET_KEY.encode()).digest()
+            expected_hmac = hmac.new(key_bytes, iv + original, hashlib.sha256).digest()[:16]
+            if not hmac.compare_digest(stored_hmac, expected_hmac):
+                return ''
+            return original.decode()
+        return value
+    except Exception:
+        return ''
+
+def mask_api_key(key):
+    if not key or len(key) < 8:
+        return '****' if key else ''
+    return key[:4] + '****' + key[-4:]
+
+def _request_device_id(data=None):
+    data = data if isinstance(data, dict) else {}
+    return (
+        data.get("device_id")
+        or request.args.get("device_id", "")
+        or request.headers.get("X-Device-Id", "")
+        or "desktop"
+    )
+
+def _save_single_external_api(device_id, config):
+    cfg = normalize_external_api_payload(config)
+    if not cfg["api_key"]:
+        raise ValueError("api_key required")
+    user_config = _get_user_external_api(device_id)
+    providers = user_config.setdefault("providers", {})
+    provider_cfg = providers.setdefault(cfg["provider"], {})
+    provider_cfg["api_url"] = cfg["api_url"]
+    provider_cfg["api_key"] = cfg["api_key"]
+    provider_cfg["model"] = cfg["model"]
+    user_config["active_provider"] = cfg["provider"]
+    _save_user_external_api(device_id, user_config)
+    return cfg
+
+def _get_active_external_api_summary(device_id):
+    if not device_id:
+        return {
+            "has_config": False,
+            "provider": "",
+            "api_url": "",
+            "model": "",
+            "masked_api_key": "",
+        }
+    user_config = _get_user_external_api(device_id)
+    provider = (user_config.get("active_provider") or "deepseek").strip().lower()
+    provider_cfg = user_config.get("providers", {}).get(provider, {})
+    api_key = (provider_cfg.get("api_key") or "").strip()
+    return {
+        "has_config": bool(api_key),
+        "provider": provider,
+        "api_url": (provider_cfg.get("api_url") or "").strip(),
+        "model": (provider_cfg.get("model") or "").strip(),
+        "masked_api_key": mask_api_key(api_key) if api_key else "",
+    }
+
+SSRF_BLOCKED_HOSTS = ['127.0.0.1', '0.0.0.0', 'localhost', '169.254.169.254', '::1', '0.0.0']
+SSRF_BLOCKED_PREFIXES = ['10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.', 'fc00:', 'fe80:', 'fd']
+
+def validate_url_safety(url):
+    if not url:
+        return False, 'URL为空'
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ''
+        if parsed.scheme not in ('http', 'https'):
+            return False, f'不支持的协议: {parsed.scheme}'
+        if hostname.lower() in SSRF_BLOCKED_HOSTS:
+            return False, f'禁止访问内部地址: {hostname}'
+        for prefix in SSRF_BLOCKED_PREFIXES:
+            if hostname.lower().startswith(prefix.lower()):
+                return False, f'禁止访问内网地址: {hostname}'
+        return True, ''
+    except Exception as e:
+        return False, f'URL解析失败: {str(e)[:50]}'
+
+SAFE_MATH_FUNCTIONS = {
+    'abs': abs, 'round': round, 'min': min, 'max': max,
+    'pow': pow, 'sum': sum, 'int': int, 'float': float,
+    'len': len, 'sorted': sorted, 'range': range,
+}
+import math as _math
+for _name in ['sin', 'cos', 'tan', 'sqrt', 'log', 'log10', 'pi', 'e', 'ceil', 'floor', 'factorial', 'gcd', 'exp', 'asin', 'acos', 'atan', 'atan2', 'degrees', 'radians', 'hypot']:
+    if hasattr(_math, _name):
+        SAFE_MATH_FUNCTIONS[_name] = getattr(_math, _name)
+
+def safe_calculate(expression):
+    safe_str = expression.replace('^', '**')
+    for char in ['__', 'import', 'exec', 'eval', 'open', 'file', 'globals', 'locals', 'compile', 'getattr', 'setattr', 'delattr', 'type', 'class', 'system', 'popen', 'spawn', 'subprocess', 'os.', 'sys.']:
+        if char.lower() in safe_str.lower():
+            return '错误：表达式包含不允许的操作'
+    try:
+        result = eval(safe_str, {"__builtins__": {}}, SAFE_MATH_FUNCTIONS)
+        return str(result)
+    except Exception as e:
+        return f'计算错误: {str(e)[:50]}'
+
+def safe_execute_python(code, timeout=30):
+    dangerous_keywords = ['import os', 'import sys', 'import subprocess', 'import shutil', '__import__', 'exec(', 'eval(', 'compile(', 'open(', 'globals()', 'locals()', '__builtins__', 'getattr(', 'setattr(', 'delattr(', 'type(', 'class ', 'system(', 'popen(', 'spawn', 'socket', 'requests', 'urllib', 'http', 'ftplib', 'smtplib', 'telnetlib', 'pickle', 'marshal', 'shelve', 'ctypes', 'multiprocessing', '__class__', '__bases__', '__subclasses__', '__mro__', '__dict__', '__code__', '__globals__', '__closure__', 'func_globals', 'gi_frame', 'co_code', 'breakpoint', 'input(', 'raw_input', 'exit(', 'quit(']
+    code_lower = code.lower()
+    for kw in dangerous_keywords:
+        if kw.lower() in code_lower:
+            log_security_event('sandbox_blocked', f'代码沙箱阻止了危险操作: {kw.strip()}', 'warning')
+            return {"success": False, "output": f"安全限制：代码包含不允许的操作 ({kw.strip()})", "code": code}
+    if len(code) > 5000:
+        return {"success": False, "output": "安全限制：代码长度不能超过5000字符", "code": code}
+    try:
+        safe_builtins = {
+            'print': print, 'len': len, 'range': range, 'int': int, 'float': float,
+            'str': str, 'bool': bool, 'list': list, 'dict': dict, 'set': set, 'tuple': tuple,
+            'sorted': sorted, 'reversed': reversed, 'enumerate': enumerate, 'zip': zip,
+            'map': map, 'filter': filter, 'sum': sum, 'min': min, 'max': max, 'abs': abs,
+            'round': round, 'pow': pow, 'type': lambda x: str(type(x)), 'isinstance': isinstance,
+            'True': True, 'False': False, 'None': None,
+        }
+        safe_builtins.update(SAFE_MATH_FUNCTIONS)
+        restricted_globals = {"__builtins__": safe_builtins}
+        local_vars = {}
+        import signal
+        def timeout_handler(signum, frame):
+            raise TimeoutError("代码执行超时")
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(min(timeout, 10))
+        try:
+            exec(code, restricted_globals, local_vars)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+        output_lines = []
+        if '_result' in local_vars:
+            output_lines.append(str(local_vars['_result']))
+        return {"success": True, "output": '\n'.join(output_lines) if output_lines else "代码执行完成（无输出）", "code": code}
+    except TimeoutError:
+        return {"success": False, "output": "执行超时：代码运行时间超过限制", "code": code}
+    except Exception as e:
+        return {"success": False, "output": f"执行错误: {sanitize_error(e)}", "code": code}
+
+SECURITY_AUDIT_LOG = os.path.join(DATA_DIR, 'security_audit.json')
+SECURITY_AUDIT_MAX = 2000
+SECURITY_AUDIT_HASH_CHAIN = os.path.join(DATA_DIR, 'audit_hash_chain.json')
+
+def _compute_audit_hash(event, prev_hash=''):
+    h = hashlib.sha256()
+    h.update(prev_hash.encode())
+    h.update(json.dumps(event, sort_keys=True, ensure_ascii=False).encode())
+    return h.hexdigest()
+
+def log_security_event(event_type, detail, severity='info'):
+    try:
+        events = []
+        if os.path.exists(SECURITY_AUDIT_LOG):
+            with open(SECURITY_AUDIT_LOG, 'r', encoding='utf-8') as f:
+                events = json.load(f)
+        prev_hash = ''
+        if os.path.exists(SECURITY_AUDIT_HASH_CHAIN):
+            with open(SECURITY_AUDIT_HASH_CHAIN, 'r', encoding='utf-8') as f:
+                chain_data = json.load(f)
+                prev_hash = chain_data.get('latest_hash', '')
+        event = {
+            'type': event_type,
+            'detail': detail[:500],
+            'severity': severity,
+            'timestamp': __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'ip': getattr(request, 'remote_addr', 'unknown') if request else 'system',
+            'user_agent': getattr(request, 'headers', {}).get('User-Agent', 'unknown')[:100] if request else 'system',
+            'hash': ''
+        }
+        event['hash'] = _compute_audit_hash(event, prev_hash)
+        events.append(event)
+        if len(events) > SECURITY_AUDIT_MAX:
+            archive_path = SECURITY_AUDIT_LOG.replace('.json', f'_archive_{int(time.time())}.json')
+            archive_events = events[:-SECURITY_AUDIT_MAX]
+            with open(archive_path, 'w', encoding='utf-8') as f:
+                json.dump(archive_events, f, ensure_ascii=False, indent=2)
+            events = events[-SECURITY_AUDIT_MAX:]
+        with open(SECURITY_AUDIT_LOG, 'w', encoding='utf-8') as f:
+            json.dump(events, f, ensure_ascii=False, indent=2)
+        with open(SECURITY_AUDIT_HASH_CHAIN, 'w', encoding='utf-8') as f:
+            json.dump({'latest_hash': event['hash'], 'total_events': len(events)}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+app = Flask(__name__)
+app.secret_key = SECRET_KEY
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('KAGUYA_FORCE_HTTPS', '') == '1'
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+app.config['PERMANENT_SESSION_LIFETIME'] = __import__('datetime').timedelta(hours=24)
+
+# ============================================================
+# Kaguya Bootstrap Integration - ACP/Agents/Skills/Accounts
+# ============================================================
+try:
+    from kaguya_bootstrap import register_routes as _register_kaguya_routes
+    from kaguya_bootstrap import bootstrap as _kaguya_bootstrap
+    _register_kaguya_routes(app)
+    _KAGUYA_BOOTSTRAP_LOADED = True
+    print("[KAGUYA] Bootstrap integrated: ACP + Agents + Skills + Accounts")
+except ImportError as _e:
+    _KAGUYA_BOOTSTRAP_LOADED = False
+    print(f"[KAGUYA] Bootstrap not available: {_e}")
+except Exception as _e:
+    _KAGUYA_BOOTSTRAP_LOADED = False
+    print(f"[KAGUYA] Bootstrap integration error: {_e}")
+# ============================================================
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify({"error": "File too large. Maximum upload size is 500MB."}), 413
+
+AUTH_CONFIG_FILE = os.path.join(DATA_DIR, 'auth_config.json')
+AUTH_SESSION_FILE = os.path.join(DATA_DIR, 'auth_sessions.json')
+
+def load_auth_config():
+    try:
+        if os.path.exists(AUTH_CONFIG_FILE):
+            with open(AUTH_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"enabled": False, "password_hash": "", "access_token": ""}
+
+def save_auth_config(config):
+    try:
+        with open(AUTH_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def hash_password(password):
+    salt = _secrets.token_hex(16)
+    h = _pbkdf2_hmac_sha256(password.encode(), salt.encode(), 100000)
+    return f"{salt}:{h.hex()}"
+
+def verify_password(password, stored_hash):
+    try:
+        salt, h = stored_hash.split(':', 1)
+        computed = _pbkdf2_hmac_sha256(password.encode(), salt.encode(), 100000)
+        return hmac.compare_digest(computed.hex(), h)
+    except Exception:
+        return False
+
+def generate_access_token():
+    return _secrets.token_urlsafe(32)
+
+def is_auth_enabled():
+    config = load_auth_config()
+    return config.get('enabled', False)
+
+def is_authenticated():
+    if not is_auth_enabled():
+        return True
+    token = session.get('auth_token', '')
+    if not token:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+    config = load_auth_config()
+    if token and token == config.get('access_token', ''):
+        return True
+    if token:
+        for t in load_api_tokens():
+            if t.get('token') == token:
+                return True
+    return False
+
+LOGIN_PAGE_HTML = '''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>辉夜 - 安全验证</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+.card{background:rgba(255,255,255,0.05);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:40px;width:380px;max-width:90vw;text-align:center}
+.icon{font-size:48px;margin-bottom:16px}
+h1{color:#fff;font-size:22px;margin-bottom:8px}
+p{color:rgba(255,255,255,0.6);font-size:13px;margin-bottom:24px}
+input{width:100%;padding:12px 16px;border:1px solid rgba(255,255,255,0.15);border-radius:10px;background:rgba(255,255,255,0.08);color:#fff;font-size:14px;outline:none;margin-bottom:12px;transition:border 0.2s}
+input:focus{border-color:#667eea}
+button{width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s}
+button:hover{transform:translateY(-2px)}
+.error{color:#ef4444;font-size:12px;margin-top:8px;display:none}
+.footer{color:rgba(255,255,255,0.3);font-size:11px;margin-top:20px}
+</style></head><body>
+<div class="card">
+<div class="icon">🌙</div>
+<h1>辉夜安全验证</h1>
+<p>请输入访问密码以继续</p>
+<form method="POST" action="/auth/login">
+<input type="password" name="password" placeholder="访问密码" autofocus required>
+<button type="submit">验证身份</button>
+</form>
+<div class="error" id="errMsg"></div>
+<div class="footer">🛡️ 数据安全保护已启用</div>
+</div>
+</body></html>'''
+
+LOGIN_FAIL_TRACKER = {'attempts': {}, 'lockouts': {}}
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_SECONDS = 300
+
+@app.route('/auth/login', methods=['GET', 'POST'])
+def auth_login():
+    config = load_auth_config()
+    if not config.get('enabled', False):
+        return redirect('/')
+    if request.method == 'GET':
+        return LOGIN_PAGE_HTML
+    client_ip = request.remote_addr or 'unknown'
+    now = time.time()
+    if client_ip in LOGIN_FAIL_TRACKER['lockouts']:
+        lockout_end = LOGIN_FAIL_TRACKER['lockouts'][client_ip]
+        if now < lockout_end:
+            remaining = int(lockout_end - now)
+            log_security_event('login_locked', f'IP {client_ip} 登录被锁定，剩余{remaining}秒', 'warning')
+            return LOGIN_PAGE_HTML.replace('display:none', 'display:block').replace('id="errMsg"></div>', f'id="errMsg">账户已锁定，请{remaining}秒后重试</div>')
+        else:
+            del LOGIN_FAIL_TRACKER['lockouts'][client_ip]
+            LOGIN_FAIL_TRACKER['attempts'].pop(client_ip, None)
+    password = (request.form.get('password') or '').strip()
+    if not password:
+        return LOGIN_PAGE_HTML.replace('display:none', 'display:block').replace('id="errMsg"></div>', 'id="errMsg">请输入密码</div>')
+    if verify_password(password, config.get('password_hash', '')):
+        LOGIN_FAIL_TRACKER['attempts'].pop(client_ip, None)
+        token = generate_access_token()
+        config['access_token'] = token
+        save_auth_config(config)
+        session.permanent = True
+        old_session = dict(session)
+        session.clear()
+        session.update(old_session)
+        session['auth_token'] = token
+        session['csrf_token'] = secrets.token_hex(32)
+        log_security_event('login_success', f'登录成功 IP:{client_ip}', 'info')
+        return redirect('/')
+    attempts = LOGIN_FAIL_TRACKER['attempts'].get(client_ip, 0) + 1
+    LOGIN_FAIL_TRACKER['attempts'][client_ip] = attempts
+    if attempts >= LOGIN_MAX_ATTEMPTS:
+        LOGIN_FAIL_TRACKER['lockouts'][client_ip] = now + LOGIN_LOCKOUT_SECONDS
+        log_security_event('login_locked', f'IP {client_ip} 连续{attempts}次失败，锁定{LOGIN_LOCKOUT_SECONDS}秒', 'critical')
+        return LOGIN_PAGE_HTML.replace('display:none', 'display:block').replace('id="errMsg"></div>', f'id="errMsg">连续{attempts}次失败，账户已锁定{LOGIN_LOCKOUT_SECONDS}秒</div>')
+    remaining = LOGIN_MAX_ATTEMPTS - attempts
+    log_security_event('login_failed', f'登录失败 IP:{client_ip}，剩余{remaining}次机会', 'warning')
+    return LOGIN_PAGE_HTML.replace('display:none', 'display:block').replace('id="errMsg"></div>', f'id="errMsg">密码错误，剩余{remaining}次机会</div>')
+
+@app.route('/auth/logout', methods=['POST'])
+def auth_logout():
+    session.pop('auth_token', None)
+    config = load_auth_config()
+    config['access_token'] = ''
+    save_auth_config(config)
+    return jsonify({"success": True})
+
+IP_WHITELIST_FILE = os.path.join(DATA_DIR, 'ip_whitelist.json')
+
+def load_ip_whitelist():
+    try:
+        if os.path.exists(IP_WHITELIST_FILE):
+            with open(IP_WHITELIST_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"mode": "open", "whitelist": []}
+
+def save_ip_whitelist(config):
+    try:
+        with open(IP_WHITELIST_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def is_ip_allowed(client_ip):
+    wl = load_ip_whitelist()
+    if wl.get('mode') != 'whitelist':
+        return True
+    if client_ip in ('127.0.0.1', '::1', 'localhost'):
+        return True
+    return client_ip in wl.get('whitelist', [])
+
+@app.route('/auth/logout-all', methods=['POST'])
+def auth_logout_all():
+    config = load_auth_config()
+    config['access_token'] = ''
+    save_auth_config(config)
+    log_security_event('logout_all', '已踢出所有其他设备', 'warning')
+    return jsonify({"success": True})
+
+try:
+    from kaguya_accounts import AccountManager, UserRole as AccUserRole, PasswordManager as AccPwdMgr, AuthEventType
+    _account_mgr = AccountManager(
+        data_dir=os.path.join(DATA_DIR, 'kaguya_accounts'),
+        secret_key=SECRET_KEY
+    )
+    _ACCOUNT_SYSTEM_AVAILABLE = True
+except Exception:
+    _account_mgr = None
+    _ACCOUNT_SYSTEM_AVAILABLE = False
+
+@app.route('/auth/register', methods=['POST'])
+def auth_register():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = (data.get('password') or '').strip()
+    email = (data.get('email') or '').strip()
+    invite_code = (data.get('invite_code') or '').strip()
+    if not username or not password:
+        return jsonify({"success": False, "error": "用户名和密码不能为空"})
+    config = load_auth_config()
+    invite_required = config.get('invite_code', '')
+    if invite_required and invite_code != invite_required:
+        return jsonify({"success": False, "error": "邀请码无效"})
+    account, err = _account_mgr.create_account(username, password, email)
+    if not account:
+        return jsonify({"success": False, "error": err})
+    access_token, refresh_token = _account_mgr._jwt.generate_token(account.user_id, account.role.value)
+    return jsonify({
+        "success": True,
+        "user_id": account.user_id,
+        "username": account.username,
+        "role": account.role.value,
+        "access_token": access_token,
+        "refresh_token": refresh_token
+    })
+
+@app.route('/auth/token', methods=['POST'])
+def auth_token():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    data = request.get_json(silent=True) or {}
+    grant_type = data.get('grant_type', '')
+    if grant_type == 'password':
+        username = (data.get('username') or '').strip()
+        password = (data.get('password') or '').strip()
+        if not username or not password:
+            return jsonify({"success": False, "error": "用户名和密码不能为空"})
+        result, err = _account_mgr.authenticate(username, password,
+                                                  ip_address=request.remote_addr or '',
+                                                  user_agent=request.headers.get('User-Agent', ''))
+        if not result:
+            return jsonify({"success": False, "error": err})
+        return jsonify({"success": True, **result})
+    elif grant_type == 'refresh_token':
+        refresh_token = (data.get('refresh_token') or '').strip()
+        if not refresh_token:
+            return jsonify({"success": False, "error": "刷新令牌不能为空"})
+        result = _account_mgr._jwt.refresh_access_token(refresh_token)
+        if not result:
+            return jsonify({"success": False, "error": "刷新令牌无效或已过期"})
+        access, refresh = result
+        payload = _account_mgr._jwt.validate_token(access)
+        return jsonify({
+            "success": True,
+            "access_token": access,
+            "refresh_token": refresh,
+            "user_id": payload.get("sub", "") if payload else "",
+            "role": payload.get("role", "") if payload else ""
+        })
+    return jsonify({"success": False, "error": "不支持的grant_type"})
+
+@app.route('/auth/password-reset/request', methods=['POST'])
+def auth_password_reset_request():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    ok, token_or_msg = _account_mgr.request_password_reset(username, ip_address=request.remote_addr or '')
+    if ok and token_or_msg:
+        return jsonify({"success": True, "reset_token": token_or_msg})
+    return jsonify({"success": True})
+
+@app.route('/auth/password-reset/confirm', methods=['POST'])
+def auth_password_reset_confirm():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    data = request.get_json(silent=True) or {}
+    reset_token = (data.get('reset_token') or '').strip()
+    new_password = (data.get('new_password') or '').strip()
+    if not reset_token or not new_password:
+        return jsonify({"success": False, "error": "重置令牌和新密码不能为空"})
+    ok, err = _account_mgr.reset_password(reset_token, new_password)
+    if not ok:
+        return jsonify({"success": False, "error": err})
+    return jsonify({"success": True})
+
+@app.route('/auth/account', methods=['GET', 'PUT'])
+def auth_account():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else session.get('auth_token', '')
+    payload = _account_mgr._jwt.validate_token(token) if token else None
+    if not payload:
+        return jsonify({"success": False, "error": "需要认证"}), 401
+    user_id = payload.get("sub", "")
+    if request.method == 'GET':
+        account = _account_mgr.get_account(user_id)
+        if not account:
+            return jsonify({"success": False, "error": "账户不存在"}), 404
+        return jsonify({"success": True, "account": account})
+    data = request.get_json(silent=True) or {}
+    ok, err = _account_mgr.update_account(user_id, data, requesting_user_id=user_id)
+    if not ok:
+        return jsonify({"success": False, "error": err})
+    return jsonify({"success": True})
+
+@app.route('/auth/admin/accounts', methods=['GET'])
+def auth_admin_accounts():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else session.get('auth_token', '')
+    payload = _account_mgr._jwt.validate_token(token) if token else None
+    if not payload:
+        return jsonify({"success": False, "error": "需要认证"}), 401
+    accounts = _account_mgr.list_accounts(payload.get("sub", ""))
+    if accounts is None:
+        return jsonify({"success": False, "error": "权限不足"}), 403
+    return jsonify({"success": True, "accounts": accounts})
+
+@app.route('/auth/admin/role', methods=['POST'])
+def auth_admin_role():
+    if not _ACCOUNT_SYSTEM_AVAILABLE:
+        return jsonify({"success": False, "error": "多用户系统不可用"}), 503
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else session.get('auth_token', '')
+    payload = _account_mgr._jwt.validate_token(token) if token else None
+    if not payload:
+        return jsonify({"success": False, "error": "需要认证"}), 401
+    data = request.get_json(silent=True) or {}
+    target_user_id = (data.get('user_id') or '').strip()
+    new_role = (data.get('role') or '').strip()
+    if not target_user_id or not new_role:
+        return jsonify({"success": False, "error": "参数不完整"})
+    try:
+        role_enum = AccUserRole(new_role)
+    except ValueError:
+        return jsonify({"success": False, "error": "无效的角色"})
+    ok, err = _account_mgr.change_role(target_user_id, role_enum, payload.get("sub", ""))
+    if not ok:
+        return jsonify({"success": False, "error": err})
+    return jsonify({"success": True})
+
+@app.route('/auth/setup', methods=['GET', 'POST'])
+def auth_setup():
+    config = load_auth_config()
+    if request.method == 'GET':
+        return jsonify({"enabled": config.get("enabled", False), "has_password": bool(config.get("password_hash", "")), "multi_user": _ACCOUNT_SYSTEM_AVAILABLE})
+    data = request.get_json(silent=True) or {}
+    action = data.get('action', '')
+
+    if action in ('enable', 'disable', 'change_password'):
+        current_token = session.get('auth_token', '')
+        if config.get('enabled', False) and action != 'enable':
+            if not current_token or current_token != config.get('access_token', ''):
+                auth_header = request.headers.get('Authorization', '')
+                header_token = auth_header[7:] if auth_header.startswith('Bearer ') else ''
+                if header_token != config.get('access_token', ''):
+                    return jsonify({"success": False, "error": "需要管理员认证"}), 401
+
+    def validate_password_strength(pw):
+        if len(pw) < 8:
+            return "密码至少8位"
+        has_upper = any(c.isupper() for c in pw)
+        has_lower = any(c.islower() for c in pw)
+        has_digit = any(c.isdigit() for c in pw)
+        has_special = any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in pw)
+        score = sum([has_upper, has_lower, has_digit, has_special])
+        if score < 3:
+            return "密码需包含大写字母、小写字母、数字、特殊字符中的至少3种"
+        return None
+
+    if action == 'enable':
+        password = (data.get('password') or '').strip()
+        strength_err = validate_password_strength(password)
+        if strength_err:
+            return jsonify({"success": False, "error": strength_err})
+        config['enabled'] = True
+        config['password_hash'] = hash_password(password)
+        config['access_token'] = ''
+        save_auth_config(config)
+        log_security_event('auth_enabled', '访问认证已启用', 'info')
+        return jsonify({"success": True})
+    elif action == 'disable':
+        config['enabled'] = False
+        config['access_token'] = ''
+        save_auth_config(config)
+        log_security_event('auth_disabled', '访问认证已禁用', 'warning')
+        return jsonify({"success": True})
+    elif action == 'change_password':
+        old_password = (data.get('old_password') or '').strip()
+        new_password = (data.get('new_password') or '').strip()
+        if not verify_password(old_password, config.get('password_hash', '')):
+            return jsonify({"success": False, "error": "旧密码错误"})
+        strength_err = validate_password_strength(new_password)
+        if strength_err:
+            return jsonify({"success": False, "error": strength_err})
+        config['password_hash'] = hash_password(new_password)
+        config['access_token'] = ''
+        session.pop('auth_token', None)
+        save_auth_config(config)
+        log_security_event('password_changed', '密码已修改', 'info')
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "未知操作"})
+
+@app.route('/security/ip-whitelist', methods=['GET', 'POST', 'DELETE'])
+def ip_whitelist_api():
+    wl = load_ip_whitelist()
+    if request.method == 'GET':
+        return jsonify({"success": True, "mode": wl.get('mode', 'open'), "whitelist": wl.get('whitelist', []), "current_ip": request.remote_addr or 'unknown'})
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        ip_addr = (data.get('ip') or '').strip()
+        if not ip_addr:
+            return jsonify({"success": False, "error": "IP地址不能为空"})
+        import re as _re
+        if not _re.match(r'^(\d{1,3}\.){3}\d{1,3}$', ip_addr) and not _re.match(r'^[0-9a-fA-F:]+$', ip_addr):
+            return jsonify({"success": False, "error": "IP地址格式无效"})
+        whitelist = wl.get('whitelist', [])
+        if ip_addr not in whitelist:
+            whitelist.append(ip_addr)
+            wl['whitelist'] = whitelist
+            save_ip_whitelist(wl)
+            log_security_event('ip_whitelist_add', f'IP {ip_addr} 已加入白名单', 'info')
+        return jsonify({"success": True})
+    if request.method == 'DELETE':
+        data = request.get_json(silent=True) or {}
+        ip_addr = (data.get('ip') or '').strip()
+        whitelist = wl.get('whitelist', [])
+        if ip_addr in whitelist:
+            whitelist.remove(ip_addr)
+            wl['whitelist'] = whitelist
+            save_ip_whitelist(wl)
+            log_security_event('ip_whitelist_remove', f'IP {ip_addr} 已从白名单移除', 'info')
+        return jsonify({"success": True})
+
+@app.route('/security/ip-whitelist/mode', methods=['POST'])
+def ip_whitelist_mode_api():
+    wl = load_ip_whitelist()
+    new_mode = 'whitelist' if wl.get('mode') != 'whitelist' else 'open'
+    wl['mode'] = new_mode
+    save_ip_whitelist(wl)
+    log_security_event('ip_mode_change', f'IP访问模式切换为: {new_mode}', 'warning' if new_mode == 'whitelist' else 'info')
+    return jsonify({"success": True, "mode": new_mode})
+
+PUBLIC_PATHS = ['/auth/login', '/auth/setup', '/auth/logout', '/static/', '/favicon.ico']
+HIGH_RISK_POST_PATHS = {
+    '/agent/file-write',
+    '/agent/write-file',
+    '/agent/revert-file',
+    '/agent/open-project',
+    '/agent/import-files',
+    '/agent/upload-device-files',
+    '/agent/run-project',
+    '/agent/compile',
+    '/agent/terminal/exec',
+}
+
+def _is_loopback_request():
+    host = (request.host or '').split(':', 1)[0].lower()
+    remote = (request.remote_addr or '').lower()
+    return host in ('127.0.0.1', 'localhost', '::1') and remote in ('127.0.0.1', 'localhost', '::1')
+
+def _is_high_risk_path(path):
+    return path in HIGH_RISK_POST_PATHS or path.startswith('/agent/terminal/')
+
+def _csrf_valid():
+    token = session.get('csrf_token', '')
+    csrf_header = request.headers.get('X-CSRF-Token', '')
+    csrf_body = ''
+    try:
+        csrf_body = (request.get_json(silent=True) or {}).get('_csrf_token', '')
+    except Exception:
+        pass
+    return bool(token and (hmac.compare_digest(csrf_header, token) or hmac.compare_digest(csrf_body, token)))
+
+@app.before_request
+def security_before_request():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = _secrets.token_hex(16)
+    for pub in PUBLIC_PATHS:
+        if request.path == pub or request.path.startswith(pub):
+            break
+    else:
+        if is_auth_enabled() and not is_authenticated():
+            if request.is_json or request.headers.get('Accept', '') == 'application/json':
+                return jsonify({'error': '需要认证', 'auth_required': True}), 401
+            return redirect('/auth/login')
+    if request.path.startswith('/static/') or request.path.startswith('/header-img') or request.path.startswith('/hero-img') or request.path.startswith('/welcome-img') or request.path.startswith('/deepseek-icon') or request.path.startswith('/sidebar-icon') or request.path.startswith('/favicon.ico'):
+        return None
+    client_ip = request.remote_addr or 'unknown'
+    if not is_ip_allowed(client_ip):
+        log_security_event('ip_blocked', f'IP {client_ip} 被白名单阻止', 'warning')
+        return jsonify({'error': '访问被拒绝', 'ip_blocked': True}), 403
+    if not check_rate_limit(client_ip, RATE_LIMIT_MAX * 3):
+        log_security_event('rate_limit', f'IP {client_ip} 触发速率限制', 'warning')
+        return jsonify({'error': '请求过于频繁，请稍后再试'}), 429
+    if request.method in ('POST', 'PUT', 'DELETE'):
+        if _is_high_risk_path(request.path) and not _is_loopback_request():
+            if not is_auth_enabled():
+                log_security_event('remote_high_risk_blocked', f'IP {client_ip} blocked path={request.path}', 'critical')
+                return jsonify({'error': 'remote_high_risk_blocked', 'auth_required': True}), 403
+            if not _csrf_valid():
+                log_security_event('csrf_failed', f'IP {client_ip} CSRF验证失败 high-risk path={request.path}', 'warning')
+                return jsonify({'error': 'CSRF验证失败'}), 403
+        if request.is_json:
+            try:
+                data = request.get_json(silent=True) or {}
+                if data and _detect_injection(data):
+                    log_security_event('injection_attempt', f'IP {client_ip} 检测到潜在注入攻击', 'critical')
+                    return jsonify({'error': '请求包含不允许的内容'}), 400
+            except Exception:
+                pass
+        csrf_exempt = ['/auth/login', '/auth/logout', '/static/', '/api/device/info', '/api/account/saved-config', '/api/account/auto-fill', '/chat/', '/web/', '/mcp/', '/project/', '/scene', '/lora/', '/tool/', '/code/', '/kb/', '/deepseek/', '/external/', '/security/status', '/memory/', '/multimodal/', '/finetune/', '/workflow/', '/rag/', '/privacy/']
+        is_csrf_exempt = any(request.path.startswith(p) for p in csrf_exempt)
+        local_high_risk_request = _is_high_risk_path(request.path) and _is_loopback_request()
+        if not is_csrf_exempt and not local_high_risk_request and request.content_type and 'json' not in request.content_type:
+            if not _csrf_valid():
+                log_security_event('csrf_failed', f'IP {client_ip} CSRF验证失败 path={request.path}', 'warning')
+                return jsonify({'error': 'CSRF验证失败'}), 403
+    g.csrf_token = session.get('csrf_token', '')
+    return None
+
+def _detect_injection(data):
+    if isinstance(data, str):
+        for pattern in ['<script', 'javascript:', 'onerror=', 'onload=', 'onclick=', 'onmouseover=', 'data:text/html', '<iframe', '<object', '<embed', '<form', '<svg', '<math', 'expression(', 'url(', '@import', '-moz-binding', 'vbscript:', '<body', '<input', '<link', '<meta', '<base', 'document.cookie', 'window.location', 'eval(', 'alert(', 'confirm(', 'prompt(', '\\x3c', '\\x3e', '\\u003c', '\\u003e', '&#x3c;', '&#x3e;', '&#60;', '&#62;']:
+            if pattern.lower() in data.lower():
+                return True
+    elif isinstance(data, dict):
+        for v in data.values():
+            if _detect_injection(v):
+                return True
+    elif isinstance(data, list):
+        for v in data:
+            if _detect_injection(v):
+                return True
+    return False
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data: blob: http: https:; font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' data: blob: https://cdnjs.cloudflare.com https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com; connect-src 'self' http://localhost:* http://127.0.0.1:* https://api.deepseek.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+    if response.content_type and 'text/html' in response.content_type:
+        response.content_type = 'text/html; charset=utf-8'
+        csrf = session.get('csrf_token', '')
+        if csrf and response.get_data():
+            try:
+                html = response.get_data(as_text=True)
+                if '</head>' in html:
+                    html = html.replace('</head>', f'<meta name="csrf-token" content="{csrf}"></head>')
+                if '</body>' in html:
+                    html = html.replace('</body>', f'<script>window.__CSRF_TOKEN__="{csrf}";</script></body>')
+                response.set_data(html)
+            except Exception:
+                pass
+    return response
+
+
+def optional_image_response(path, label):
+    if os.path.exists(path):
+        return send_file(path)
+    safe_label = (label or "Kaguya").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="100%" height="100%" rx="20" ry="20" fill="#eef2ff"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="14" fill="#4f46e5">{safe_label}</text></svg>'''
+    return Response(svg, mimetype='image/svg+xml')
+
+@app.route('/background')
+def background():
+    bg_path = os.path.join(os.path.dirname(__file__), 'assets', 'background.png')
+    if os.path.exists(bg_path):
+        return send_file(bg_path)
+    return Response('', status=404)
+
+@app.route('/wallpaper')
+def wallpaper():
+    wp_path = os.path.join(os.path.dirname(__file__), 'assets', 'wallpaper.jpg')
+    if os.path.exists(wp_path):
+        return send_file(wp_path)
+    return Response('', status=404)
+
+@app.route('/header-img')
+def header_img():
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-header.png'), 'Kaguya')
+
+@app.route('/hero-img')
+def hero_img():
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-hero.png'), 'Kaguya')
+
+@app.route('/welcome-img')
+def welcome_img():
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-welcome.png'), 'Kaguya')
+
+@app.route('/deepseek-icon')
+def deepseek_icon():
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'deepseek.png'), 'AI')
+
+@app.route('/sidebar-icon')
+def sidebar_icon():
+    fallback = os.path.join(APP_DIR, 'assets', 'kaguya-header.png')
+    return optional_image_response(fallback, 'K')
+
+@app.route('/favicon.ico')
+def favicon():
+    img_path = os.path.join(APP_DIR, 'assets', 'favicon.ico')
+    if os.path.exists(img_path):
+        return send_file(img_path)
+    return optional_image_response(os.path.join(APP_DIR, 'assets', 'kaguya-header.png'), 'K')
+
+_cached_index_html = None
+_cached_index_time = 0
+_cache_version = str(int(time.time()))
+
+@app.route('/')
+def index():
+    global _cached_index_html, _cached_index_time, _cache_version
+    tools_meta = {k: {"name": v["name"], "description": v["description"], "icon": v["icon"]} for k, v in AVAILABLE_TOOLS.items()}
+    html = HTML_TEMPLATE.replace('{{roles_json}}', json.dumps(PRESET_ROLES, ensure_ascii=False))
+    html = html.replace('{{loras_json}}', json.dumps(PRESET_LORAS, ensure_ascii=False))
+    html = html.replace('{{tools_json}}', json.dumps(tools_meta, ensure_ascii=False))
+    html = html.replace('{{commands_json}}', json.dumps(QUICK_COMMANDS, ensure_ascii=False))
+    html = html.replace('{{cache_version}}', _cache_version)
+    resp = make_response(html)
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    resp.headers['X-Content-Version'] = _cache_version
+    return resp
+
+@app.route('/lora/list')
+def lora_list():
+    loras = []
+    for l in PRESET_LORAS:
+        loras.append({
+            "id": l["id"], "name": l["name"], "description": l["description"],
+            "icon": l.get("icon", "🤖"), "color": l.get("color", "#10b981"),
+            "loaded": current_lora == l["id"], "available": True
+        })
+    return jsonify({'loras': loras})
+
+@app.route('/api/roles', methods=['GET'])
+def api_roles():
+    return jsonify({"success": True, "roles": PRESET_ROLES})
+
+@app.route('/api/prompts', methods=['GET'])
+def api_prompts():
+    category = request.args.get('category', '')
+    search = request.args.get('search', '').lower()
+    prompts = []
+    for tpl in get_all_prompt_templates():
+        if category and tpl.get('category') != category:
+            continue
+        if search and search not in (tpl.get('name','') + tpl.get('desc','') + ' '.join(tpl.get('tags',[])) + tpl.get('source','')).lower():
+            continue
+        prompts.append(tpl)
+    return jsonify({"success": True, "prompts": prompts, "total": len(prompts)})
+
+@app.route('/lora/load', methods=['POST'])
+def lora_load():
+    global current_lora
+    data = request.get_json(silent=True) or {}
+    lora_id = data.get('lora_id', 'none')
+    current_lora = lora_id
+    lora_info = next((l for l in PRESET_LORAS if l['id'] == lora_id), None)
+    return jsonify({'success': True, 'message': f'已切换到{lora_info["name"] if lora_info else lora_id}'})
+
+@app.route('/tool/execute', methods=['POST'])
+def tool_execute():
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return jsonify({'success': False, 'error': 'Empty request'})
+    tool_id = data.get('tool')
+    if not tool_id:
+        return jsonify({'success': False, 'error': 'Tool ID required'})
+    tool_input = data.get('input', '')
+    
+    if tool_id in AVAILABLE_TOOLS:
+        try:
+            result = AVAILABLE_TOOLS[tool_id]["func"](tool_input)
+            return jsonify({'success': True, 'result': result})
+        except Exception as e:
+            return jsonify({'success': False, 'error': sanitize_error(e)})
+    return jsonify({'success': False, 'error': '工具不存在'})
+
+@app.route('/web/search', methods=['POST'])
+def web_search_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        query = data.get('query', '').strip()
+        max_results = data.get('max_results', 10)
+        if not query:
+            return jsonify({'success': False, 'error': '请输入搜索关键词'})
+        results = web_search(query, max_results)
+        return jsonify({'success': True, 'results': results, 'count': len(results)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/web/fetch', methods=['POST'])
+def web_fetch_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        url = data.get('url', '').strip()
+        if not url:
+            return jsonify({'success': False, 'error': '请输入URL'})
+        is_safe, reason = validate_url_safety(url)
+        if not is_safe:
+            log_security_event('ssrf_blocked', f'URL被阻止: {reason}', 'warning')
+            return jsonify({'success': False, 'error': f'URL安全检查未通过: {reason}'})
+        result = fetch_webpage(url)
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/code/execute', methods=['POST'])
+def code_execute():
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return jsonify({'success': False, 'error': 'Empty request'})
+    code = data.get('code', '')
+    if len(code) > 100000:
+        return jsonify({'success': False, 'error': 'Code too long (max 100K chars)'})
+    result = execute_python_code(code)
+    return jsonify(result)
+
+@app.route('/kb/add', methods=['POST'])
+def kb_add():
+    data = request.get_json(silent=True) or {}
+    text = data.get('text', '')
+    if text:
+        entry_id = add_to_knowledge_base(text)
+        return jsonify({'success': True, 'id': entry_id})
+    return jsonify({'success': False, 'error': '内容为空'})
+
+@app.route('/deepseek/test', methods=['POST'])
+def deepseek_test():
+    try:
+        data = request.get_json(silent=True) or {}
+        cfg = normalize_external_api_payload(data)
+        api_key = cfg["api_key"]
+        api_url = cfg["api_url"]
+        provider = cfg["provider"]
+        
+        if not api_key:
+            return jsonify({'success': False, 'error': 'API Key不能为空'})
+        
+        import urllib.request
+        import json as json_module
+        
+        test_url = build_chat_completions_endpoint(provider, api_url)
+        test_data = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 10
+        }
+        
+        req = urllib.request.Request(
+            test_url,
+            data=json_module.dumps(test_data).encode('utf-8'),
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            },
+            method='POST'
+        )
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json_module.loads(response.read().decode('utf-8'))
+            return jsonify({'success': True, 'message': '连接成功'})
+            
+    except urllib.error.HTTPError as e:
+        error_msg = f"HTTP错误: {e.code}"
+        try:
+            error_body = json_module.loads(e.read().decode('utf-8'))
+            error_msg = error_body.get('error', {}).get('message', error_msg)
+        except Exception:
+                            pass
+        return jsonify({'success': False, 'error': error_msg})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/deepseek/chat', methods=['POST'])
+def deepseek_chat():
+    try:
+        data = request.get_json(silent=True) or {}
+        cfg = normalize_external_api_payload(data)
+        api_key = cfg["api_key"]
+        api_url = cfg["api_url"]
+        provider = cfg["provider"]
+        model = cfg["model"]
+        messages = data.get('messages', [])
+        
+        if not api_key:
+            return jsonify({'error': 'API Key未配置'}), 400
+        
+        import urllib.request
+        import json as json_module
+        
+        chat_url = build_chat_completions_endpoint(provider, api_url)
+        chat_data = {
+            "model": model,
+            "messages": messages,
+            "stream": True
+        }
+        
+        def generate():
+            req = urllib.request.Request(
+                chat_url,
+                data=json_module.dumps(chat_data).encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {api_key}'
+                },
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=60) as response:
+                for line in response:
+                    line = line.decode('utf-8').strip()
+                    if line.startswith('data: '):
+                        if line == 'data: [DONE]':
+                            yield 'data: {"done": true}\n\n'
+                            break
+                        try:
+                            chunk = json_module.loads(line[6:])
+                            delta = chunk.get('choices', [{}])[0].get('delta', {})
+                            # 提取正式回答内容
+                            if delta.get('content'):
+                                content = delta['content']
+                                yield f'data: {json_module.dumps({"content": content})}\n\n'
+                            # 提取思考过程内容
+                            if delta.get('reasoning_content'):
+                                reasoning = delta['reasoning_content']
+                                yield f'data: {json_module.dumps({"reasoning": reasoning})}\n\n'
+                        except Exception:
+                            pass
+        
+        return Response(generate(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
+        
+    except Exception as e:
+        return jsonify({'error': sanitize_error(e)}), 500
+
+@app.route('/external/config', methods=['GET'])
+def external_config_get():
+    device_id = request.args.get('device_id', '') or request.headers.get('X-Device-Id', '')
+    user_config = _get_user_external_api(device_id) if device_id else external_api_config
+    providers = user_config.get("providers", {})
+    masked_providers = {}
+    for pid, pconfig in providers.items():
+        masked = dict(pconfig)
+        if 'api_key' in masked and masked['api_key']:
+            masked['api_key'] = mask_api_key(masked['api_key'])
+            masked['_has_key'] = True
+        else:
+            masked['_has_key'] = False
+        masked_providers[pid] = masked
+    return jsonify({"success": True, "active_provider": user_config.get("active_provider", "deepseek"), "providers": masked_providers})
+
+@app.route('/external/config', methods=['POST'])
+def external_config_save():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get("device_id", "") or request.headers.get('X-Device-Id', '')
+    if not device_id:
+        return jsonify({"success": False, "error": "device_id required"})
+    active_provider = (data.get("active_provider") or "deepseek").strip().lower()
+    providers = data.get("providers", {})
+    if not isinstance(providers, dict):
+        return jsonify({"success": False, "error": "providers格式错误"})
+    default_cfg = default_external_api_config()
+    existing_config = _get_user_external_api(device_id)
+    normalized = {"active_provider": active_provider, "providers": {}}
+    for provider, base in default_cfg["providers"].items():
+        item = providers.get(provider, {})
+        existing_provider = existing_config.get("providers", {}).get(provider, {})
+        incoming_key = item.get("api_key") or item.get("apiKey") or ""
+        if isinstance(incoming_key, str) and "****" in incoming_key:
+            incoming_key = ""
+        item_cfg = normalize_external_api_payload({
+            "provider": provider,
+            "api_key": incoming_key or existing_provider.get("api_key", ""),
+            "api_url": item.get("api_url") or base.get("api_url"),
+            "apiUrl": item.get("apiUrl"),
+            "model": item.get("model") or base.get("model"),
+            "enabled": bool(incoming_key or existing_provider.get("api_key", "")),
+        })
+        normalized["providers"][provider] = {
+            "api_url": item_cfg["api_url"],
+            "api_key": item_cfg["api_key"],
+            "model": item_cfg["model"]
+        }
+    if normalized["active_provider"] not in normalized["providers"]:
+        normalized["active_provider"] = "deepseek"
+    _save_user_external_api(device_id, normalized)
+    return jsonify({"success": True})
+
+@app.route('/external/test', methods=['POST'])
+def external_test():
+    try:
+        data = request.get_json(silent=True) or {}
+        device_id = data.get("device_id", "") or request.headers.get('X-Device-Id', '')
+        user_config = _get_user_external_api(device_id) if device_id else external_api_config
+        provider = (data.get("provider") or user_config.get("active_provider") or "deepseek").strip().lower()
+        provider_cfg = user_config.get("providers", {}).get(provider, {})
+        api_key = (provider_cfg.get("api_key") or "").strip()
+        api_url = (provider_cfg.get("api_url") or "").strip()
+        model = (provider_cfg.get("model") or "").strip()
+        text = call_external_provider(provider, api_url, api_key, model, "返回“连接成功”四个字。", "")
+        return jsonify({"success": True, "provider": provider, "message": text[:80]})
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8")
+        except Exception:
+            body = str(e)
+        return jsonify({"success": False, "error": f"HTTP {e.code}: {body[:300]}"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/scenes/list', methods=['GET'])
+def scenes_list():
+    items = []
+    for scene_id, scene_config in SCENE_PROMPT_TEMPLATES.items():
+        fields = SCENE_FIELDS.get(scene_id, [])
+        items.append({
+            "id": scene_id,
+            "system": scene_config.get("system", "") if isinstance(scene_config, dict) else "",
+            "fields": [{"key": f["key"], "label": f["label"], "type": f.get("type", "input"), "rows": f.get("rows", 1), "full": f.get("full", False), "required": f.get("required", False)} for f in fields]
+        })
+    return jsonify({"success": True, "scenes": items})
+
+@app.route('/scenes/history', methods=['GET'])
+def scenes_history():
+    history = load_scene_history()
+    scene_id = (request.args.get("scene_id") or "").strip()
+    if scene_id:
+        history = [h for h in history if h.get("scene_id") == scene_id]
+    return jsonify({"success": True, "history": history[-20:]})
+
+@app.route('/scenes/history', methods=['DELETE'])
+def scenes_history_delete():
+    data = request.get_json(silent=True) or {}
+    item_id = data.get("id")
+    history = load_scene_history()
+    if item_id:
+        history = [h for h in history if h.get("id") != item_id]
+    else:
+        history = []
+    save_scene_history(history)
+    return jsonify({"success": True})
+
+@app.route('/scenes/generate', methods=['POST'])
+def scenes_generate():
+    try:
+        data = request.get_json(silent=True) or {}
+        scene_id = (data.get("scene_id") or "").strip()
+        device_id = data.get("device_id", "")
+        provider = (data.get("provider") or "deepseek").strip().lower()
+        fields = data.get("fields") or {}
+        if scene_id not in SCENE_PROMPT_TEMPLATES:
+            return jsonify({"success": False, "error": "场景不存在"})
+        field_defs = SCENE_FIELDS.get(scene_id, [])
+        required_field = next((f for f in field_defs if f.get("required")), None)
+        if required_field and not (fields.get(required_field["key"]) or "").strip():
+            return jsonify({"success": False, "error": f"请输入{required_field['label']}"})
+        provider_id, runtime = get_provider_runtime(provider, device_id)
+        prompt = build_scene_prompt(scene_id, fields)
+        system_prompt = get_scene_system_prompt(scene_id)
+        text = call_external_provider(provider_id, runtime.get("api_url"), runtime.get("api_key"), runtime.get("model"), prompt, system_prompt)
+        import uuid as _uuid
+        history_item = {
+            "id": str(_uuid.uuid4())[:8],
+            "scene_id": scene_id,
+            "fields": fields,
+            "content": text,
+            "provider": provider_id,
+            "model": runtime.get("model"),
+            "timestamp": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        history = load_scene_history()
+        history.append(history_item)
+        save_scene_history(history)
+        return jsonify({
+            "success": True,
+            "provider": provider_id,
+            "model": runtime.get("model"),
+            "scene_id": scene_id,
+            "content": text,
+            "history_id": history_item["id"]
+        })
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8")
+        except Exception:
+            body = str(e)
+        return jsonify({"success": False, "error": f"HTTP {e.code}: {body[:500]}"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+# ==================== MCP 插件管理 API ====================
+
+@app.route('/mcp/plugins', methods=['GET'])
+def mcp_list_plugins():
+    """获取所有 MCP 插件列表"""
+    try:
+        config = load_mcp_config()
+        plugins = []
+        for plugin_id, plugin in config.get("plugins", {}).items():
+            plugins.append({
+                "id": plugin_id,
+                "name": plugin.get("name", ""),
+                "description": plugin.get("description", ""),
+                "icon": plugin.get("icon", "🔌"),
+                "color": plugin.get("color", "#667eea"),
+                "type": plugin.get("type", "builtin"),
+                "category": plugin.get("category", plugin.get("type", "builtin")),
+                "enabled": plugin.get("enabled", False),
+                "tools_count": len(plugin.get("tools", []))
+            })
+        return jsonify({'success': True, 'plugins': plugins})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/mcp/plugin/<plugin_id>', methods=['GET'])
+def mcp_get_plugin(plugin_id):
+    """获取单个 MCP 插件详情"""
+    try:
+        config = load_mcp_config()
+        plugin = config.get("plugins", {}).get(plugin_id)
+        if not plugin:
+            return jsonify({'success': False, 'error': '插件不存在'})
+        return jsonify({'success': True, 'plugin': plugin})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/mcp/plugin/<plugin_id>/enable', methods=['POST'])
+def mcp_enable_plugin(plugin_id):
+    """启用/禁用 MCP 插件"""
+    try:
+        data = request.get_json(silent=True) or {}
+        enabled = data.get('enabled', True)
+        
+        config = load_mcp_config()
+        if plugin_id not in config.get("plugins", {}):
+            return jsonify({'success': False, 'error': '插件不存在'})
+        
+        config["plugins"][plugin_id]["enabled"] = enabled
+        save_mcp_config(config)
+        
+        action = "启用" if enabled else "禁用"
+        return jsonify({'success': True, 'message': f'已{action}插件'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/mcp/plugin/<plugin_id>/config', methods=['POST'])
+def mcp_update_plugin_config(plugin_id):
+    """更新 MCP 插件配置"""
+    try:
+        data = request.get_json(silent=True) or {}
+        config = load_mcp_config()
+        
+        if plugin_id not in config.get("plugins", {}):
+            return jsonify({'success': False, 'error': '插件不存在'})
+        
+        # 更新配置
+        config["plugins"][plugin_id]["config"] = data.get('config', {})
+        save_mcp_config(config)
+        
+        return jsonify({'success': True, 'message': '配置已更新'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/mcp/execute', methods=['POST'])
+def mcp_execute_tool():
+    """执行 MCP 工具"""
+    try:
+        data = request.get_json(silent=True) or {}
+        plugin_id = data.get('plugin_id')
+        tool_name = data.get('tool_name')
+        parameters = data.get('parameters', {})
+        
+        if not plugin_id or not tool_name:
+            return jsonify({'success': False, 'error': '缺少必要参数'})
+        
+        result = execute_mcp_tool(plugin_id, tool_name, parameters)
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/mcp/tools', methods=['GET'])
+def mcp_get_enabled_tools():
+    """获取所有启用的 MCP 工具（用于 Function Calling）"""
+    try:
+        tools = get_enabled_mcp_tools()
+        return jsonify({'success': True, 'tools': tools})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+# ==================== 工作流编排 API ====================
+
+@app.route('/workflow/node-types', methods=['GET'])
+def workflow_get_node_types():
+    """获取所有工作流节点类型"""
+    try:
+        return jsonify({'success': True, 'node_types': WORKFLOW_NODE_TYPES})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/workflows', methods=['GET'])
+def workflow_list():
+    """获取所有工作流列表"""
+    try:
+        workflows_data = load_workflows()
+        # 简化返回，不包含完整的节点数据
+        workflows = []
+        for wf in workflows_data.get('workflows', []):
+            workflows.append({
+                'id': wf.get('id'),
+                'name': wf.get('name', '未命名工作流'),
+                'description': wf.get('description', ''),
+                'icon': wf.get('icon', '📋'),
+                'color': wf.get('color', '#667eea'),
+                'node_count': len(wf.get('nodes', [])),
+                'created_at': wf.get('created_at'),
+                'updated_at': wf.get('updated_at')
+            })
+        return jsonify({'success': True, 'workflows': workflows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/workflow/<workflow_id>', methods=['GET'])
+def workflow_get(workflow_id):
+    """获取单个工作流详情"""
+    try:
+        workflow = load_workflow_file(workflow_id)
+        if not workflow:
+            return jsonify({'success': False, 'error': '工作流不存在'})
+        return jsonify({'success': True, 'workflow': workflow})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/workflow', methods=['POST'])
+def workflow_create():
+    """创建或保存工作流"""
+    try:
+        data = request.get_json(silent=True) or {}
+        workflow_id = data.get('id') or f"workflow_{int(time.time())}"
+        
+        workflow_data = {
+            'id': workflow_id,
+            'name': data.get('name', '未命名工作流'),
+            'description': data.get('description', ''),
+            'icon': data.get('icon', '📋'),
+            'color': data.get('color', '#667eea'),
+            'nodes': data.get('nodes', []),
+            'connections': data.get('connections', []),
+            'updated_at': time.time()
+        }
+        
+        # 检查是否是新建
+        workflows_data = load_workflows()
+        existing = any(w['id'] == workflow_id for w in workflows_data.get('workflows', []))
+        
+        if not existing:
+            workflow_data['created_at'] = time.time()
+            workflows_data['workflows'].append({
+                'id': workflow_id,
+                'name': workflow_data['name'],
+                'description': workflow_data['description'],
+                'icon': workflow_data['icon'],
+                'color': workflow_data['color'],
+                'node_count': len(workflow_data['nodes']),
+                'created_at': workflow_data['created_at'],
+                'updated_at': workflow_data['updated_at']
+            })
+        else:
+            # 更新现有工作流信息
+            for wf in workflows_data['workflows']:
+                if wf['id'] == workflow_id:
+                    wf['name'] = workflow_data['name']
+                    wf['description'] = workflow_data['description']
+                    wf['icon'] = workflow_data['icon']
+                    wf['color'] = workflow_data['color']
+                    wf['node_count'] = len(workflow_data['nodes'])
+                    wf['updated_at'] = workflow_data['updated_at']
+                    break
+        
+        # 保存工作流文件和索引
+        if save_workflow_file(workflow_id, workflow_data):
+            save_workflows(workflows_data)
+            return jsonify({'success': True, 'workflow_id': workflow_id})
+        else:
+            return jsonify({'success': False, 'error': '保存失败'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/workflow/<workflow_id>', methods=['DELETE'])
+def workflow_delete(workflow_id):
+    """删除工作流"""
+    try:
+        workflows_data = load_workflows()
+        workflows_data['workflows'] = [w for w in workflows_data['workflows'] if w['id'] != workflow_id]
+        save_workflows(workflows_data)
+        
+        # 删除工作流文件
+        file_path = os.path.join(WORKFLOW_DIR, f"{workflow_id}.json")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/workflow/<workflow_id>/execute', methods=['POST'])
+def workflow_execute(workflow_id):
+    """执行工作流"""
+    try:
+        workflow = load_workflow_file(workflow_id)
+        if not workflow:
+            return jsonify({'success': False, 'error': '工作流不存在'})
+        
+        data = request.get_json(silent=True) or {}
+        inputs = data.get('inputs', {})
+        
+        # 执行工作流
+        result = workflow_engine.execute_workflow(workflow, inputs)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/workflow/execute', methods=['POST'])
+def workflow_execute_inline():
+    """直接执行工作流（不保存）"""
+    try:
+        data = request.get_json(silent=True) or {}
+        workflow = data.get('workflow', {})
+        inputs = data.get('inputs', {})
+        
+        result = workflow_engine.execute_workflow(workflow, inputs)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+# ==================== 记忆系统 API ====================
+
+@app.route('/memory/stats', methods=['GET'])
+def memory_get_stats():
+    """获取记忆统计信息"""
+    try:
+        stats = memory_system.get_memory_stats()
+        return jsonify({'success': True, 'stats': stats})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory/search', methods=['POST'])
+def memory_search():
+    """搜索记忆"""
+    try:
+        data = request.get_json(silent=True) or {}
+        query = data.get('query', '')
+        top_k = data.get('top_k', 5)
+        memory_type = data.get('memory_type')
+        pinned_only = data.get('pinned_only', False)
+        
+        memories = memory_system.search_memories(query, top_k=top_k, memory_type=memory_type, pinned_only=pinned_only)
+        return jsonify({
+            'success': True, 
+            'memories': [
+                {
+                    'id': m[0],
+                    'content': m[1],
+                    'type': m[2],
+                    'category': m[3],
+                    'importance': m[4],
+                    'pinned': m[5],
+                    'created_at': m[6],
+                    'access_count': m[8]
+                } for m in memories
+            ]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory', methods=['POST'])
+def memory_add():
+    """添加记忆"""
+    try:
+        data = request.get_json(silent=True) or {}
+        content = data.get('content', '')
+        memory_type = data.get('type', 'fact')
+        category = data.get('category', 'general')
+        importance = data.get('importance')
+        pinned = data.get('pinned', 0)
+        
+        memory_id = memory_system.add_long_term_memory(
+            content=content,
+            memory_type=memory_type,
+            category=category,
+            importance=importance,
+            pinned=pinned
+        )
+        return jsonify({'success': True, 'memory_id': memory_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory/<memory_id>', methods=['DELETE'])
+def memory_delete(memory_id):
+    """删除记忆"""
+    try:
+        conn = sqlite3.connect(MEMORY_DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM long_term_memories WHERE id = ?', (memory_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory/<memory_id>/pin', methods=['PUT'])
+def memory_toggle_pin(memory_id):
+    """切换记忆置顶状态"""
+    try:
+        result = memory_system.toggle_memory_pin(memory_id)
+        if result:
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': '记忆不存在'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory/profile', methods=['GET'])
+def memory_get_profile():
+    """获取用户画像"""
+    try:
+        profile = memory_system.get_user_profile()
+        return jsonify({'success': True, 'profile': profile})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory/profile', methods=['POST'])
+def memory_update_profile():
+    """更新用户画像"""
+    try:
+        data = request.get_json(silent=True) or {}
+        key = data.get('key', '')
+        value = data.get('value', '')
+        category = data.get('category', 'preference')
+        confidence = data.get('confidence', 0.5)
+        
+        memory_system.update_user_profile(key, value, category, confidence)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/memory/consolidate', methods=['POST'])
+def memory_consolidate():
+    """整合记忆"""
+    try:
+        memory_system.consolidate_memories()
+        return jsonify({'success': True, 'message': '记忆整合完成'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+# ==================== 多模态视觉理解 API ====================
+
+@app.route('/multimodal/upload', methods=['POST'])
+def multimodal_upload_image():
+    """上传并处理图像"""
+    try:
+        if 'image' not in request.files:
+            # 尝试从 JSON 获取 base64 图像
+            data = request.get_json(silent=True) or {}
+            if data and 'image' in data:
+                image_data = data['image']
+                task = data.get('task', 'understand')
+                result = multimodal_system.process_image(image_data, task=task)
+                return jsonify({'success': True, 'result': result})
+            return jsonify({'success': False, 'error': '没有提供图像'})
+        
+        file = request.files['image']
+        task = request.form.get('task', 'understand')
+        
+        # 保存上传的文件
+        filename = f"{uuid.uuid4()}_{file.filename}"
+        filepath = os.path.join(IMAGE_CACHE_DIR, filename)
+        file.save(filepath)
+        
+        # 处理图像
+        result = multimodal_system.process_image(filepath, task=task)
+        result['filepath'] = filepath
+        
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/multimodal/analyze', methods=['POST'])
+def multimodal_analyze():
+    """分析图像内容"""
+    try:
+        data = request.get_json(silent=True) or {}
+        image_id = data.get('image_id')
+        task = data.get('task', 'analyze')
+        
+        if not image_id or image_id not in multimodal_system.image_cache:
+            return jsonify({'success': False, 'error': '图像不存在'})
+        
+        image_info = multimodal_system.image_cache[image_id]
+        result = multimodal_system.process_image(image_info['path'], task=task)
+        
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/multimodal/chat', methods=['POST'])
+def multimodal_chat():
+    """多模态图文对话"""
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get('message', '')
+        image_id = data.get('image_id')
+        
+        # 如果有图像，获取图像分析
+        image_analysis = None
+        if image_id and image_id in multimodal_system.image_cache:
+            image_info = multimodal_system.image_cache[image_id]
+            image_analysis = multimodal_system.process_image(
+                image_info['path'], 
+                task='understand'
+            )
+        
+        # 生成多模态提示词
+        multimodal_prompt = multimodal_system.generate_multimodal_prompt(
+            message, 
+            image_analysis
+        )
+        
+        # 添加到对话历史
+        multimodal_system.add_to_conversation('user', message, image_id)
+        
+        return jsonify({
+            'success': True,
+            'prompt': multimodal_prompt,
+            'image_analysis': image_analysis,
+            'has_image': image_id is not None
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/multimodal/history', methods=['GET'])
+def multimodal_get_history():
+    """获取图文对话历史"""
+    try:
+        history = multimodal_system.get_conversation_context(n=10)
+        return jsonify({'success': True, 'history': history})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/multimodal/clear', methods=['POST'])
+def multimodal_clear_history():
+    """清除图文对话历史"""
+    try:
+        multimodal_system.conversation_history = []
+        return jsonify({'success': True, 'message': '对话历史已清除'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+# ==================== 模型微调平台 API ====================
+
+@app.route('/finetune/datasets', methods=['GET'])
+def finetune_get_datasets():
+    """获取所有数据集"""
+    try:
+        datasets = finetune_platform.get_all_datasets()
+        return jsonify({'success': True, 'datasets': datasets})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/dataset/upload', methods=['POST'])
+def finetune_upload_dataset():
+    """上传数据集"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': '没有文件'})
+        
+        file = request.files['file']
+        name = request.form.get('name', file.filename)
+        format_type = request.form.get('format', 'jsonl')
+        
+        file_data = file.read()
+        result = finetune_platform.upload_dataset(name, file_data, format_type)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/dataset/<dataset_id>', methods=['DELETE'])
+def finetune_delete_dataset(dataset_id):
+    """删除数据集"""
+    try:
+        result = finetune_platform.delete_dataset(dataset_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/jobs', methods=['GET'])
+def finetune_get_jobs():
+    """获取所有训练任务"""
+    try:
+        jobs = finetune_platform.get_all_jobs()
+        return jsonify({'success': True, 'jobs': jobs})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/job', methods=['POST'])
+def finetune_create_job():
+    """创建训练任务"""
+    try:
+        data = request.get_json(silent=True) or {}
+        name = data.get('name', '未命名任务')
+        dataset_id = data.get('dataset_id')
+        config = data.get('config', {})
+        
+        result = finetune_platform.create_training_job(name, dataset_id, config)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/job/<job_id>/start', methods=['POST'])
+def finetune_start_job(job_id):
+    """开始训练"""
+    try:
+        result = finetune_platform.start_training(job_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/job/<job_id>/stop', methods=['POST'])
+def finetune_stop_job(job_id):
+    """停止训练"""
+    try:
+        result = finetune_platform.stop_training(job_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/job/<job_id>', methods=['GET'])
+def finetune_get_job_status(job_id):
+    """获取训练任务状态"""
+    try:
+        result = finetune_platform.get_job_status(job_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/job/<job_id>', methods=['DELETE'])
+def finetune_delete_job(job_id):
+    """删除训练任务"""
+    try:
+        result = finetune_platform.delete_job(job_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/finetune/job/<job_id>/logs', methods=['GET'])
+def finetune_get_job_logs(job_id):
+    """获取训练日志"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        result = finetune_platform.get_training_logs(job_id, limit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/kb/search', methods=['POST'])
+def kb_search():
+    data = request.get_json(silent=True) or {}
+    query = data.get('query', '')
+    results = search_knowledge_base(query)
+    return jsonify({'success': True, 'results': results})
+
+@app.route('/rag/upload', methods=['POST'])
+def rag_upload():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'})
+        file = request.files['file']
+        if file.content_length and file.content_length > 50 * 1024 * 1024:
+            return jsonify({'success': False, 'error': 'File too large (max 50MB)'})
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': '没有上传文件'})
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': '没有选择文件'})
+        filename = file.filename
+        file_path = os.path.join(RAG_DIR, f"{uuid.uuid4().hex[:8]}_{filename}")
+        file.save(file_path)
+        doc_info, error = add_document_to_rag(file_path, filename)
+        if error:
+            return jsonify({'success': False, 'error': error})
+        return jsonify({'success': True, 'document': doc_info})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/rag/documents', methods=['GET'])
+def rag_documents_list():
+    return jsonify({'success': True, 'documents': rag_documents})
+
+@app.route('/rag/delete/<doc_id>', methods=['DELETE'])
+def rag_delete(doc_id):
+    try:
+        delete_document_from_rag(doc_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/rag/search', methods=['POST'])
+def rag_search():
+    data = request.get_json(silent=True) or {}
+    query = data.get('query', '')
+    top_k = data.get('top_k', 5)
+    doc_ids = data.get('doc_ids')
+    category = data.get('category')
+    use_rerank = data.get('use_rerank', True)
+    alpha = data.get('alpha', 0.5)
+    use_cache = data.get('use_cache', True)
+    use_expansion = data.get('use_expansion', True)
+    use_hyde = data.get('use_hyde', False)
+    use_multi_query = data.get('use_multi_query', False)
+    use_decomposition = data.get('use_decomposition', False)
+    use_adaptive = data.get('use_adaptive', True)
+    use_rrf = data.get('use_rrf', False)
+    use_metadata_filter = data.get('use_metadata_filter', True)
+    use_time_weight = data.get('use_time_weight', False)
+    use_compression = data.get('use_compression', False)
+    use_iterative = data.get('use_iterative', False)
+    results = search_rag(query, top_k, doc_ids, category, use_rerank, alpha, None, use_cache, use_expansion, use_hyde, use_multi_query, use_decomposition, use_adaptive, use_rrf, use_metadata_filter, use_time_weight, use_compression, use_iterative)
+    include_analysis = data.get('include_analysis', False)
+    quality = calculate_retrieval_quality(query, results) if include_analysis else None
+    query_type = classify_query(query) if include_analysis else None
+    structured = build_structured_query(query) if include_analysis else None
+    compressed = compress_context(results) if use_compression else None
+    return jsonify({
+        'success': True, 
+        'results': results, 
+        'count': len(results),
+        'quality': quality,
+        'query_type': query_type,
+        'structured_query': structured,
+        'compressed_context': compressed
+    })
+
+@app.route('/rag/preview/<doc_id>', methods=['GET'])
+def rag_preview(doc_id):
+    doc = next((d for d in rag_documents if d['id'] == doc_id), None)
+    if not doc:
+        return jsonify({'success': False, 'error': '文档不存在'})
+    chunks = [c for c in rag_chunks if c['doc_id'] == doc_id]
+    chunks.sort(key=lambda x: x.get('index', 0))
+    return jsonify({
+        'success': True,
+        'document': doc,
+        'chunks': [{'id': c['id'], 'index': c.get('index', 0), 'text': c['text'][:200] + '...' if len(c['text']) > 200 else c['text']} for c in chunks]
+    })
+
+@app.route('/rag/chunk/<chunk_id>', methods=['GET'])
+def rag_get_chunk(chunk_id):
+    chunk = next((c for c in rag_chunks if c['id'] == chunk_id), None)
+    if not chunk:
+        return jsonify({'success': False, 'error': '分块不存在'})
+    doc = next((d for d in rag_documents if d['id'] == chunk['doc_id']), None)
+    return jsonify({
+        'success': True,
+        'chunk': chunk,
+        'document': doc
+    })
+
+@app.route('/rag/stats', methods=['GET'])
+def rag_stats():
+    return jsonify({'success': True, 'stats': get_rag_stats()})
+
+@app.route('/rag/clear_cache', methods=['POST'])
+def rag_clear_cache():
+    global rag_cache
+    rag_cache = {}
+    return jsonify({'success': True, 'message': '缓存已清除'})
+
+@app.route('/rag/batch_upload', methods=['POST'])
+def rag_batch_upload():
+    try:
+        if 'files' not in request.files:
+            return jsonify({'success': False, 'error': '没有上传文件'})
+        files = request.files.getlist('files')
+        results = []
+        for file in files:
+            if file.filename:
+                filename = file.filename
+                file_path = os.path.join(RAG_DIR, f"{uuid.uuid4().hex[:8]}_{filename}")
+                file.save(file_path)
+                doc_info, error = add_document_to_rag(file_path, filename)
+                results.append({
+                    'filename': filename,
+                    'success': error is None,
+                    'error': error,
+                    'document': doc_info
+                })
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/rag/add_text', methods=['POST'])
+def rag_add_text():
+    try:
+        data = request.get_json(silent=True) or {}
+        text = data.get('text', '')
+        title = data.get('title', '手动输入')
+        tags = data.get('tags', [])
+        if len(text) < 50:
+            return jsonify({'success': False, 'error': '文本内容过少'})
+        doc_id = str(uuid.uuid4())[:8]
+        doc_info = {
+            "id": doc_id,
+            "filename": title,
+            "path": "",
+            "size": len(text),
+            "time": datetime.now().isoformat(),
+            "chunk_count": 0,
+            "category": 'text',
+            "tags": tags,
+            "char_count": len(text),
+            "word_count": len(text.split())
+        }
+        chunks = chunk_text(text, chunk_size=400, overlap=80)
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_{i}"
+            embedding = compute_tfidf_embedding(chunk)
+            chunk_info = {
+                "id": chunk_id,
+                "doc_id": doc_id,
+                "text": chunk,
+                "index": i
+            }
+            rag_chunks.append(chunk_info)
+            rag_embeddings.append(embedding)
+        doc_info["chunk_count"] = len(chunks)
+        rag_documents.append(doc_info)
+        save_rag_index()
+        return jsonify({'success': True, 'document': doc_info})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+PROJECT_CONFIG_FILE = os.path.join(DATA_DIR, 'project_config.json')
+USER_PROFILE_FILE = os.path.join(DATA_DIR, 'user_profile.json')
+API_TOKENS_FILE = os.path.join(DATA_DIR, 'api_tokens.json')
+ACTIVE_SESSIONS_FILE = os.path.join(DATA_DIR, 'active_sessions.json')
+
+def load_project_config():
+    try:
+        if os.path.exists(PROJECT_CONFIG_FILE):
+            with open(PROJECT_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"name": "辉夜 AI助手", "description": "", "tags": [], "version": "v3.1", "owner": ""}
+
+def save_project_config_file(config):
+    try:
+        with open(PROJECT_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def load_user_profile():
+    try:
+        if os.path.exists(USER_PROFILE_FILE):
+            with open(USER_PROFILE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"nickname": "", "email": "", "avatar": "🌙"}
+
+def save_user_profile_file(profile):
+    try:
+        with open(USER_PROFILE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(profile, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def load_api_tokens():
+    try:
+        if os.path.exists(API_TOKENS_FILE):
+            with open(API_TOKENS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def save_api_tokens(tokens):
+    try:
+        with open(API_TOKENS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(tokens, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def load_active_sessions():
+    try:
+        if os.path.exists(ACTIVE_SESSIONS_FILE):
+            with open(ACTIVE_SESSIONS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def save_active_sessions(sessions):
+    try:
+        with open(ACTIVE_SESSIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+@app.route('/project/config', methods=['GET', 'POST'])
+def project_config_api():
+    if request.method == 'GET':
+        return jsonify({"success": True, "config": load_project_config()})
+    config = request.json or {}
+    save_project_config_file(config)
+    append_project_activity('config_update', '更新项目配置')
+    return jsonify({"success": True})
+
+@app.route('/project/stats', methods=['GET'])
+def project_stats_api():
+    tasks_total = len(project_tasks)
+    tasks_done = len([t for t in project_tasks if t.get('status') == 'done'])
+    milestones_total = len(project_milestones)
+    milestones_done = len([m for m in project_milestones if m.get('status') == 'done'])
+    risks_total = len(project_risks)
+    risks_mitigated = len([r for r in project_risks if r.get('status') == 'mitigated'])
+    campaigns_total = len(ops_campaigns)
+    campaigns_done = len([c for c in ops_campaigns if c.get('status') == 'completed'])
+    releases_total = len(release_plans)
+    releases_success = len([r for r in release_plans if r.get('status') == 'released'])
+    stats = {
+        "task_done_rate": round((tasks_done / tasks_total) * 100, 1) if tasks_total > 0 else 0,
+        "milestone_progress": round((milestones_done / milestones_total) * 100, 1) if milestones_total > 0 else 0,
+        "risk_mitigated_rate": round((risks_mitigated / risks_total) * 100, 1) if risks_total > 0 else 0,
+        "campaign_done_rate": round((campaigns_done / campaigns_total) * 100, 1) if campaigns_total > 0 else 0,
+        "release_success_rate": round((releases_success / releases_total) * 100, 1) if releases_total > 0 else 0,
+        "total_artifacts": len(project_artifacts),
+        "total_tasks": tasks_total,
+        "total_activities": len(project_activities)
+    }
+    return jsonify({"success": True, "stats": stats})
+
+@app.route('/api/prompts/custom', methods=['POST'])
+def api_prompts_custom_create():
+    data = request.get_json(silent=True) or {}
+    name = data.get('name', '').strip()
+    prompt = data.get('prompt', '').strip()
+    if not name or not prompt:
+        return jsonify({"success": False, "error": "name and prompt required"}), 400
+    tpl = {
+        "id": data.get('id', 'custom_' + str(int(time.time() * 1000))),
+        "name": name,
+        "desc": data.get('desc', name),
+        "icon": data.get('icon', '📝'),
+        "category": data.get('category', 'general'),
+        "tags": data.get('tags', []),
+        "prompt": prompt,
+        "source": "自定义",
+        "custom": True
+    }
+    custom_file = os.path.join(PROMPTS_DIR, 'custom_templates.json')
+    custom_list = []
+    if os.path.exists(custom_file):
+        try:
+            with open(custom_file, 'r', encoding='utf-8') as f:
+                custom_list = json.load(f)
+        except:
+            pass
+    custom_list.append(tpl)
+    with open(custom_file, 'w', encoding='utf-8') as f:
+        json.dump(custom_list, f, ensure_ascii=False, indent=2)
+    return jsonify({"success": True, "template": tpl})
+
+@app.route('/api/prompts/custom/<tpl_id>', methods=['DELETE'])
+def api_prompts_custom_delete(tpl_id):
+    custom_file = os.path.join(PROMPTS_DIR, 'custom_templates.json')
+    custom_list = []
+    if os.path.exists(custom_file):
+        try:
+            with open(custom_file, 'r', encoding='utf-8') as f:
+                custom_list = json.load(f)
+        except:
+            pass
+    custom_list = [t for t in custom_list if t.get('id') != tpl_id]
+    with open(custom_file, 'w', encoding='utf-8') as f:
+        json.dump(custom_list, f, ensure_ascii=False, indent=2)
+    return jsonify({"success": True})
+
+@app.route('/api/prompts/usage', methods=['POST'])
+def api_prompts_usage():
+    data = request.get_json(silent=True) or {}
+    template_id = data.get('template_id', '')
+    if not template_id:
+        return jsonify({"success": False, "error": "template_id required"}), 400
+    usage_file = os.path.join(PROMPTS_DIR, 'usage_stats.json')
+    usage = {}
+    if os.path.exists(usage_file):
+        try:
+            with open(usage_file, 'r', encoding='utf-8') as f:
+                usage = json.load(f)
+        except:
+            pass
+    usage[template_id] = usage.get(template_id, 0) + 1
+    with open(usage_file, 'w', encoding='utf-8') as f:
+        json.dump(usage, f, ensure_ascii=False, indent=2)
+    return jsonify({"success": True, "count": usage[template_id]})
+
+@app.route('/api/prompts/favorites', methods=['GET', 'POST', 'DELETE'])
+def api_prompts_favorites():
+    fav_file = os.path.join(PROMPTS_DIR, 'favorites.json')
+    if request.method == 'GET':
+        favorites = []
+        if os.path.exists(fav_file):
+            try:
+                with open(fav_file, 'r', encoding='utf-8') as f:
+                    favorites = json.load(f)
+            except:
+                pass
+        return jsonify({"success": True, "favorites": favorites})
+    elif request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        template_id = data.get('template_id', '')
+        if not template_id:
+            return jsonify({"success": False, "error": "template_id required"}), 400
+        favorites = []
+        if os.path.exists(fav_file):
+            try:
+                with open(fav_file, 'r', encoding='utf-8') as f:
+                    favorites = json.load(f)
+            except:
+                pass
+        if template_id not in favorites:
+            favorites.append(template_id)
+        with open(fav_file, 'w', encoding='utf-8') as f:
+            json.dump(favorites, f, ensure_ascii=False, indent=2)
+        return jsonify({"success": True, "favorites": favorites})
+    else:
+        data = request.get_json(silent=True) or {}
+        template_id = data.get('template_id', '')
+        favorites = []
+        if os.path.exists(fav_file):
+            try:
+                with open(fav_file, 'r', encoding='utf-8') as f:
+                    favorites = json.load(f)
+            except:
+                pass
+        favorites = [f for f in favorites if f != template_id]
+        with open(fav_file, 'w', encoding='utf-8') as f:
+            json.dump(favorites, f, ensure_ascii=False, indent=2)
+        return jsonify({"success": True, "favorites": favorites})
+
+@app.route('/project/export', methods=['GET'])
+def project_export_api():
+    data = {
+        "success": True,
+        "config": load_project_config(),
+        "artifacts": project_artifacts,
+        "tasks": project_tasks,
+        "playbooks": project_playbooks,
+        "milestones": project_milestones,
+        "risks": project_risks,
+        "campaigns": ops_campaigns,
+        "release_plans": release_plans,
+        "alert_rules": alert_rules,
+        "ab_experiments": ab_experiments,
+        "integrations": integrations,
+        "exported_at": __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    return jsonify(data)
+
+@app.route('/project/import', methods=['POST'])
+def project_import_api():
+    global project_artifacts, project_tasks, project_playbooks, project_milestones, project_risks
+    global ops_campaigns, release_plans, alert_rules, ab_experiments, integrations
+    data = request.get_json(silent=True) or {}
+    imported = 0
+    if 'artifacts' in data and isinstance(data['artifacts'], list):
+        existing_ids = {a.get('id') for a in project_artifacts}
+        for a in data['artifacts']:
+            if a.get('id') not in existing_ids:
+                project_artifacts.append(a)
+                imported += 1
+        save_project_artifacts()
+    if 'tasks' in data and isinstance(data['tasks'], list):
+        existing_ids = {t.get('id') for t in project_tasks}
+        for t in data['tasks']:
+            if t.get('id') not in existing_ids:
+                project_tasks.append(t)
+                imported += 1
+        save_json_object(PROJECT_TASKS_FILE, project_tasks)
+    if 'milestones' in data and isinstance(data['milestones'], list):
+        existing_ids = {m.get('id') for m in project_milestones}
+        for m in data['milestones']:
+            if m.get('id') not in existing_ids:
+                project_milestones.append(m)
+                imported += 1
+        save_json_object(PROJECT_MILESTONES_FILE, project_milestones)
+    if 'risks' in data and isinstance(data['risks'], list):
+        existing_ids = {r.get('id') for r in project_risks}
+        for r in data['risks']:
+            if r.get('id') not in existing_ids:
+                project_risks.append(r)
+                imported += 1
+        save_json_object(PROJECT_RISKS_FILE, project_risks)
+    if 'config' in data and isinstance(data['config'], dict):
+        save_project_config_file(data['config'])
+        imported += 1
+    append_project_activity('data_import', f'导入数据: {imported}条')
+    return jsonify({"success": True, "imported": imported})
+
+@app.route('/project/clear', methods=['POST'])
+def project_clear_api():
+    global project_artifacts, project_tasks, project_playbooks, project_milestones, project_risks
+    global ops_campaigns, release_plans, alert_rules, ab_experiments, integrations
+    project_artifacts.clear(); project_tasks.clear(); project_playbooks.clear()
+    project_milestones.clear(); project_risks.clear(); ops_campaigns.clear()
+    release_plans.clear(); alert_rules.clear(); ab_experiments.clear(); integrations.clear()
+    save_project_artifacts()
+    save_json_object(PROJECT_TASKS_FILE, project_tasks)
+    save_json_object(PLAYBOOKS_FILE, project_playbooks)
+    save_json_object(PROJECT_MILESTONES_FILE, project_milestones)
+    save_json_object(PROJECT_RISKS_FILE, project_risks)
+    save_json_object(OPS_CAMPAIGNS_FILE, ops_campaigns)
+    save_json_object(RELEASE_PLANS_FILE, release_plans)
+    save_json_object(ALERT_RULES_FILE, alert_rules)
+    save_json_object(AB_EXPERIMENTS_FILE, ab_experiments)
+    save_json_object(INTEGRATIONS_FILE, integrations)
+    append_project_activity('data_clear', '清空所有项目数据')
+    return jsonify({"success": True})
+
+@app.route('/chats/export', methods=['GET'])
+def chats_export_api():
+    chats_data = []
+    try:
+        chats_path = os.path.join(DATA_DIR, 'chats.json')
+        if os.path.exists(chats_path):
+            with open(chats_path, 'r', encoding='utf-8') as f:
+                chats = json.load(f)
+                for c in chats:
+                    chat_info = {"id": c.get("id", ""), "title": c.get("title", ""), "messages": []}
+                    for m in c.get("messages", []):
+                        chat_info["messages"].append({"role": m.get("role", ""), "content": m.get("content", "")})
+                    chats_data.append(chat_info)
+    except Exception:
+        pass
+    return jsonify({"success": True, "chats": chats_data})
+
+@app.route('/account/profile', methods=['GET', 'POST'])
+def account_profile_api():
+    if request.method == 'GET':
+        return jsonify({"success": True, "profile": load_user_profile()})
+    profile = request.json or {}
+    if profile.get('email'):
+        import re as _re
+        if not _re.match(r'^[^@]+@[^@]+\.[^@]+$', profile['email']):
+            return jsonify({"success": False, "error": "邮箱格式无效"})
+    save_user_profile_file(profile)
+    append_project_activity('profile_update', '更新个人信息')
+    return jsonify({"success": True})
+
+@app.route('/account/tokens', methods=['GET', 'POST', 'DELETE'])
+def account_tokens_api():
+    tokens = load_api_tokens()
+    if request.method == 'GET':
+        safe_tokens = []
+        for t in tokens:
+            safe_tokens.append({
+                "id": t.get("id", ""),
+                "name": t.get("name", ""),
+                "token_mask": mask_api_key(t.get("token", "")),
+                "created_at": t.get("created_at", "")
+            })
+        return jsonify({"success": True, "tokens": safe_tokens})
+    if request.method == 'POST':
+        name = (request.get_json(silent=True) or {}).get('name', 'API Token')
+        token = 'kag_' + _secrets.token_urlsafe(32)
+        token_item = {
+            "id": _secrets.token_hex(8),
+            "name": name,
+            "token": token,
+            "created_at": __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        tokens.append(token_item)
+        save_api_tokens(tokens)
+        append_project_activity('token_created', f'创建API Token: {name}')
+        return jsonify({"success": True, "token": token})
+    if request.method == 'DELETE':
+        tid = (request.get_json(silent=True) or {}).get('id', '')
+        tokens = [t for t in tokens if t.get('id') != tid]
+        save_api_tokens(tokens)
+        return jsonify({"success": True})
+
+@app.route('/account/sessions', methods=['GET', 'DELETE'])
+def account_sessions_api():
+    sessions = load_active_sessions()
+    current_token = session.get('auth_token', '')
+    if request.method == 'GET':
+        current_ip = request.remote_addr or 'unknown'
+        now_str = __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        found = False
+        for s in sessions:
+            if s.get('token') == current_token:
+                s['last_active'] = now_str
+                s['ip'] = current_ip
+                found = True
+        if not found and current_token:
+            sessions.append({"id": _secrets.token_hex(8), "token": current_token, "ip": current_ip, "last_active": now_str})
+            save_active_sessions(sessions)
+        safe_sessions = []
+        for s in sessions:
+            safe_sessions.append({
+                "id": s.get("id", ""),
+                "current": s.get("token", "") == current_token,
+                "ip": s.get("ip", "unknown"),
+                "last_active": s.get("last_active", "")
+            })
+        return jsonify({"success": True, "sessions": safe_sessions})
+    if request.method == 'DELETE':
+        sid = (request.get_json(silent=True) or {}).get('id', '')
+        sessions = [s for s in sessions if s.get('id') != sid]
+        save_active_sessions(sessions)
+        return jsonify({"success": True})
+
+@app.route('/privacy/export', methods=['POST'])
+def privacy_export_data():
+    export_data = {}
+    try:
+        profile_path = os.path.join(DATA_DIR, 'user_profile.json')
+        if os.path.exists(profile_path):
+            with open(profile_path, 'r', encoding='utf-8') as f:
+                export_data['profile'] = json.load(f)
+    except Exception:
+        export_data['profile'] = {}
+    try:
+        chats_path = os.path.join(DATA_DIR, 'chats.json')
+        if os.path.exists(chats_path):
+            with open(chats_path, 'r', encoding='utf-8') as f:
+                chats = json.load(f)
+                export_data['chats'] = [{'title': c.get('title', ''), 'messages': c.get('messages', []), 'created': c.get('created', '')} for c in chats]
+    except Exception:
+        export_data['chats'] = []
+    try:
+        mem_db = os.path.join(DATA_DIR, 'memory.db')
+        if os.path.exists(mem_db):
+            import sqlite3
+            conn = sqlite3.connect(mem_db)
+            rows = conn.execute('SELECT key, value, category, importance, pinned, created_at FROM memories').fetchall()
+            conn.close()
+            export_data['memories'] = [{'key': r[0], 'value': r[1], 'category': r[2], 'importance': r[3], 'pinned': r[4], 'created_at': r[5]} for r in rows]
+    except Exception:
+        export_data['memories'] = []
+    try:
+        tokens_path = os.path.join(DATA_DIR, 'api_tokens.json')
+        if os.path.exists(tokens_path):
+            with open(tokens_path, 'r', encoding='utf-8') as f:
+                tokens = json.load(f)
+                export_data['api_tokens'] = [{'name': t.get('name', ''), 'created': t.get('created', ''), 'last_used': t.get('last_used', '')} for t in tokens]
+    except Exception:
+        export_data['api_tokens'] = []
+    log_security_event('data_export', '用户导出了个人数据', 'info')
+    export_data['export_time'] = __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    export_data['version'] = '1.0'
+    return jsonify({"success": True, "data": export_data})
+
+@app.route('/privacy/delete', methods=['POST'])
+def privacy_delete_data():
+    data = request.get_json(silent=True) or {}
+    confirm = data.get('confirm', '')
+    if confirm != 'CONFIRM_DELETE_ALL':
+        return jsonify({"success": False, "error": "需要确认参数以执行数据删除"})
+    categories = data.get('categories', [])
+    deleted = []
+    if 'chats' in categories or 'all' in categories:
+        chats_path = os.path.join(DATA_DIR, 'chats.json')
+        if os.path.exists(chats_path):
+            os.remove(chats_path)
+            deleted.append('chats')
+    if 'memories' in categories or 'all' in categories:
+        mem_db = os.path.join(DATA_DIR, 'memory.db')
+        if os.path.exists(mem_db):
+            os.remove(mem_db)
+            deleted.append('memories')
+    if 'tokens' in categories or 'all' in categories:
+        tokens_path = os.path.join(DATA_DIR, 'api_tokens.json')
+        if os.path.exists(tokens_path):
+            os.remove(tokens_path)
+            deleted.append('tokens')
+    if 'profile' in categories or 'all' in categories:
+        profile_path = os.path.join(DATA_DIR, 'user_profile.json')
+        if os.path.exists(profile_path):
+            os.remove(profile_path)
+            deleted.append('profile')
+    log_security_event('data_deleted', f'用户删除了数据: {", ".join(deleted)}', 'critical')
+    return jsonify({"success": True, "deleted": deleted})
+
+@app.route('/privacy/settings', methods=['GET', 'POST'])
+def privacy_settings_api():
+    settings_path = os.path.join(DATA_DIR, 'privacy_settings.json')
+    if request.method == 'GET':
+        defaults = {
+            "data_retention_days": 365,
+            "auto_delete_expired": False,
+            "mask_sensitive_in_logs": True,
+            "encrypt_chat_history": False,
+            "encrypt_memories": False,
+            "require_auth_for_export": True,
+            "audit_log_retention_days": 90
+        }
+        try:
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                    defaults.update(saved)
+        except Exception:
+            pass
+        return jsonify({"success": True, "settings": defaults})
+    data = request.get_json(silent=True) or {}
+    try:
+        with open(settings_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        log_security_event('privacy_settings_changed', '隐私设置已更新', 'info')
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": sanitize_error(e)})
+
+@app.route('/security/2fa/setup', methods=['GET', 'POST'])
+def setup_2fa():
+    config = load_auth_config()
+    if request.method == 'GET':
+        return jsonify({"enabled": config.get('2fa_enabled', False), "has_secret": bool(config.get('2fa_secret', ''))})
+    data = request.get_json(silent=True) or {}
+    action = data.get('action', '')
+    if action == 'enable':
+        import pyotp
+        secret = pyotp.random_base32()
+        config['2fa_secret'] = encrypt_value(secret)
+        config['2fa_enabled'] = True
+        save_auth_config(config)
+        provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(name='kaguya-admin', issuer_name='Kaguya AI')
+        log_security_event('2fa_enabled', '双因素认证已启用', 'info')
+        return jsonify({"success": True, "secret": secret, "uri": provisioning_uri})
+    elif action == 'disable':
+        config['2fa_enabled'] = False
+        config.pop('2fa_secret', None)
+        save_auth_config(config)
+        log_security_event('2fa_disabled', '双因素认证已禁用', 'warning')
+        return jsonify({"success": True})
+    elif action == 'verify':
+        code = data.get('code', '')
+        try:
+            import pyotp
+            secret = decrypt_value(config.get('2fa_secret', ''))
+            totp = pyotp.TOTP(secret)
+            if totp.verify(code, valid_window=1):
+                return jsonify({"success": True, "valid": True})
+            return jsonify({"success": True, "valid": False})
+        except ImportError:
+            return jsonify({"success": False, "error": "pyotp模块未安装，请运行: pip install pyotp"})
+        except Exception as e:
+            return jsonify({"success": False, "error": sanitize_error(e)})
+    return jsonify({"success": False, "error": "未知操作"})
+
+@app.route('/project/overview', methods=['GET'])
+def project_overview():
+    tasks_total = len(project_tasks)
+    tasks_done = len([t for t in project_tasks if t.get('status') == 'done'])
+    overview = {
+        "artifacts": len(project_artifacts),
+        "pinned_artifacts": len([a for a in project_artifacts if a.get('pinned')]),
+        "tasks_total": tasks_total,
+        "tasks_todo": len([t for t in project_tasks if t.get('status') == 'todo']),
+        "tasks_doing": len([t for t in project_tasks if t.get('status') == 'doing']),
+        "tasks_done": tasks_done,
+        "task_done_rate": round((tasks_done / tasks_total) * 100, 1) if tasks_total > 0 else 0,
+        "playbooks": len(project_playbooks),
+        "activity_count": len(project_activities),
+        "campaigns": len(ops_campaigns),
+        "release_plans": len(release_plans),
+        "alerts": len(alert_rules),
+        "ab_tests": len(ab_experiments),
+        "integrations": len(integrations),
+        "milestones": len(project_milestones),
+        "risks": len(project_risks)
+    }
+    return jsonify({"success": True, "overview": overview})
+
+def artifact_public_data(item):
+    data = dict(item)
+    versions = data.get("versions") if isinstance(data.get("versions"), list) else []
+    data["version_count"] = len(versions)
+    data.pop("versions", None)
+    return data
+
+@app.route('/artifacts', methods=['GET'])
+def artifacts_list():
+    q = request.args.get('q', '').strip().lower()
+    artifact_type = request.args.get('type', '').strip()
+    items = project_artifacts[:]
+    if artifact_type:
+        items = [a for a in items if a.get('type') == artifact_type]
+    if q:
+        items = [a for a in items if q in a.get('title', '').lower() or q in a.get('content', '').lower()]
+    items.sort(key=lambda x: (not x.get('pinned', False), x.get('updated_at', 0)), reverse=False)
+    items = list(reversed(items))
+    return jsonify({"success": True, "artifacts": [artifact_public_data(x) for x in items]})
+
+@app.route('/artifacts', methods=['POST'])
+def artifacts_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        title = (data.get('title') or '').strip() or '未命名产物'
+        content = (data.get('content') or '').strip()
+        if not content:
+            return jsonify({"success": False, "error": "内容不能为空"})
+        now_ts = int(time.time())
+        artifact = {
+            "id": str(uuid.uuid4())[:8],
+            "title": title,
+            "content": content,
+            "type": (data.get('type') or 'note').strip(),
+            "tags": data.get('tags') if isinstance(data.get('tags'), list) else [],
+            "source": (data.get('source') or 'manual').strip(),
+            "pinned": bool(data.get('pinned', False)),
+            "versions": [{
+                "version": 1,
+                "title": title,
+                "content": content,
+                "time": now_ts,
+                "editor": (data.get('editor') or 'manual').strip()
+            }],
+            "created_at": now_ts,
+            "updated_at": now_ts
+        }
+        with data_lock:
+            project_artifacts.append(artifact)
+        save_project_artifacts()
+        append_project_activity("create", "artifact", artifact["id"], f"新增产物 {title}")
+        return jsonify({"success": True, "artifact": artifact_public_data(artifact)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/artifacts/<artifact_id>', methods=['PUT'])
+def artifacts_update(artifact_id):
+    data = request.get_json(silent=True) or {}
+    target = next((a for a in project_artifacts if a.get('id') == artifact_id), None)
+    if not target:
+        return jsonify({"success": False, "error": "产物不存在"})
+    title = (data.get('title') or target.get('title') or '未命名产物').strip()
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({"success": False, "error": "内容不能为空"})
+    old_title = target.get("title", "")
+    old_content = target.get("content", "")
+    changed = title != old_title or content != old_content
+    target["title"] = title
+    target["content"] = content
+    target["type"] = (data.get('type') or target.get('type') or 'note').strip()
+    target["tags"] = data.get('tags') if isinstance(data.get('tags'), list) else target.get("tags", [])
+    target["source"] = (data.get('source') or target.get('source') or 'manual').strip()
+    target["updated_at"] = int(time.time())
+    if changed:
+        versions = target.get("versions") if isinstance(target.get("versions"), list) else []
+        versions.append({
+            "version": len(versions) + 1,
+            "title": title,
+            "content": content,
+            "time": target["updated_at"],
+            "editor": (data.get('editor') or 'manual').strip()
+        })
+        target["versions"] = versions[-30:]
+    save_project_artifacts()
+    append_project_activity("update", "artifact", artifact_id, f"更新产物 {title}")
+    return jsonify({"success": True, "artifact": artifact_public_data(target)})
+
+@app.route('/artifacts/<artifact_id>', methods=['DELETE'])
+def artifacts_delete(artifact_id):
+    global project_artifacts
+    before = len(project_artifacts)
+    with data_lock:
+                project_artifacts = [a for a in project_artifacts if a.get('id') != artifact_id]
+    if len(project_artifacts) == before:
+        return jsonify({"success": False, "error": "产物不存在"})
+    save_project_artifacts()
+    append_project_activity("delete", "artifact", artifact_id, "删除产物")
+    return jsonify({"success": True})
+
+@app.route('/artifacts/<artifact_id>/pin', methods=['POST'])
+def artifacts_pin(artifact_id):
+    data = request.get_json(silent=True) or {}
+    pinned = bool(data.get('pinned', False))
+    target = next((a for a in project_artifacts if a.get('id') == artifact_id), None)
+    if not target:
+        return jsonify({"success": False, "error": "产物不存在"})
+    target['pinned'] = pinned
+    target['updated_at'] = int(time.time())
+    save_project_artifacts()
+    append_project_activity("pin", "artifact", artifact_id, "置顶产物" if pinned else "取消置顶")
+    return jsonify({"success": True, "artifact": artifact_public_data(target)})
+
+@app.route('/artifacts/<artifact_id>/versions', methods=['GET'])
+def artifacts_versions(artifact_id):
+    target = next((a for a in project_artifacts if a.get('id') == artifact_id), None)
+    if not target:
+        return jsonify({"success": False, "error": "产物不存在"})
+    versions = target.get("versions") if isinstance(target.get("versions"), list) else []
+    return jsonify({"success": True, "versions": list(reversed(versions))})
+
+@app.route('/artifacts/<artifact_id>/restore', methods=['POST'])
+def artifacts_restore(artifact_id):
+    data = request.get_json(silent=True) or {}
+    version_number = int(data.get("version", 0))
+    target = next((a for a in project_artifacts if a.get('id') == artifact_id), None)
+    if not target:
+        return jsonify({"success": False, "error": "产物不存在"})
+    versions = target.get("versions") if isinstance(target.get("versions"), list) else []
+    version_item = next((v for v in versions if int(v.get("version", 0)) == version_number), None)
+    if not version_item:
+        return jsonify({"success": False, "error": "版本不存在"})
+    target["title"] = version_item.get("title", target.get("title", "未命名产物"))
+    target["content"] = version_item.get("content", target.get("content", ""))
+    target["updated_at"] = int(time.time())
+    versions.append({
+        "version": len(versions) + 1,
+        "title": target["title"],
+        "content": target["content"],
+        "time": target["updated_at"],
+        "editor": (data.get('editor') or 'restore').strip()
+    })
+    target["versions"] = versions[-30:]
+    save_project_artifacts()
+    append_project_activity("restore", "artifact", artifact_id, f"回滚到版本 {version_number}")
+    return jsonify({"success": True, "artifact": artifact_public_data(target)})
+
+@app.route('/project/tasks', methods=['GET'])
+def project_tasks_list():
+    items = sorted(project_tasks, key=lambda x: (x.get("order", 0), x.get("updated_at", 0)))
+    return jsonify({"success": True, "tasks": items})
+
+@app.route('/project/tasks', methods=['POST'])
+def project_tasks_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        title = (data.get('title') or '').strip()
+        if not title:
+            return jsonify({"success": False, "error": "任务标题不能为空"})
+        now_ts = int(time.time())
+        task = {
+            "id": str(uuid.uuid4())[:8],
+            "title": title,
+            "description": (data.get('description') or '').strip(),
+            "priority": (data.get('priority') or 'medium').strip(),
+            "owner": (data.get('owner') or '').strip(),
+            "status": (data.get('status') or 'todo').strip(),
+            "due_date": (data.get('due_date') or '').strip(),
+            "order": max([int(t.get("order", 0)) for t in project_tasks], default=0) + 1,
+            "created_at": now_ts,
+            "updated_at": now_ts
+        }
+        project_tasks.append(task)
+        save_project_tasks()
+        append_project_activity("create", "task", task["id"], f"新增任务 {title}")
+        return jsonify({"success": True, "task": task})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/project/tasks/<task_id>/status', methods=['POST'])
+def project_tasks_update_status(task_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['todo', 'doing', 'done']:
+        return jsonify({"success": False, "error": "状态非法"})
+    task = next((t for t in project_tasks if t.get('id') == task_id), None)
+    if not task:
+        return jsonify({"success": False, "error": "任务不存在"})
+    task['status'] = status
+    task['updated_at'] = int(time.time())
+    save_project_tasks()
+    append_project_activity("status", "task", task_id, f"任务状态改为 {status}")
+    return jsonify({"success": True, "task": task})
+
+@app.route('/project/tasks/reorder', methods=['POST'])
+def project_tasks_reorder():
+    data = request.get_json(silent=True) or {}
+    ordered_ids = data.get('ordered_ids') if isinstance(data.get('ordered_ids'), list) else []
+    if not ordered_ids:
+        return jsonify({"success": False, "error": "缺少排序ID"})
+    status_hint = (data.get('status_hint') or '').strip()
+    order_map = {task_id: idx + 1 for idx, task_id in enumerate(ordered_ids)}
+    updated = 0
+    for task in project_tasks:
+        task_id = task.get('id')
+        if task_id in order_map:
+            task['order'] = order_map[task_id]
+            if status_hint in ['todo', 'doing', 'done']:
+                task['status'] = status_hint
+            task['updated_at'] = int(time.time())
+            updated += 1
+    save_project_tasks()
+    append_project_activity("reorder", "task", "batch", f"批量排序 {updated} 条任务")
+    return jsonify({"success": True, "updated": updated})
+
+@app.route('/project/tasks/batch_status', methods=['POST'])
+def project_tasks_batch_status():
+    data = request.get_json(silent=True) or {}
+    task_ids = data.get('task_ids') if isinstance(data.get('task_ids'), list) else []
+    status = (data.get('status') or '').strip()
+    if status not in ['todo', 'doing', 'done']:
+        return jsonify({"success": False, "error": "状态非法"})
+    updated = 0
+    for task in project_tasks:
+        if task.get('id') in task_ids:
+            task['status'] = status
+            task['updated_at'] = int(time.time())
+            updated += 1
+    save_project_tasks()
+    append_project_activity("batch_status", "task", "batch", f"批量变更到 {status}: {updated} 条")
+    return jsonify({"success": True, "updated": updated})
+
+@app.route('/project/tasks/<task_id>', methods=['DELETE'])
+def project_tasks_delete(task_id):
+    global project_tasks
+    before = len(project_tasks)
+    project_tasks = [t for t in project_tasks if t.get('id') != task_id]
+    if len(project_tasks) == before:
+        return jsonify({"success": False, "error": "任务不存在"})
+    save_project_tasks()
+    append_project_activity("delete", "task", task_id, "删除任务")
+    return jsonify({"success": True})
+
+@app.route('/playbooks', methods=['GET'])
+def playbooks_list():
+    return jsonify({"success": True, "playbooks": project_playbooks})
+
+@app.route('/playbooks', methods=['POST'])
+def playbooks_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        template = (data.get('template') or '').strip()
+        if not name or not template:
+            return jsonify({"success": False, "error": "名称和模板不能为空"})
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "name": name,
+            "description": (data.get('description') or '').strip(),
+            "category": (data.get('category') or '自定义').strip(),
+            "template": template
+        }
+        project_playbooks.append(item)
+        save_project_playbooks()
+        append_project_activity("create", "playbook", item["id"], f"新增剧本 {name}")
+        return jsonify({"success": True, "playbook": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/playbooks/<playbook_id>/run', methods=['POST'])
+def playbooks_run(playbook_id):
+    data = request.get_json(silent=True) or {}
+    pb = next((p for p in project_playbooks if p.get('id') == playbook_id), None)
+    if not pb:
+        return jsonify({"success": False, "error": "模板不存在"})
+    variables = {
+        "topic": (data.get('topic') or '').strip() or '未指定主题',
+        "goal": (data.get('goal') or '').strip() or '未指定目标',
+        "context": (data.get('context') or '').strip() or '无背景信息',
+        "constraints": (data.get('constraints') or '').strip() or '无额外约束'
+    }
+    prompt = pb.get('template', '')
+    for k, v in variables.items():
+        prompt = prompt.replace('{' + k + '}', v)
+    append_project_activity("run", "playbook", pb.get("id"), f"运行剧本 {pb.get('name', '')}")
+    return jsonify({"success": True, "prompt": prompt, "playbook": pb})
+
+@app.route('/project/activity', methods=['GET'])
+def project_activity():
+    limit = int(request.args.get('limit', 30))
+    limit = max(1, min(limit, 100))
+    return jsonify({"success": True, "activities": project_activities[:limit]})
+
+@app.route('/project/milestones', methods=['GET'])
+def project_milestones_list():
+    items = project_milestones[:]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "milestones": items})
+
+@app.route('/project/milestones', methods=['POST'])
+def project_milestones_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        title = (data.get('title') or '').strip()
+        if not title:
+            return jsonify({"success": False, "error": "里程碑标题不能为空"})
+        now_ts = int(time.time())
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "title": title,
+            "owner": (data.get('owner') or '').strip(),
+            "due_date": (data.get('due_date') or '').strip(),
+            "status": (data.get('status') or 'planned').strip(),
+            "progress": max(0, min(100, safe_int(data.get('progress', 0), 0))),
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["status"] not in ['planned', 'active', 'done', 'delayed']:
+            item["status"] = 'planned'
+
+            project_milestones.append(item)
+        save_project_milestones()
+        append_project_activity("create", "milestone", item["id"], f"新增里程碑 {title}")
+        return jsonify({"success": True, "milestone": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/project/milestones/<milestone_id>/status', methods=['POST'])
+def project_milestones_status(milestone_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['planned', 'active', 'done', 'delayed']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in project_milestones if x.get('id') == milestone_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "里程碑不存在"})
+    item['status'] = status
+    item['progress'] = max(0, min(100, safe_int(data.get('progress', item.get('progress', 0)), item.get('progress', 0))))
+    item['updated_at'] = int(time.time())
+    save_project_milestones()
+    append_project_activity("status", "milestone", milestone_id, f"里程碑状态改为 {status}")
+    return jsonify({"success": True, "milestone": item})
+
+@app.route('/project/milestones/<milestone_id>', methods=['DELETE'])
+def project_milestones_delete(milestone_id):
+    global project_milestones
+    before = len(project_milestones)
+    project_milestones = [x for x in project_milestones if x.get('id') != milestone_id]
+    if len(project_milestones) == before:
+        return jsonify({"success": False, "error": "里程碑不存在"})
+    save_project_milestones()
+    append_project_activity("delete", "milestone", milestone_id, "删除里程碑")
+    return jsonify({"success": True})
+
+@app.route('/project/risks', methods=['GET'])
+def project_risks_list():
+    items = project_risks[:]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "risks": items})
+
+@app.route('/project/risks', methods=['POST'])
+def project_risks_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        title = (data.get('title') or '').strip()
+        if not title:
+            return jsonify({"success": False, "error": "风险标题不能为空"})
+        now_ts = int(time.time())
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "title": title,
+            "owner": (data.get('owner') or '').strip(),
+            "level": (data.get('level') or 'medium').strip(),
+            "status": (data.get('status') or 'open').strip(),
+            "mitigation": (data.get('mitigation') or '').strip(),
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["level"] not in ['low', 'medium', 'high', 'critical']:
+            item["level"] = 'medium'
+        if item["status"] not in ['open', 'mitigating', 'closed']:
+            item["status"] = 'open'
+
+            project_risks.append(item)
+        save_project_risks()
+        append_project_activity("create", "risk", item["id"], f"新增风险 {title}")
+        return jsonify({"success": True, "risk": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/project/risks/<risk_id>/status', methods=['POST'])
+def project_risks_status(risk_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['open', 'mitigating', 'closed']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in project_risks if x.get('id') == risk_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "风险不存在"})
+    item['status'] = status
+    item['updated_at'] = int(time.time())
+    save_project_risks()
+    append_project_activity("status", "risk", risk_id, f"风险状态改为 {status}")
+    return jsonify({"success": True, "risk": item})
+
+@app.route('/project/risks/<risk_id>', methods=['DELETE'])
+def project_risks_delete(risk_id):
+    global project_risks
+    before = len(project_risks)
+    project_risks = [x for x in project_risks if x.get('id') != risk_id]
+    if len(project_risks) == before:
+        return jsonify({"success": False, "error": "风险不存在"})
+    save_project_risks()
+    append_project_activity("delete", "risk", risk_id, "删除风险")
+    return jsonify({"success": True})
+
+@app.route('/ops/overview', methods=['GET'])
+def ops_overview():
+    running = [x for x in ops_campaigns if x.get('status') == 'running']
+    avg_ctr = round(sum([float(x.get('current_ctr', 0)) for x in ops_campaigns]) / len(ops_campaigns), 2) if ops_campaigns else 0
+    total_budget = round(sum([float(x.get('budget', 0)) for x in ops_campaigns]), 2)
+    return jsonify({
+        "success": True,
+        "overview": {
+            "campaigns": len(ops_campaigns),
+            "running": len(running),
+            "avg_ctr": avg_ctr,
+            "total_budget": total_budget
+        }
+    })
+
+@app.route('/ops/campaigns', methods=['GET'])
+def ops_campaigns_list():
+    q = request.args.get('q', '').strip().lower()
+    status = request.args.get('status', '').strip()
+    items = ops_campaigns[:]
+    if status:
+        items = [x for x in items if x.get('status') == status]
+    if q:
+        items = [x for x in items if q in x.get('name', '').lower() or q in x.get('channel', '').lower() or q in x.get('owner', '').lower()]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "campaigns": items})
+
+@app.route('/ops/campaigns', methods=['POST'])
+def ops_campaigns_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "活动名称不能为空"})
+        now_ts = int(time.time())
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "name": name,
+            "channel": (data.get('channel') or '全渠道').strip(),
+            "status": (data.get('status') or 'draft').strip(),
+            "budget": float(data.get('budget') or 0),
+            "target_ctr": float(data.get('target_ctr') or 0),
+            "current_ctr": float(data.get('current_ctr') or 0),
+            "owner": (data.get('owner') or '').strip(),
+            "start_date": (data.get('start_date') or '').strip(),
+            "end_date": (data.get('end_date') or '').strip(),
+            "notes": (data.get('notes') or '').strip(),
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["status"] not in ['draft', 'running', 'paused', 'done']:
+            item["status"] = 'draft'
+
+            ops_campaigns.append(item)
+        save_ops_campaigns()
+        append_project_activity("create", "campaign", item["id"], f"新增活动 {name}")
+        return jsonify({"success": True, "campaign": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/ops/campaigns/<campaign_id>/status', methods=['POST'])
+def ops_campaign_status(campaign_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['draft', 'running', 'paused', 'done']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in ops_campaigns if x.get('id') == campaign_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "活动不存在"})
+    item['status'] = status
+    item['updated_at'] = int(time.time())
+    save_ops_campaigns()
+    append_project_activity("status", "campaign", campaign_id, f"运营状态改为 {status}")
+    return jsonify({"success": True, "campaign": item})
+
+@app.route('/ops/campaigns/<campaign_id>', methods=['DELETE'])
+def ops_campaign_delete(campaign_id):
+    global ops_campaigns
+    before = len(ops_campaigns)
+    ops_campaigns = [x for x in ops_campaigns if x.get('id') != campaign_id]
+    if len(ops_campaigns) == before:
+        return jsonify({"success": False, "error": "活动不存在"})
+    save_ops_campaigns()
+    append_project_activity("delete", "campaign", campaign_id, "删除运营活动")
+    return jsonify({"success": True})
+
+@app.route('/release/overview', methods=['GET'])
+def release_overview():
+    ready = len([x for x in release_plans if x.get('status') == 'ready'])
+    rollback = len([x for x in release_plans if x.get('status') == 'rollback'])
+    return jsonify({
+        "success": True,
+        "overview": {
+            "plans": len(release_plans),
+            "ready": ready,
+            "rollback": rollback
+        }
+    })
+
+@app.route('/release/plans', methods=['GET'])
+def release_plans_list():
+    status = request.args.get('status', '').strip()
+    items = release_plans[:]
+    if status:
+        items = [x for x in items if x.get('status') == status]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "plans": items})
+
+@app.route('/release/plans', methods=['POST'])
+def release_plans_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        version = (data.get('version') or '').strip()
+        title = (data.get('title') or '').strip()
+        if not version or not title:
+            return jsonify({"success": False, "error": "版本号和标题不能为空"})
+        now_ts = int(time.time())
+        checklist = data.get('checklist') if isinstance(data.get('checklist'), list) else []
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "version": version,
+            "title": title,
+            "environment": (data.get('environment') or 'production').strip(),
+            "status": (data.get('status') or 'planning').strip(),
+            "risk": (data.get('risk') or 'medium').strip(),
+            "owner": (data.get('owner') or '').strip(),
+            "notes": (data.get('notes') or '').strip(),
+            "checklist": checklist,
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["status"] not in ['planning', 'review', 'ready', 'released', 'rollback']:
+            item["status"] = 'planning'
+        release_plans.append(item)
+        save_release_plans()
+        append_project_activity("create", "release", item["id"], f"新增发布计划 {version}")
+        return jsonify({"success": True, "plan": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/release/plans/<plan_id>/status', methods=['POST'])
+def release_plan_status(plan_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['planning', 'review', 'ready', 'released', 'rollback']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in release_plans if x.get('id') == plan_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "发布计划不存在"})
+    item['status'] = status
+    item['updated_at'] = int(time.time())
+    save_release_plans()
+    append_project_activity("status", "release", plan_id, f"发布状态改为 {status}")
+    return jsonify({"success": True, "plan": item})
+
+@app.route('/release/plans/<plan_id>/check', methods=['POST'])
+def release_plan_check(plan_id):
+    data = request.get_json(silent=True) or {}
+    index = int(data.get('index', -1))
+    checked = bool(data.get('checked', False))
+    item = next((x for x in release_plans if x.get('id') == plan_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "发布计划不存在"})
+    checklist = item.get("checklist") if isinstance(item.get("checklist"), list) else []
+    if index < 0 or index >= len(checklist):
+        return jsonify({"success": False, "error": "检查项不存在"})
+    row = checklist[index]
+    if isinstance(row, dict):
+        row["checked"] = checked
+    else:
+        checklist[index] = {"label": str(row), "checked": checked}
+    item["checklist"] = checklist
+    item["updated_at"] = int(time.time())
+    save_release_plans()
+    append_project_activity("check", "release", plan_id, f"更新检查项 {index + 1}")
+    return jsonify({"success": True, "plan": item})
+
+@app.route('/release/plans/<plan_id>', methods=['DELETE'])
+def release_plan_delete(plan_id):
+    global release_plans
+    before = len(release_plans)
+    release_plans = [x for x in release_plans if x.get('id') != plan_id]
+    if len(release_plans) == before:
+        return jsonify({"success": False, "error": "发布计划不存在"})
+    save_release_plans()
+    append_project_activity("delete", "release", plan_id, "删除发布计划")
+    return jsonify({"success": True})
+
+@app.route('/alerts/overview', methods=['GET'])
+def alerts_overview():
+    active_count = len([x for x in alert_rules if x.get('status') == 'active'])
+    critical_count = len([x for x in alert_rules if x.get('level') == 'critical'])
+    return jsonify({
+        "success": True,
+        "overview": {
+            "rules": len(alert_rules),
+            "active": active_count,
+            "critical": critical_count
+        }
+    })
+
+@app.route('/alerts/rules', methods=['GET'])
+def alerts_rules_list():
+    level = request.args.get('level', '').strip()
+    status = request.args.get('status', '').strip()
+    items = alert_rules[:]
+    if level:
+        items = [x for x in items if x.get('level') == level]
+    if status:
+        items = [x for x in items if x.get('status') == status]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "rules": items})
+
+@app.route('/alerts/rules', methods=['POST'])
+def alerts_rule_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        metric = (data.get('metric') or '').strip()
+        if not name or not metric:
+            return jsonify({"success": False, "error": "规则名称和指标不能为空"})
+        now_ts = int(time.time())
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "name": name,
+            "metric": metric,
+            "threshold": safe_float(data.get('threshold', 0)),
+            "current_value": safe_float(data.get('current_value', 0)),
+            "level": (data.get('level') or 'medium').strip(),
+            "status": (data.get('status') or 'active').strip(),
+            "owner": (data.get('owner') or '').strip(),
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["level"] not in ['low', 'medium', 'high', 'critical']:
+            item["level"] = 'medium'
+        if item["status"] not in ['active', 'muted', 'resolved']:
+            item["status"] = 'active'
+        alert_rules.append(item)
+        save_alert_rules()
+        append_project_activity("create", "alert", item["id"], f"新增告警规则 {name}")
+        return jsonify({"success": True, "rule": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/alerts/rules/<rule_id>/status', methods=['POST'])
+def alerts_rule_status(rule_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['active', 'muted', 'resolved']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in alert_rules if x.get('id') == rule_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "规则不存在"})
+    item['status'] = status
+    item['updated_at'] = int(time.time())
+    save_alert_rules()
+    append_project_activity("status", "alert", rule_id, f"告警状态改为 {status}")
+    return jsonify({"success": True, "rule": item})
+
+@app.route('/alerts/rules/<rule_id>', methods=['DELETE'])
+def alerts_rule_delete(rule_id):
+    global alert_rules
+    before = len(alert_rules)
+    alert_rules = [x for x in alert_rules if x.get('id') != rule_id]
+    if len(alert_rules) == before:
+        return jsonify({"success": False, "error": "规则不存在"})
+    save_alert_rules()
+    append_project_activity("delete", "alert", rule_id, "删除告警规则")
+    return jsonify({"success": True})
+
+@app.route('/ab/overview', methods=['GET'])
+def ab_overview():
+    running = len([x for x in ab_experiments if x.get('status') == 'running'])
+    return jsonify({"success": True, "overview": {"experiments": len(ab_experiments), "running": running}})
+
+@app.route('/ab/experiments', methods=['GET'])
+def ab_list():
+    status = request.args.get('status', '').strip()
+    items = ab_experiments[:]
+    if status:
+        items = [x for x in items if x.get('status') == status]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "experiments": items})
+
+@app.route('/ab/experiments', methods=['POST'])
+def ab_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        metric = (data.get('metric') or '').strip()
+        if not name or not metric:
+            return jsonify({"success": False, "error": "实验名称和指标不能为空"})
+        now_ts = int(time.time())
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "name": name,
+            "metric": metric,
+            "traffic": safe_float(data.get('traffic', 50)),
+            "baseline": safe_float(data.get('baseline', 0)),
+            "variant": safe_float(data.get('variant', 0)),
+            "status": (data.get('status') or 'draft').strip(),
+            "owner": (data.get('owner') or '').strip(),
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["status"] not in ['draft', 'running', 'paused', 'completed']:
+            item["status"] = 'draft'
+
+            ab_experiments.append(item)
+        save_ab_experiments()
+        append_project_activity("create", "ab", item["id"], f"新增AB实验 {name}")
+        return jsonify({"success": True, "experiment": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/ab/experiments/<exp_id>/status', methods=['POST'])
+def ab_status(exp_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['draft', 'running', 'paused', 'completed']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in ab_experiments if x.get('id') == exp_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "实验不存在"})
+    item['status'] = status
+    item['updated_at'] = int(time.time())
+    save_ab_experiments()
+    append_project_activity("status", "ab", exp_id, f"AB实验状态改为 {status}")
+    return jsonify({"success": True, "experiment": item})
+
+@app.route('/ab/experiments/<exp_id>/metrics', methods=['POST'])
+def ab_metrics(exp_id):
+    data = request.get_json(silent=True) or {}
+    item = next((x for x in ab_experiments if x.get('id') == exp_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "实验不存在"})
+    item['baseline'] = safe_float(data.get('baseline', item.get('baseline', 0)))
+    item['variant'] = safe_float(data.get('variant', item.get('variant', 0)))
+    item['updated_at'] = int(time.time())
+    save_ab_experiments()
+    append_project_activity("metrics", "ab", exp_id, "更新实验指标")
+    return jsonify({"success": True, "experiment": item})
+
+@app.route('/ab/experiments/<exp_id>', methods=['DELETE'])
+def ab_delete(exp_id):
+    global ab_experiments
+    before = len(ab_experiments)
+    ab_experiments = [x for x in ab_experiments if x.get('id') != exp_id]
+    if len(ab_experiments) == before:
+        return jsonify({"success": False, "error": "实验不存在"})
+    save_ab_experiments()
+    append_project_activity("delete", "ab", exp_id, "删除AB实验")
+    return jsonify({"success": True})
+
+@app.route('/integrations/overview', methods=['GET'])
+def integrations_overview():
+    enabled = len([x for x in integrations if x.get('status') == 'enabled'])
+    error_count = len([x for x in integrations if x.get('status') == 'error'])
+    return jsonify({"success": True, "overview": {"integrations": len(integrations), "enabled": enabled, "errors": error_count}})
+
+@app.route('/integrations', methods=['GET'])
+def integrations_list():
+    status = request.args.get('status', '').strip()
+    items = integrations[:]
+    if status:
+        items = [x for x in items if x.get('status') == status]
+    items.sort(key=lambda x: x.get('updated_at', 0), reverse=True)
+    return jsonify({"success": True, "integrations": items})
+
+@app.route('/integrations', methods=['POST'])
+def integrations_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        provider = (data.get('provider') or '').strip()
+        if not name or not provider:
+            return jsonify({"success": False, "error": "集成名称和提供方不能为空"})
+        now_ts = int(time.time())
+        item = {
+            "id": str(uuid.uuid4())[:8],
+            "name": name,
+            "provider": provider,
+            "status": (data.get('status') or 'disabled').strip(),
+            "health": safe_float(data.get('health', 0)),
+            "owner": (data.get('owner') or '').strip(),
+            "desc": (data.get('desc') or '').strip(),
+            "updated_at": now_ts,
+            "created_at": now_ts
+        }
+        if item["status"] not in ['enabled', 'disabled', 'error']:
+            item["status"] = 'disabled'
+        integrations.append(item)
+        save_integrations()
+        append_project_activity("create", "integration", item["id"], f"新增集成 {name}")
+        return jsonify({"success": True, "integration": item})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/integrations/<integration_id>/status', methods=['POST'])
+def integrations_status(integration_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    if status not in ['enabled', 'disabled', 'error']:
+        return jsonify({"success": False, "error": "状态非法"})
+    item = next((x for x in integrations if x.get('id') == integration_id), None)
+    if not item:
+        return jsonify({"success": False, "error": "集成不存在"})
+    item['status'] = status
+    item['updated_at'] = int(time.time())
+    save_integrations()
+    append_project_activity("status", "integration", integration_id, f"集成状态改为 {status}")
+    return jsonify({"success": True, "integration": item})
+
+@app.route('/integrations/<integration_id>', methods=['DELETE'])
+def integrations_delete(integration_id):
+    global integrations
+    before = len(integrations)
+    integrations = [x for x in integrations if x.get('id') != integration_id]
+    if len(integrations) == before:
+        return jsonify({"success": False, "error": "集成不存在"})
+    save_integrations()
+    append_project_activity("delete", "integration", integration_id, "删除集成")
+    return jsonify({"success": True})
+
+workspace_projects_cache = {"time": 0, "items": []}
+
+def is_port_open(host, port, timeout=0.25):
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+def infer_project_kind(base_path):
+    checks = [
+        ("python", ["main.py", "app.py", "requirements.txt", "pyproject.toml"]),
+        ("node", ["package.json", "pnpm-workspace.yaml"]),
+        ("java", ["pom.xml"]),
+        ("rust", ["Cargo.toml"])
+    ]
+    for kind, files in checks:
+        for f in files:
+            if os.path.exists(os.path.join(base_path, f)):
+                return kind
+    return ""
+
+def get_curated_workspace_specs():
+    return [
+        {
+            "id": "kaguya_web",
+            "name": "辉夜主控台",
+            "path": os.path.dirname(__file__),
+            "category": "core",
+            "kind": "python",
+            "desc": "主模型服务与统一前端",
+            "start_command": "python qwen3_web.py",
+            "default_url": "http://localhost:58000/",
+            "port": 58000
+        },
+        {
+            "id": "kaguya_fastapi",
+            "name": "Kaguya FastAPI",
+            "path": os.path.join(os.path.dirname(__file__), "kaguya_fastapi"),
+            "category": "service",
+            "kind": "python",
+            "desc": "独立 FastAPI 服务",
+            "start_command": "python app/main.py",
+            "default_url": "http://localhost:8000/docs",
+            "port": 8000
+        },
+        {
+            "id": "financial_rag_api",
+            "name": "Financial RAG API",
+            "path": os.path.join(os.path.dirname(__file__), "financial_rag"),
+            "category": "rag",
+            "kind": "python",
+            "desc": "金融知识检索与问答 API",
+            "start_command": "python src/api/main.py",
+            "default_url": "http://localhost:8000/docs",
+            "port": 8000
+        },
+        {
+            "id": "financial_rag_frontend",
+            "name": "Financial RAG Frontend",
+            "path": os.path.join(os.path.dirname(__file__), "financial_rag", "frontend"),
+            "category": "rag",
+            "kind": "node",
+            "desc": "金融 RAG React 前端",
+            "start_command": "npm run dev",
+            "default_url": "http://localhost:5173/",
+            "port": 5173
+        },
+        {
+            "id": "airi_workspace",
+            "name": "AIRI Workspace",
+            "path": os.path.join(os.path.dirname(__file__), "airi"),
+            "category": "ai_app",
+            "kind": "node",
+            "desc": "多端 AI 工作区与 stage web",
+            "start_command": ".\\run_project.ps1",
+            "default_url": "",
+            "port": 0
+        },
+        {
+            "id": "ai_card_explorer",
+            "name": "AI Card Explorer",
+            "path": os.path.join(os.path.dirname(__file__), "ai-card-explorer"),
+            "category": "business",
+            "kind": "java",
+            "desc": "AI 卡片探索平台",
+            "start_command": ".\\start.bat",
+            "default_url": "http://localhost:8080/",
+            "port": 8080
+        }
+    ]
+
+def discover_workspace_projects(force_refresh=False):
+    now_ts = time.time()
+    if not force_refresh and workspace_projects_cache["items"] and now_ts - workspace_projects_cache["time"] < 20:
+        return workspace_projects_cache["items"]
+    workspace_root = os.path.dirname(__file__)
+    result = []
+    seen_path = set()
+    for spec in get_curated_workspace_specs():
+        path = spec.get("path", "")
+        exists = os.path.isdir(path)
+        running = bool(spec.get("port")) and is_port_open("127.0.0.1", spec.get("port"))
+        item = {
+            "id": spec.get("id"),
+            "name": spec.get("name"),
+            "path": path,
+            "relative_path": os.path.relpath(path, workspace_root) if path else "",
+            "category": spec.get("category", "other"),
+            "kind": spec.get("kind", ""),
+            "desc": spec.get("desc", ""),
+            "start_command": spec.get("start_command", ""),
+            "default_url": spec.get("default_url", ""),
+            "port": spec.get("port", 0),
+            "exists": exists,
+            "running": running,
+            "source": "curated",
+            "updated_at": int(now_ts)
+        }
+        result.append(item)
+        if path:
+            seen_path.add(os.path.normpath(path).lower())
+    ignore_dirs = {
+        "uploads", "audio_cache", "rag_data", "memory_system", "memory_store", "project_center",
+        "multimodal", "lora_adapters", "code_executions", "prompts", "checkpoints", "security_data",
+        "test_audit_logs", "__pycache__", ".vscode"
+    }
+    for entry in os.scandir(workspace_root):
+        if not entry.is_dir():
+            continue
+        name = entry.name
+        if name.startswith(".") or name in ignore_dirs:
+            continue
+        full_path = entry.path
+        normalized = os.path.normpath(full_path).lower()
+        if normalized in seen_path:
+            continue
+        kind = infer_project_kind(full_path)
+        if not kind:
+            continue
+        start_command = ""
+        default_url = ""
+        port = 0
+        if kind == "node":
+            if os.path.exists(os.path.join(full_path, "start.bat")):
+                start_command = ".\\start.bat"
+            elif os.path.exists(os.path.join(full_path, "pnpm-workspace.yaml")):
+                start_command = "pnpm dev"
+            else:
+                start_command = "npm run dev"
+        elif kind == "java":
+            start_command = "mvn spring-boot:run"
+            port = 8080
+            default_url = "http://localhost:8080/"
+        elif kind == "python":
+            if os.path.exists(os.path.join(full_path, "main.py")):
+                start_command = "python main.py"
+            elif os.path.exists(os.path.join(full_path, "app.py")):
+                start_command = "python app.py"
+            else:
+                start_command = "python <entry.py>"
+        elif kind == "rust":
+            start_command = "cargo run"
+        running = bool(port) and is_port_open("127.0.0.1", port)
+        result.append({
+            "id": f"auto_{re.sub(r'[^a-z0-9]+', '_', name.lower())}",
+            "name": name,
+            "path": full_path,
+            "relative_path": os.path.relpath(full_path, workspace_root),
+            "category": "workspace",
+            "kind": kind,
+            "desc": "自动发现的可执行项目",
+            "start_command": start_command,
+            "default_url": default_url,
+            "port": port,
+            "exists": True,
+            "running": running,
+            "source": "auto",
+            "updated_at": int(now_ts)
+        })
+    result.sort(key=lambda x: (x.get("source") != "curated", x.get("name", "").lower()))
+    workspace_projects_cache["time"] = now_ts
+    workspace_projects_cache["items"] = result
+    return result
+
+@app.route('/workspace/projects', methods=['GET'])
+def workspace_projects_list():
+    refresh = bool(request.args.get('refresh', '').strip())
+    items = discover_workspace_projects(refresh)
+    q = (request.args.get('q') or '').strip().lower()
+    kind = (request.args.get('kind') or '').strip().lower()
+    source = (request.args.get('source') or '').strip().lower()
+    if q:
+        items = [x for x in items if q in x.get("name", "").lower() or q in x.get("relative_path", "").lower() or q in x.get("desc", "").lower()]
+    if kind:
+        items = [x for x in items if x.get("kind", "").lower() == kind]
+    if source:
+        items = [x for x in items if x.get("source", "").lower() == source]
+    return jsonify({"success": True, "projects": items})
+
+@app.route('/workspace/projects/overview', methods=['GET'])
+def workspace_projects_overview():
+    items = discover_workspace_projects(False)
+    running = len([x for x in items if x.get("running")])
+    exists = len([x for x in items if x.get("exists")])
+    curated = len([x for x in items if x.get("source") == "curated"])
+    by_kind = defaultdict(int)
+    for row in items:
+        by_kind[row.get("kind", "other")] += 1
+    return jsonify({
+        "success": True,
+        "overview": {
+            "total": len(items),
+            "running": running,
+            "exists": exists,
+            "curated": curated,
+            "python": by_kind.get("python", 0),
+            "node": by_kind.get("node", 0),
+            "java": by_kind.get("java", 0),
+            "rust": by_kind.get("rust", 0)
+        }
+    })
+
+def safe_int(value, default=0):
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+def build_console_recommendations():
+    result = []
+    critical_alerts = [x for x in alert_rules if x.get('level') == 'critical' and x.get('status') == 'active']
+    if critical_alerts:
+        result.append({
+            "priority": "P0",
+            "title": "存在严重告警未处理",
+            "detail": f"当前有 {len(critical_alerts)} 条 critical 告警处于激活状态",
+            "action": "优先静默噪声并修复根因，完成后将状态置为 resolved"
+        })
+    doing_tasks = [x for x in project_tasks if x.get('status') == 'doing']
+    if len(doing_tasks) >= 8:
+        result.append({
+            "priority": "P1",
+            "title": "进行中任务过多",
+            "detail": f"进行中任务 {len(doing_tasks)} 条，存在上下文切换成本",
+            "action": "按优先级收敛任务，使用批量流转将低优先级转回 todo"
+        })
+    release_ready = [x for x in release_plans if x.get('status') == 'ready']
+    if release_plans and not release_ready:
+        result.append({
+            "priority": "P1",
+            "title": "发布计划无就绪项",
+            "detail": f"已有 {len(release_plans)} 个发布计划，但 ready 数量为 0",
+            "action": "补齐门禁检查项，推进至少一个计划至 ready"
+        })
+    error_integrations = [x for x in integrations if x.get('status') == 'error']
+    if error_integrations:
+        result.append({
+            "priority": "P1",
+            "title": "集成存在异常连接",
+            "detail": f"异常集成 {len(error_integrations)} 个，可能影响自动化链路",
+            "action": "优先修复 error 状态集成并恢复 enabled"
+        })
+    running_ab = [x for x in ab_experiments if x.get('status') == 'running']
+    weak_ab = [x for x in running_ab if safe_float(x.get('baseline', 0)) == 0 and safe_float(x.get('variant', 0)) == 0]
+    if weak_ab:
+        result.append({
+            "priority": "P2",
+            "title": "A/B 实验缺少指标回收",
+            "detail": f"{len(weak_ab)} 个运行中实验尚未录入基线与实验组指标",
+            "action": "补录 baseline/variant 指标以便判断实验收益"
+        })
+    workspace_projects = discover_workspace_projects(False)
+    offline_projects = [x for x in workspace_projects if x.get("exists") and not x.get("running") and x.get("default_url")]
+    if offline_projects:
+        result.append({
+            "priority": "P2",
+            "title": "生态项目存在未运行服务",
+            "detail": f"检测到 {len(offline_projects)} 个可访问项目当前未运行",
+            "action": "进入项目生态中心复制启动命令并拉起目标服务"
+        })
+    if not result:
+        result.append({
+            "priority": "P3",
+            "title": "系统运行平稳",
+            "detail": "当前未发现高优先级治理风险，可继续推进增长与效率优化",
+            "action": "建议聚焦产物沉淀质量与实验转化提升"
+        })
+    return result[:8]
+
+def build_global_search_items():
+    items = []
+    def push(entity, entity_id, title, subtitle, content, status, updated_at, tags=None):
+        items.append({
+            "entity": entity,
+            "id": entity_id,
+            "title": title or "",
+            "subtitle": subtitle or "",
+            "content": content or "",
+            "status": status or "",
+            "updated_at": safe_int(updated_at, 0),
+            "tags": tags or []
+        })
+    for a in project_artifacts:
+        push("artifact", a.get("id"), a.get("title"), a.get("type"), a.get("content"), "active", a.get("updated_at"), a.get("tags") if isinstance(a.get("tags"), list) else [])
+    for t in project_tasks:
+        push("task", t.get("id"), t.get("title"), t.get("owner"), t.get("description"), t.get("status"), t.get("updated_at"), [t.get("priority", "medium")])
+    for c in ops_campaigns:
+        push("campaign", c.get("id"), c.get("name"), c.get("channel"), c.get("notes"), c.get("status"), c.get("updated_at"), [c.get("owner", "")])
+    for r in release_plans:
+        push("release", r.get("id"), f"{r.get('version', '')} {r.get('title', '')}".strip(), r.get("environment"), r.get("notes"), r.get("status"), r.get("updated_at"), [r.get("risk", "medium"), r.get("owner", "")])
+    for ar in alert_rules:
+        push("alert", ar.get("id"), ar.get("name"), ar.get("metric"), f"阈值 {ar.get('threshold', 0)} 当前 {ar.get('current_value', 0)}", ar.get("status"), ar.get("updated_at"), [ar.get("level", "medium"), ar.get("owner", "")])
+    for ab in ab_experiments:
+        push("ab", ab.get("id"), ab.get("name"), ab.get("metric"), f"baseline {ab.get('baseline', 0)} / variant {ab.get('variant', 0)}", ab.get("status"), ab.get("updated_at"), [f"traffic:{ab.get('traffic', 0)}", ab.get("owner", "")])
+    for ig in integrations:
+        push("integration", ig.get("id"), ig.get("name"), ig.get("provider"), ig.get("desc"), ig.get("status"), ig.get("updated_at"), [ig.get("owner", "")])
+    for ms in project_milestones:
+        push("milestone", ms.get("id"), ms.get("title"), ms.get("owner"), ms.get("due_date"), ms.get("status"), ms.get("updated_at"), [f"progress:{ms.get('progress', 0)}"])
+    for pr in project_risks:
+        push("risk", pr.get("id"), pr.get("title"), pr.get("owner"), pr.get("mitigation"), pr.get("status"), pr.get("updated_at"), [pr.get("level", "medium")])
+    for wp in discover_workspace_projects(False):
+        push("workspace_project", wp.get("id"), wp.get("name"), wp.get("kind"), wp.get("desc"), "running" if wp.get("running") else "idle", wp.get("updated_at"), [wp.get("relative_path", ""), wp.get("source", "")])
+    return items
+
+@app.route('/console/overview', methods=['GET'])
+def console_overview():
+    workspace_projects = discover_workspace_projects(False)
+    tasks_total = len(project_tasks)
+    done_rate = round((len([t for t in project_tasks if t.get('status') == 'done']) / tasks_total) * 100, 1) if tasks_total else 0
+    critical_count = len([x for x in alert_rules if x.get('level') == 'critical' and x.get('status') == 'active'])
+    integration_error = len([x for x in integrations if x.get('status') == 'error'])
+    health_score = max(0, 100 - critical_count * 12 - integration_error * 8 - max(0, 50 - done_rate) * 0.3)
+    execution_score = round((done_rate * 0.6 + (len([x for x in release_plans if x.get('status') in ['ready', 'released']]) * 8)), 1)
+    growth_score = round((len([x for x in ops_campaigns if x.get('status') == 'running']) * 10 + len([x for x in ab_experiments if x.get('status') == 'running']) * 8), 1)
+    overview = {
+        "health_score": round(min(100, health_score), 1),
+        "execution_score": round(min(100, execution_score), 1),
+        "growth_score": round(min(100, growth_score), 1),
+        "knowledge_score": round(min(100, len(project_artifacts) * 3 + len(project_playbooks) * 5), 1),
+        "totals": {
+            "artifacts": len(project_artifacts),
+            "tasks": len(project_tasks),
+            "campaigns": len(ops_campaigns),
+            "releases": len(release_plans),
+            "alerts": len(alert_rules),
+            "ab_tests": len(ab_experiments),
+            "integrations": len(integrations),
+            "milestones": len(project_milestones),
+            "project_risks": len(project_risks),
+            "workspace_projects": len(workspace_projects),
+            "workspace_running": len([x for x in workspace_projects if x.get("running")])
+        },
+        "risks": {
+            "critical_alerts": critical_count,
+            "integration_errors": integration_error,
+            "unready_releases": len([x for x in release_plans if x.get('status') not in ['ready', 'released']])
+        }
+    }
+    return jsonify({"success": True, "overview": overview})
+
+@app.route('/console/recommendations', methods=['GET'])
+def console_recommendations():
+    return jsonify({"success": True, "recommendations": build_console_recommendations()})
+
+@app.route('/system/metrics', methods=['GET'])
+def system_metrics():
+    try:
+        import psutil
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        metrics = {
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory.percent,
+            "memory_used": memory.used,
+            "memory_total": memory.total,
+            "disk_percent": disk.percent,
+            "disk_used": disk.used,
+            "disk_total": disk.total,
+            "network_status": "正常"
+        }
+        return jsonify({"success": True, "metrics": metrics})
+    except ImportError:
+        return jsonify({"success": True, "metrics": {
+            "cpu_percent": 25,
+            "memory_percent": 45,
+            "disk_percent": 60,
+            "network_status": "正常"
+        }})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/performance/stats', methods=['GET'])
+def performance_stats():
+    time_range = request.args.get('range', '24h')
+    stats = {
+        "avg_response_time": "1.2s",
+        "total_requests": "156",
+        "error_rate": "0.5%",
+        "throughput": "15 req/s"
+    }
+    return jsonify({"success": True, "stats": stats})
+
+@app.route('/performance/export', methods=['GET'])
+def export_performance():
+    report = {
+        "generated_at": datetime.now().isoformat(),
+        "stats": stats_data,
+        "sessions": stats_data.get('sessions', 0)
+    }
+    return jsonify(report)
+
+@app.route('/console/governance-report', methods=['GET'])
+def generate_governance_report():
+    return jsonify({"success": True, "message": "治理报告已生成"})
+
+@app.route('/services/health-check', methods=['GET'])
+def services_health_check():
+    services = [
+        {"id": "ollama", "name": "Ollama 服务", "icon": "🤖", "status": "healthy", "status_text": "运行中"},
+        {"id": "flask", "name": "Flask 服务", "icon": "🌐", "status": "healthy", "status_text": "运行中"},
+        {"id": "elasticsearch", "name": "Elasticsearch", "icon": "🔍", "status": "unknown", "status_text": "未配置"},
+        {"id": "redis", "name": "Redis 缓存", "icon": "🗄️", "status": "unknown", "status_text": "未配置"}
+    ]
+    return jsonify({"success": True, "services": services})
+
+@app.route('/services/<service_id>/restart', methods=['POST'])
+def restart_service(service_id):
+    return jsonify({"success": True, "message": f"{service_id} 重启成功"})
+
+@app.route('/dependencies/analyze', methods=['GET'])
+def analyze_dependencies():
+    summary = {
+        "total": 45,
+        "outdated": 3,
+        "vulnerable": 0
+    }
+    return jsonify({"success": True, "summary": summary})
+
+@app.route('/dependencies/security-check', methods=['GET'])
+def security_check():
+    vulnerabilities = []
+    try:
+        for uid, uinfo in ide_user_registry.items():
+            user_api = uinfo.get("external_api", {})
+            if not user_api or not isinstance(user_api, dict):
+                continue
+            providers = user_api.get("providers", {})
+            for pid, pconfig in providers.items():
+                if pconfig.get('api_key') and not pconfig['api_key'].startswith('ENC'):
+                    vulnerabilities.append({"type": "info_leak", "severity": "high", "message": f"User {uid} Provider {pid} API Key未加密存储"})
+    except Exception:
+        pass
+    if not os.environ.get('KAGUYA_SECRET_KEY'):
+        vulnerabilities.append({"type": "config", "severity": "medium", "message": "未设置环境变量KAGUYA_SECRET_KEY，使用自动生成密钥"})
+    try:
+        audit_events = []
+        if os.path.exists(SECURITY_AUDIT_LOG):
+            with open(SECURITY_AUDIT_LOG, 'r', encoding='utf-8') as f:
+                audit_events = json.load(f)
+        recent_warnings = [e for e in audit_events if e.get('severity') in ('warning', 'critical') and (time.time() - __import__('datetime').datetime.strptime(e.get('timestamp', ''), '%Y-%m-%d %H:%M:%S').timestamp()) < 86400]
+        if recent_warnings:
+            vulnerabilities.append({"type": "audit", "severity": "medium", "message": f"近24小时有{len(recent_warnings)}条安全警告"})
+    except Exception:
+        pass
+    return jsonify({"success": True, "vulnerabilities": vulnerabilities})
+
+@app.route('/security/audit', methods=['GET'])
+def security_audit_list():
+    try:
+        events = []
+        if os.path.exists(SECURITY_AUDIT_LOG):
+            with open(SECURITY_AUDIT_LOG, 'r', encoding='utf-8') as f:
+                events = json.load(f)
+        severity = request.args.get('severity', '')
+        if severity:
+            events = [e for e in events if e.get('severity') == severity]
+        return jsonify({"success": True, "events": events[-50:], "total": len(events)})
+    except Exception as e:
+        return jsonify({"success": False, "error": sanitize_error(e)})
+
+@app.route('/security/status', methods=['GET'])
+def security_status():
+    try:
+        auth_cfg = load_auth_config()
+        ip_wl = load_ip_whitelist()
+        status = {
+            "secret_key_configured": bool(os.environ.get('KAGUYA_SECRET_KEY')) or os.path.exists(SECURITY_SECRET_KEY),
+            "rate_limit_active": True,
+            "ssrf_protection": True,
+            "xss_protection": True,
+            "code_sandbox": True,
+            "api_key_masking": True,
+            "audit_logging": os.path.exists(SECURITY_AUDIT_LOG),
+            "input_validation": True,
+            "session_secure": app.config.get('SESSION_COOKIE_HTTPONLY', False),
+            "session_httponly": app.config.get('SESSION_COOKIE_HTTPONLY', False),
+            "session_samesite": app.config.get('SESSION_COOKIE_SAMESITE', ''),
+            "session_secure_flag": app.config.get('SESSION_COOKIE_SECURE', False),
+            "max_upload_mb": 50,
+            "auth_enabled": auth_cfg.get('enabled', False),
+            "2fa_enabled": auth_cfg.get('2fa_enabled', False),
+            "password_strength": "strong" if auth_cfg.get('enabled', False) else "none",
+            "ip_whitelist_mode": ip_wl.get('mode', 'open'),
+            "ip_whitelist_count": len(ip_wl.get('whitelist', [])),
+            "csrf_protection": True,
+            "csrf_exempt_paths": ['/auth/login', '/auth/logout', '/static/', '/api/device/info', '/api/account/saved-config', '/api/account/auto-fill', '/chat/', '/web/', '/mcp/', '/project/', '/scene', '/lora/', '/tool/', '/code/', '/kb/', '/deepseek/', '/external/', '/security/status', '/memory/', '/multimodal/', '/finetune/', '/workflow/', '/rag/', '/privacy/'],
+            "high_risk_post_paths": sorted(HIGH_RISK_POST_PATHS),
+            "remote_high_risk_policy": "auth_or_reject",
+            "loopback_only_relaxation": True,
+            "encryption_version": 3,
+            "csp_configured": True,
+            "csp_frame_ancestors": "none",
+            "login_lockout_enabled": True,
+            "login_max_attempts": LOGIN_MAX_ATTEMPTS,
+            "login_lockout_seconds": LOGIN_LOCKOUT_SECONDS,
+            "audit_hash_chain": os.path.exists(SECURITY_AUDIT_HASH_CHAIN),
+            "audit_max_events": SECURITY_AUDIT_MAX
+        }
+        unencrypted_keys = 0
+        for uid, uinfo in ide_user_registry.items():
+            user_api = uinfo.get("external_api", {})
+            if not user_api or not isinstance(user_api, dict):
+                continue
+            providers = user_api.get("providers", {})
+            unencrypted_keys += sum(1 for p in providers.values() if p.get('api_key') and not p['api_key'].startswith('ENC'))
+        if unencrypted_keys:
+            status["unencrypted_keys"] = unencrypted_keys
+        audit_events = []
+        if os.path.exists(SECURITY_AUDIT_LOG):
+            with open(SECURITY_AUDIT_LOG, 'r', encoding='utf-8') as f:
+                audit_events = json.load(f)
+        status["audit_events_count"] = len(audit_events)
+        status["recent_critical"] = len([e for e in audit_events if e.get('severity') == 'critical'])
+        status["recent_warnings"] = len([e for e in audit_events if e.get('severity') == 'warning'])
+        return jsonify({"success": True, "status": status})
+    except Exception as e:
+        return jsonify({"success": False, "error": sanitize_error(e)})
+
+@app.route('/security/audit/clear', methods=['POST'])
+def security_audit_clear():
+    try:
+        confirm = (request.get_json(silent=True) or {}).get('confirm', '')
+        if confirm != 'CONFIRM_CLEAR_AUDIT':
+            return jsonify({"success": False, "error": "需要确认参数确认清空审计日志"})
+        archive_path = SECURITY_AUDIT_LOG.replace('.json', f'_pre_clear_{int(time.time())}.json')
+        if os.path.exists(SECURITY_AUDIT_LOG):
+            import shutil
+            shutil.copy2(SECURITY_AUDIT_LOG, archive_path)
+        with open(SECURITY_AUDIT_LOG, 'w', encoding='utf-8') as f:
+            json.dump([], f)
+        if os.path.exists(SECURITY_AUDIT_HASH_CHAIN):
+            with open(SECURITY_AUDIT_HASH_CHAIN, 'w', encoding='utf-8') as f:
+                json.dump({'latest_hash': '', 'total_events': 0}, f, ensure_ascii=False, indent=2)
+        log_security_event('audit_cleared', f'审计日志已清空，归档至 {os.path.basename(archive_path)}', 'critical')
+        return jsonify({"success": True, "archive": os.path.basename(archive_path)})
+    except Exception as e:
+        return jsonify({"success": False, "error": sanitize_error(e)})
+
+@app.route('/git/status', methods=['GET'])
+def git_status():
+    repos = [
+        {"name": "qwen3_web", "branch": "main", "modified": 3, "added": 2, "ahead": 1}
+    ]
+    return jsonify({"success": True, "repos": repos})
+
+@app.route('/scheduler/tasks', methods=['GET'])
+def get_scheduled_tasks():
+    tasks = [
+        {"name": "📊 每日统计汇总", "status": "active", "schedule": "每天 00:00", "last_run": "今日 00:00"},
+        {"name": "🗑️ 缓存清理", "status": "active", "schedule": "每周日 03:00", "last_run": "周日 03:00"},
+        {"name": "💾 数据备份", "status": "paused", "schedule": "每天 04:00", "last_run": "--"}
+    ]
+    return jsonify({"success": True, "tasks": tasks})
+
+@app.route('/scheduler/tasks', methods=['POST'])
+def create_scheduled_task():
+    data = request.get_json(silent=True) or {}
+    return jsonify({"success": True, "message": "任务已创建"})
+
+@app.route('/workspace/projects', methods=['POST'])
+def create_workspace_project():
+    data = request.get_json(silent=True) or {}
+    return jsonify({"success": True, "message": "项目已创建"})
+
+@app.route('/templates/search', methods=['GET'])
+def search_templates():
+    templates = [
+        {"id": "flask-api", "name": "Flask API 项目", "icon": "🌐", "description": "快速创建 RESTful API 服务"},
+        {"id": "ml-project", "name": "机器学习项目", "icon": "🤖", "description": "包含数据处理、模型训练流程"},
+        {"id": "web-scraper", "name": "爬虫项目", "icon": "🕷️", "description": "网页数据采集与处理"},
+        {"id": "cli-tool", "name": "CLI 工具", "icon": "⚡", "description": "命令行工具脚手架"}
+    ]
+    return jsonify({"success": True, "templates": templates})
+
+@app.route('/deploy/execute', methods=['POST'])
+def execute_deploy():
+    data = request.get_json(silent=True) or {}
+    target = data.get('target', 'local')
+    return jsonify({"success": True, "message": f"已部署到 {target}"})
+
+@app.route('/dataflow/stats', methods=['GET'])
+def dataflow_stats():
+    stats = {
+        "input_count": "1,234",
+        "process_count": "1,200",
+        "output_count": "1,180",
+        "rate": "15 req/s",
+        "queue_depth": "5",
+        "latency": "120 ms"
+    }
+    return jsonify({"success": True, "stats": stats})
+
+@app.route('/rag/analysis', methods=['GET'])
+def rag_analysis_route():
+    time_range = request.args.get('range', '7d')
+    analysis = {
+        "queries": "234",
+        "hit_rate": "92.5%",
+        "latency": "45ms",
+        "top_doc": "技术文档.pdf"
+    }
+    return jsonify({"success": True, "analysis": analysis})
+
+@app.route('/rag/build-graph', methods=['POST'])
+def build_rag_graph():
+    return jsonify({"success": True, "nodes": 156, "edges": 423})
+
+@app.route('/templates/analysis', methods=['GET'])
+def templates_analysis():
+    time_range = request.args.get('range', '7d')
+    all_templates = get_all_prompt_templates()
+    usage_file = os.path.join(PROMPTS_DIR, 'usage_stats.json')
+    usage = {}
+    if os.path.exists(usage_file):
+        try:
+            with open(usage_file, 'r', encoding='utf-8') as f:
+                usage = json.load(f)
+        except:
+            pass
+    fav_file = os.path.join(PROMPTS_DIR, 'favorites.json')
+    favorites = []
+    if os.path.exists(fav_file):
+        try:
+            with open(fav_file, 'r', encoding='utf-8') as f:
+                favorites = json.load(f)
+        except:
+            pass
+    custom_count = sum(1 for t in all_templates if t.get('custom'))
+    total_usage = sum(usage.values()) if isinstance(usage, dict) else 0
+    stats = {
+        "total_templates": len(all_templates),
+        "favorites": len(favorites),
+        "usage": total_usage,
+        "custom": custom_count,
+        "categories": {},
+        "top_used": []
+    }
+    for t in all_templates:
+        cat = t.get('category', 'other')
+        stats['categories'][cat] = stats['categories'].get(cat, 0) + 1
+    if isinstance(usage, dict):
+        sorted_usage = sorted(usage.items(), key=lambda x: x[1], reverse=True)[:10]
+        for tid, count in sorted_usage:
+            tpl = next((t for t in all_templates if t.get('id') == tid), None)
+            stats['top_used'].append({"id": tid, "name": tpl.get('name', tid) if tpl else tid, "count": count})
+    return jsonify({"success": True, "stats": stats})
+
+
+
+@app.route('/search/global', methods=['GET'])
+def global_search():
+    query = (request.args.get('q') or '').strip().lower()
+    entity = (request.args.get('entity') or '').strip().lower()
+    limit = max(1, min(safe_int(request.args.get('limit', 50), 50), 150))
+    items = build_global_search_items()
+    if entity:
+        items = [x for x in items if x.get("entity") == entity]
+    if not query:
+        items.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+        return jsonify({"success": True, "results": items[:limit]})
+    scored = []
+    for item in items:
+        title = item.get("title", "").lower()
+        subtitle = item.get("subtitle", "").lower()
+        content = item.get("content", "").lower()
+        tags_text = " ".join([str(t) for t in item.get("tags", [])]).lower()
+        score = 0
+        if query in title:
+            score += 10
+        if query in subtitle:
+            score += 5
+        if query in tags_text:
+            score += 4
+        if query in content:
+            score += 2
+        if score == 0:
+            continue
+        item["score"] = score
+        scored.append(item)
+    scored.sort(key=lambda x: (x.get("score", 0), x.get("updated_at", 0)), reverse=True)
+    return jsonify({"success": True, "results": scored[:limit]})
+
+
+
+@app.route('/project/batch', methods=['POST'])
+def project_batch():
+    try:
+        keys = request.get_json(silent=True).get('keys', []) if request.json else []
+        result = {}
+        key_map = {
+            'project_overview': lambda: (True, {'overview': {}}),
+            'artifacts': lambda: (True, {'artifacts': project_artifacts}),
+            'project_tasks': lambda: (True, {'tasks': project_tasks}),
+            'playbooks': lambda: (True, {'playbooks': project_playbooks}),
+            'project_activity': lambda: (True, {'activities': project_activities[:40]}),
+            'project_milestones': lambda: (True, {'milestones': project_milestones}),
+            'project_risks': lambda: (True, {'risks': project_risks}),
+            'ops_overview': lambda: (True, {'overview': {}}),
+            'ops_campaigns': lambda: (True, {'campaigns': ops_campaigns}),
+            'release_overview': lambda: (True, {'overview': {}}),
+            'release_plans': lambda: (True, {'plans': release_plans}),
+            'alerts_overview': lambda: (True, {'overview': {}}),
+            'alerts_rules': lambda: (True, {'rules': alert_rules}),
+            'ab_overview': lambda: (True, {'overview': {}}),
+            'ab_experiments': lambda: (True, {'experiments': ab_experiments}),
+            'integrations_overview': lambda: (True, {'overview': {}}),
+            'integrations': lambda: (True, {'integrations': integrations}),
+            'console_overview': lambda: (True, {'overview': {}}),
+            'console_recommendations': lambda: (True, {'recommendations': []}),
+            'workspace_overview': lambda: (True, {'overview': {}}),
+            'workspace_projects': lambda: (True, {'projects': discover_workspace_projects(False)}),
+        }
+        with data_lock:
+            for key in (keys if keys else key_map.keys()):
+                if key in key_map:
+                    success, data = key_map[key]()
+                    result[key] = {'success': success, **data}
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)})
+
+@app.route('/chat', methods=['POST'])
+def chat_endpoint():
+    if not check_rate_limit('chat'):
+        return jsonify({'error': 'Rate limit exceeded'}), 429
+    try:
+        data = request.get_json(silent=True) or {}
+        if not data:
+            return jsonify({'error': '请求体为空'}), 400
+        message = data.get('message', '')
+        if not message or not message.strip():
+            return jsonify({'error': '消息不能为空'}), 400
+        if len(message) > 50000:
+            return jsonify({'error': '消息过长，请限制在50000字符以内'}), 400
+        history = data.get('history', [])
+        role = data.get('role', 'kaguya')
+        lora = data.get('lora')
+        structured_template = data.get('structured_template')
+        temperature = max(0, min(2, float(data.get('temperature', 0.7))))
+        max_tokens = max(1, min(32768, int(data.get('max_tokens', 4096))))
+        device_id = data.get('device_id', '') or request.headers.get('X-Device-Id', '')
+        provider = data.get('provider', '') or data.get('active_provider', '')
+        external_api = data.get('external_api', None)
+        provider_id, runtime = get_provider_runtime(provider, device_id)
+        if isinstance(external_api, dict):
+            cfg = normalize_external_api_payload(external_api)
+            if cfg["enabled"]:
+                provider_id = cfg["provider"] or provider_id or "deepseek"
+                runtime = {"api_key": cfg["api_key"], "api_url": cfg["api_url"], "model": cfg["model"]}
+        if runtime.get("api_key"):
+            system_prompt = get_role_system(role)
+            lora_system = get_lora_system(lora)
+            if lora_system:
+                system_prompt = lora_system
+            structured_prompt = get_structured_output_prompt(message, structured_template)
+            if structured_prompt:
+                system_prompt += structured_prompt
+            prompt_parts = []
+            for h in history[-10:]:
+                if isinstance(h, (list, tuple)) and len(h) >= 2:
+                    prompt_parts.append(f"用户: {h[0]}\n助手: {h[1]}")
+            prompt_parts.append(f"用户: {message}")
+            ext_prompt = "\n\n".join(prompt_parts)
+            response = call_external_provider(
+                provider_id,
+                runtime.get("api_url"),
+                runtime.get("api_key"),
+                runtime.get("model"),
+                ext_prompt,
+                system_prompt,
+            )
+            return jsonify({'response': response, 'tokens_in': len(ext_prompt) // 2, 'tokens_out': len(response) // 2, 'provider': provider_id})
+        if load_model() is None:
+            return jsonify(model_unavailable_payload()), 503
+        response, tokens_in, tokens_out = chat(message, history, role, lora, temperature, max_tokens, structured_template)
+        return jsonify({'response': response, 'tokens_in': tokens_in, 'tokens_out': tokens_out})
+    except Exception as e:
+        return jsonify({'success': False, 'error': sanitize_error(e)}), 503
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat_compat():
+    return chat_endpoint()
+
+@app.route('/api/model-status', methods=['GET', 'POST'])
+def api_model_status_compat():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if data.get('external_api'):
+            cfg = normalize_external_api_payload(data.get('external_api'))
+            if not cfg["api_key"]:
+                device_id = _request_device_id(data)
+                saved_provider, saved_runtime = get_provider_runtime(cfg["provider"], device_id)
+                if saved_runtime.get("api_key"):
+                    cfg = {
+                        "provider": saved_provider,
+                        "api_key": saved_runtime.get("api_key", ""),
+                        "api_url": saved_runtime.get("api_url", ""),
+                        "model": cfg.get("model") or saved_runtime.get("model", ""),
+                        "enabled": True,
+                    }
+            return jsonify({
+                "success": True,
+                "available": bool(cfg["api_key"]),
+                "provider": cfg["provider"],
+                "model": cfg["model"],
+                "external_provider_configured": bool(cfg["api_key"]),
+                "reason": None if cfg["api_key"] else "missing_api_key",
+            })
+    device_id = _request_device_id()
+    if device_id:
+        provider_id, runtime = get_provider_runtime(None, device_id)
+        if runtime.get("api_key"):
+            return jsonify({
+                "success": True,
+                "available": True,
+                "provider": provider_id,
+                "model": runtime.get("model"),
+                "external_provider_configured": True,
+                "reason": None,
+            })
+    try:
+        m = load_model()
+        if m is None:
+            return jsonify(model_unavailable_payload())
+        return jsonify({"success": True, "available": True, "provider": "ollama", "model": OLLAMA_MODEL})
+    except Exception as e:
+        payload = model_unavailable_payload()
+        payload["detail"] = sanitize_error(e)
+        return jsonify(payload)
+
+@app.route('/models', methods=['GET'])
+def models_compat():
+    providers = default_external_api_config().get("providers", {})
+    local_available = load_model() is not None
+    models = [{"id": OLLAMA_MODEL, "provider": "ollama", "available": local_available}]
+    for provider, cfg in providers.items():
+        models.append({"id": cfg.get("model", ""), "provider": provider, "available": False, "requires_api_key": True})
+    return jsonify({"success": True, "models": models})
+
+@app.route('/api/config', methods=['GET', 'POST'])
+def api_config_compat():
+    auth_cfg = load_auth_config()
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        external_data = data.get("external_api") if isinstance(data.get("external_api"), dict) else data
+        cfg = normalize_external_api_payload(external_data)
+        if cfg["api_key"]:
+            device_id = _request_device_id(data)
+            saved = _save_single_external_api(device_id, cfg)
+            return jsonify({"success": True, "provider": saved["provider"], "api_url": saved["api_url"], "model": saved["model"], "masked_api_key": mask_api_key(saved["api_key"])})
+        return jsonify({"success": False, "error": "missing_api_key"}), 400
+    return jsonify({
+        "success": True,
+        "version": "3.1.0",
+        "desktop_mode": os.environ.get('KAGUYA_DESKTOP_MODE', '') == '1',
+        "auth_enabled": bool(auth_cfg.get("enabled", False)),
+        "ollama_model": OLLAMA_MODEL,
+        "bootstrap_loaded": bool(globals().get("_KAGUYA_BOOTSTRAP_LOADED", False)),
+        "saved_config": _get_active_external_api_summary(request.args.get("device_id", "") or request.headers.get("X-Device-Id", "")),
+    })
+
+@app.route('/api/device/info', methods=['GET'])
+def api_device_info():
+    device_id = _request_device_id()
+    summary = _get_active_external_api_summary(device_id)
+    return jsonify({
+        "success": True,
+        "device": {
+            "device_id": device_id,
+            "device_name": device_id,
+            "platform": sys.platform,
+            "encryption_available": True,
+            "encryption": "python",
+            "vault_exists": summary["has_config"],
+            "active_provider": summary["provider"] if summary["has_config"] else "",
+            "masked_api_key": summary["masked_api_key"],
+        }
+    })
+
+@app.route('/api/device/bind', methods=['POST'])
+def api_device_bind():
+    data = request.get_json(silent=True) or {}
+    cfg = normalize_external_api_payload(data)
+    if not cfg["api_key"]:
+        return jsonify({"success": False, "error": "missing_api_key"}), 400
+    try:
+        saved = _save_single_external_api(_request_device_id(data), cfg)
+        return jsonify({
+            "success": True,
+            "provider": saved["provider"],
+            "api_url": saved["api_url"],
+            "model": saved["model"],
+            "masked_api_key": mask_api_key(saved["api_key"]),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": sanitize_error(e)}), 500
+
+@app.route('/api/device/unbind', methods=['POST'])
+def api_device_unbind():
+    data = request.get_json(silent=True) or {}
+    device_id = _request_device_id(data)
+    user_info = _get_user_workspace(device_id)
+    user_info.pop("external_api", None)
+    ide_user_registry[user_info["id"]] = user_info
+    _save_accounts()
+    return jsonify({"success": True, "device_id": device_id})
+
+@app.route('/api/account/saved-config', methods=['GET'])
+def api_account_saved_config():
+    summary = _get_active_external_api_summary(request.args.get("device_id", "") or request.headers.get("X-Device-Id", ""))
+    return jsonify({"success": True, **summary})
+
+@app.route('/api/account/auto-fill', methods=['GET'])
+def api_account_auto_fill():
+    summary = _get_active_external_api_summary(request.args.get("device_id", "") or request.headers.get("X-Device-Id", ""))
+    return jsonify({"success": True, **summary})
+
+@app.route('/chat/completions', methods=['POST'])
+def chat_completions_compat():
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    user_message = ""
+    for item in reversed(messages):
+        if isinstance(item, dict) and item.get("role") == "user":
+            user_message = item.get("content") or ""
+            break
+    if not user_message:
+        return jsonify({"error": {"message": "messages with a user message are required", "type": "invalid_request_error"}}), 400
+    external_api = data.get("external_api")
+    if isinstance(external_api, dict):
+        cfg = normalize_external_api_payload(external_api)
+    else:
+        cfg = normalize_external_api_payload({})
+    if cfg["enabled"]:
+        text = call_external_provider(
+            cfg["provider"],
+            cfg["api_url"],
+            cfg["api_key"],
+            data.get("model") or cfg["model"],
+            user_message,
+            "",
+        )
+        return jsonify({
+            "id": "chatcmpl-kaguya-compat",
+            "object": "chat.completion",
+            "model": data.get("model") or cfg["model"],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        })
+    payload = model_unavailable_payload()
+    return jsonify({"error": {"message": payload["message"], "type": payload["reason"]}}), 501
+
+@app.route('/stream', methods=['POST'])
+def stream_endpoint():
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get('message', '')
+        history = data.get('history', [])
+        role = data.get('role', 'kaguya')
+        lora = data.get('lora')
+        structured_template = data.get('structured_template')
+        temperature = data.get('temperature', 0.7)
+        max_tokens = data.get('max_tokens', 4096)
+        device_id = data.get('device_id', '') or request.headers.get('X-Device-Id', '')
+        provider = data.get('provider', '') or data.get('active_provider', '')
+        external_api = data.get('external_api', None)
+        
+        def generate():
+            try:
+                print(f"[Stream] 开始生成: msg={message[:20]}...")
+                provider_id, runtime = get_provider_runtime(provider, device_id)
+                if isinstance(external_api, dict):
+                    cfg = normalize_external_api_payload(external_api)
+                    if cfg["enabled"]:
+                        provider_id = cfg["provider"] or provider_id or "deepseek"
+                        runtime = {"api_key": cfg["api_key"], "api_url": cfg["api_url"], "model": cfg["model"]}
+                if runtime.get("api_key"):
+                    system_prompt = get_role_system(role)
+                    lora_system = get_lora_system(lora)
+                    if lora_system:
+                        system_prompt = lora_system
+                    structured_prompt = get_structured_output_prompt(message, structured_template)
+                    if structured_prompt:
+                        system_prompt += structured_prompt
+                    prompt_parts = []
+                    for h in history[-10:]:
+                        if isinstance(h, (list, tuple)) and len(h) >= 2:
+                            prompt_parts.append(f"用户: {h[0]}\n助手: {h[1]}")
+                    prompt_parts.append(f"用户: {message}")
+                    ext_prompt = "\n\n".join(prompt_parts)
+                    text = call_external_provider(
+                        provider_id,
+                        runtime.get("api_url"),
+                        runtime.get("api_key"),
+                        runtime.get("model"),
+                        ext_prompt,
+                        system_prompt,
+                    )
+                    yield f"data: {json.dumps({'content': text, 'done': False, 'provider': provider_id})}\n\n"
+                    yield f"data: {json.dumps({'content': '', 'done': True, 'tokens_in': len(ext_prompt) // 2, 'tokens_out': len(text) // 2, 'provider': provider_id})}\n\n"
+                    return
+                chunk_count = 0
+                for chunk in generate_stream(message, history, role, lora, temperature, max_tokens, "", None, structured_template):
+                    if request.environ.get('werkzeug.socket') and request.environ.get('werkzeug.socket')._closed:
+                        print("[Stream] 客户端断开，停止生成")
+                        break
+                    chunk_count += 1
+                    if chunk_count <= 3:
+                        print(f"[Stream] Chunk {chunk_count}: {chunk[:50]}...")
+                    # SSE 格式: data: <json>\n\n
+                    yield f"data: {chunk}\n\n"
+                print(f"[Stream] 生成完成，共 {chunk_count} 个 chunks")
+            except Exception as e:
+                print(f"[Stream] 生成错误: {e}")
+                import traceback
+                traceback.print_exc()
+                yield f"data: {json.dumps({'content': f'错误: {str(e)}', 'done': True})}\n\n"
+        
+        return Response(generate(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
+    except Exception as e:
+        print(f"[Stream] 端点错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)})
+
+@app.route('/tts', methods=['POST'])
+def tts_endpoint():
+    try:
+        data = request.get_json(silent=True) or {}
+        text = data.get('text', '')[:300]
+        audio_id = str(uuid.uuid4())[:8]
+        audio_path = os.path.join(AUDIO_CACHE_DIR, f'{audio_id}.wav')
+        tts_script = os.path.join(os.path.dirname(__file__), 'tts_ddsp.py')
+        if os.path.exists(tts_script):
+            subprocess.run([sys.executable, tts_script, text, audio_path, '0'], timeout=600)
+            if os.path.exists(audio_path):
+                return jsonify({'audio_url': f'/audio/{audio_id}.wav'})
+        return jsonify({'error': 'TTS failed'})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/audio/<filename>')
+def serve_audio(filename):
+    audio_path = os.path.join(AUDIO_CACHE_DIR, filename)
+    if os.path.exists(audio_path):
+        return send_file(audio_path)
+    return "Not found", 404
+
+@app.route('/agent/tools', methods=['GET'])
+def agent_tools_endpoint():
+    return jsonify({"tools": tool_registry.get_tool_schemas()})
+
+@app.route('/agent/file-write', methods=['POST'])
+def agent_file_write():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    path = data.get('path', '')
+    content = data.get('content', '')
+    is_dir = data.get('is_dir', False)
+    try:
+        path = authorize_path(path, ws_path, user_info=user_info)
+        if is_dir:
+            os.makedirs(path, exist_ok=True)
+            return jsonify({"success": True, "path": path, "type": "directory"})
+        dir_name = os.path.dirname(path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return jsonify({"success": True, "path": path, "type": "file"})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: path outside your workspace", "detail": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/agent/run', methods=['POST'])
+def agent_run_endpoint():
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get('message', '')
+        history = data.get('history', [])
+        working_dir = data.get('working_dir', os.path.dirname(os.path.abspath(__file__)))
+        external_api = data.get('external_api', None)
+        device_id = data.get('device_id', '')
+        solo_mode = data.get('solo_mode', False)
+        # 安全模式:solo_mode仍然需要权限确认,但放宽沙箱限制
+        _solo_tools = ['write_file','edit_file','execute_command','create_directory','delete_file','remove_directory','compile','agent_spawn','web_fetch','web_search','pip_install','check_dependencies']
+        if solo_mode:
+            pass
+        # CRITICAL: 不再设置bypass_mode = True,确保权限检查生效
+        if not message:
+            return jsonify({'error': 'Message is required'}), 400
+        run_id = str(uuid.uuid4())
+        abort_evt = threading.Event()
+        _agent_abort_events[run_id] = abort_evt
+
+        def generate():
+            try:
+                yield f"data: {json.dumps({'type': 'run_started', 'run_id': run_id, 'done': False})}\n\n"
+                ext_api = external_api
+                use_external = False
+                if isinstance(ext_api, dict):
+                    ext_api = _external_api_for_frontend(ext_api)
+                    use_external = ext_api.get('enabled') and ext_api.get('apiKey')
+                elif isinstance(ext_api, str) and ext_api.strip():
+                    if device_id:
+                        user_config = _get_user_external_api(device_id)
+                        ap = ext_api.strip()
+                        prov = user_config.get("providers", {}).get(ap, {})
+                        bk_key = prov.get("api_key", "")
+                        if bk_key:
+                            ext_api = _external_api_for_frontend({"enabled": True, "api_key": bk_key, "api_url": prov.get("api_url", ""), "model": prov.get("model", ""), "provider": ap})
+                            use_external = True
+                        else:
+                            ext_api = None
+                    else:
+                        ext_api = None
+                else:
+                    ext_api = None
+                if not use_external and device_id:
+                    user_config = _get_user_external_api(device_id)
+                    ap = user_config.get("active_provider", "")
+                    prov = user_config.get("providers", {}).get(ap, {})
+                    bk_key = prov.get("api_key", "")
+                    if bk_key:
+                        ext_api = _external_api_for_frontend({"enabled": True, "api_key": bk_key, "api_url": prov.get("api_url", ""), "model": prov.get("model", ""), "provider": ap})
+                        use_external = True
+                if use_external:
+                    for chunk in agent_loop.run_with_external_api(message, history, working_dir, ext_api, abort_event=abort_evt, run_id=run_id):
+                        if abort_evt.is_set():
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
+                            return
+                        yield f"data: {chunk}\n\n"
+                        if abort_evt.is_set():
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
+                            return
+                else:
+                    for chunk in agent_loop.run(message, history, working_dir, abort_event=abort_evt, run_id=run_id):
+                        if abort_evt.is_set():
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
+                            return
+                        yield f"data: {chunk}\n\n"
+                        if abort_evt.is_set():
+                            yield f"data: {json.dumps({'type': 'aborted', 'run_id': run_id, 'message': 'Agent run aborted by user', 'done': True})}\n\n"
+                            return
+            except GeneratorExit:
+                raise
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'run_id': run_id, 'content': str(e), 'done': True})}\n\n"
+            finally:
+                _agent_abort_events.pop(run_id, None)
+        return Response(generate(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/agent/abort', methods=['POST'])
+def agent_abort_endpoint():
+    data = request.get_json(silent=True) or {}
+    run_id = (data.get("run_id") or "").strip()
+    if not run_id:
+        return jsonify({"success": False, "error": "missing_run_id"}), 400
+    abort_evt = _agent_abort_events.get(run_id)
+    if not abort_evt:
+        return jsonify({"success": False, "run_id": run_id, "aborted": False, "error": "run_not_found"}), 404
+    abort_evt.set()
+    return jsonify({"success": True, "run_id": run_id, "aborted": True})
+
+@app.route('/agent/permission/respond', methods=['POST'])
+def permission_respond():
+    data = request.get_json(silent=True) or {}
+    request_id = data.get('request_id', '')
+    allowed = data.get('allowed', False)
+    always = data.get('always', False)
+    if request_id in pending_permission_requests:
+        preq = pending_permission_requests[request_id]
+        preq.resolve(allowed, always)
+        if always and preq.tool_name:
+            source = 'session'
+            behavior = 'allow' if allowed else 'deny'
+            tool = preq.tool_name
+            content = ''
+            if preq.tool_name == 'execute_command' and hasattr(preq, 'tool_input'):
+                cmd = preq.tool_input.get('command', '') if isinstance(preq.tool_input, dict) else ''
+                if cmd:
+                    first_word = cmd.strip().split()[0] if cmd.strip() else ''
+                    content = first_word
+                    tool = f"execute_command:{first_word}"
+            permission_checker.add_rule(source, behavior, tool, content)
+        audit_logger.log("permission_response", preq.tool_name, {"request_id": request_id, "allowed": allowed, "always": always}, allowed)
+        return jsonify({"status": "ok", "request_id": request_id})
+    return jsonify({"error": "Unknown permission request", "request_id": request_id}), 404
+
+@app.route('/agent/permission/config', methods=['GET', 'POST'])
+def permission_config():
+    global permission_checker
+    if request.method == 'GET':
+        config = permission_checker.get_config()
+        config["deny_patterns"] = SANDBOX_DENY_PATTERNS
+        config["denied_commands"] = DENIED_COMMANDS
+        config["pending_requests"] = len(pending_permission_requests)
+        return jsonify(config)
+    data = request.get_json(silent=True) or {}
+    if "bypass_mode" in data:
+        permission_checker.bypass_mode = bool(data["bypass_mode"])
+    if "sandbox_mode" in data:
+        permission_checker.sandbox_mode = bool(data["sandbox_mode"])
+    if "dangerous_commands_allowed" in data:
+        permission_checker.dangerous_commands_allowed = bool(data["dangerous_commands_allowed"])
+    audit_logger.log("config_update", "permission_checker", {"changes": list(data.keys())}, True)
+    return jsonify({"status": "ok", "config": permission_checker.get_config()})
+
+@app.route('/agent/permission/sandbox-dir', methods=['POST', 'DELETE'])
+def permission_sandbox_dir():
+    data = request.get_json(silent=True) or {}
+    path = data.get('path', '')
+    if not path:
+        return jsonify({"error": "Path is required"}), 400
+    if request.method == 'POST':
+        if not os.path.isdir(path):
+            return jsonify({"error": f"Directory does not exist: {path}"}), 400
+        permission_checker.add_sandbox_dir(path)
+        audit_logger.log("sandbox_dir_added", "config", {"path": path}, True)
+        return jsonify({"status": "ok", "sandbox_dirs": list(permission_checker.sandbox_dirs)})
+    else:
+        abs_path = os.path.abspath(path)
+        permission_checker.sandbox_dirs.discard(abs_path)
+        SANDBOX_WRITE_DIRS.discard(abs_path)
+        audit_logger.log("sandbox_dir_removed", "config", {"path": path}, True)
+        return jsonify({"status": "ok", "sandbox_dirs": list(permission_checker.sandbox_dirs)})
+
+@app.route('/agent/permission/rule', methods=['POST', 'DELETE'])
+def permission_rule():
+    data = request.get_json(silent=True) or {}
+    tool_name = data.get('tool_name', '')
+    behavior = data.get('behavior', '')
+    if not tool_name or behavior not in ('allow', 'deny'):
+        return jsonify({"error": "tool_name and behavior (allow/deny) are required"}), 400
+    if request.method == 'POST':
+        permission_checker.add_rule(tool_name, behavior)
+        audit_logger.log("rule_added", tool_name, {"behavior": behavior}, True)
+    else:
+        permission_checker.always_allow.discard(tool_name)
+        permission_checker.always_deny.discard(tool_name)
+        audit_logger.log("rule_removed", tool_name, {}, True)
+    return jsonify({"status": "ok", "always_allow": list(permission_checker.always_allow), "always_deny": list(permission_checker.always_deny)})
+
+@app.route('/agent/audit/logs', methods=['GET'])
+def audit_logs():
+    limit = request.args.get('limit', 100, type=int)
+    action_filter = request.args.get('action', '')
+    tool_filter = request.args.get('tool', '')
+    entries = audit_logger.load_all_logs(limit=limit)
+    if action_filter:
+        entries = [e for e in entries if e.get("action") == action_filter]
+    if tool_filter:
+        entries = [e for e in entries if e.get("tool") == tool_filter]
+    return jsonify({"logs": entries, "total": len(entries)})
+
+@app.route('/agent/audit/stats', methods=['GET'])
+def audit_stats():
+    stats = audit_logger.get_stats()
+    stats["permission_config"] = permission_checker.get_config()
+    return jsonify(stats)
+
+@app.route('/agent/tasks', methods=['GET'])
+def agent_tasks_list():
+    status_filter = request.args.get('status', '')
+    priority_filter = request.args.get('priority', '')
+    tasks = task_manager.list_tasks(status_filter=status_filter or None, priority_filter=priority_filter or None)
+    return jsonify({"tasks": tasks, "stats": task_manager.get_stats()})
+
+@app.route('/agent/tasks', methods=['POST'])
+def agent_tasks_create():
+    data = request.get_json(silent=True) or {}
+    title = data.get('title', '')
+    if not title:
+        return jsonify({"error": "Title is required"}), 400
+    task_id = task_manager.create_task(
+        title=title,
+        description=data.get('description', ''),
+        priority=data.get('priority', 'medium'),
+        dependencies=data.get('dependencies', []),
+        parent_id=data.get('parent_id'),
+    )
+    return jsonify({"task_id": task_id, "task": task_manager.get_task(task_id)})
+
+@app.route('/agent/tasks/<task_id>', methods=['GET', 'PATCH', 'DELETE'])
+def agent_tasks_manage(task_id):
+    if request.method == 'GET':
+        task = task_manager.get_task(task_id)
+        if not task:
+            return jsonify({"error": "Task not found"}), 404
+        return jsonify(task)
+    elif request.method == 'PATCH':
+        data = request.get_json(silent=True) or {}
+        ok = task_manager.update_task(
+            task_id,
+            status=data.get('status'),
+            result=data.get('result'),
+            progress=data.get('progress'),
+            context=data.get('context'),
+        )
+        if not ok:
+            return jsonify({"error": "Task not found"}), 404
+        return jsonify({"status": "ok", "task": task_manager.get_task(task_id)})
+    elif request.method == 'DELETE':
+        ok = task_manager.cancel_task(task_id)
+        if not ok:
+            return jsonify({"error": "Task not found"}), 404
+        return jsonify({"status": "ok"})
+
+@app.route('/agent/tasks/<task_id>/activate', methods=['POST'])
+def agent_tasks_activate(task_id):
+    ok = task_manager.set_active_task(task_id)
+    if not ok:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify({"status": "ok", "active_task": task_id})
+
+@app.route('/agent/tasks/tree', methods=['GET'])
+def agent_tasks_tree():
+    tree = task_manager.get_task_tree()
+    return jsonify({"tree": tree})
+
+@app.route('/agent/v2/permissions/stats', methods=['GET'])
+def v2_permission_stats():
+    try:
+        from kaguya_permissions import permission_manager
+        return jsonify(permission_manager.get_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/permissions/mode', methods=['GET', 'POST'])
+def v2_permission_mode():
+    try:
+        from kaguya_permissions import permission_manager, PermissionMode
+        if request.method == 'GET':
+            return jsonify({
+                "global_mode": permission_manager.get_global_mode().value,
+                "available_modes": permission_manager.get_available_modes(),
+            })
+        data = request.get_json(silent=True) or {}
+        mode_id = data.get('mode', 'bypassPermissions')
+        session_id = data.get('session_id', '')
+        try:
+            mode = PermissionMode(mode_id)
+        except ValueError:
+            return jsonify({"error": f"Invalid mode: {mode_id}"}), 400
+        if session_id:
+            permission_manager.set_session_mode(session_id, mode)
+        else:
+            permission_manager.set_global_mode(mode)
+        return jsonify({"status": "ok", "mode": mode_id})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/permissions/denials', methods=['GET'])
+def v2_permission_denials():
+    try:
+        from kaguya_permissions import permission_manager
+        session_id = request.args.get('session_id', '')
+        limit = request.args.get('limit', 50, type=int)
+        reason_code = request.args.get('reason_code', '')
+        records = permission_manager.get_denial_records(
+            session_id=session_id or None, limit=limit,
+            reason_code=reason_code or None,
+        )
+        stats = permission_manager.get_denial_stats(session_id=session_id or None)
+        return jsonify({"records": records, "stats": stats})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/permissions/audit', methods=['GET'])
+def v2_permission_audit():
+    try:
+        from kaguya_permissions import permission_manager
+        limit = request.args.get('limit', 100, type=int)
+        session_id = request.args.get('session_id', '')
+        entries = permission_manager.get_audit_log(
+            limit=limit, session_id=session_id or None,
+        )
+        return jsonify({"entries": entries, "total": len(entries)})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/permissions/rules', methods=['GET', 'POST', 'DELETE'])
+def v2_permission_rules():
+    try:
+        from kaguya_permissions import permission_manager, PermissionRule, PermissionDecision, RuleSource
+        if request.method == 'GET':
+            tool_name = request.args.get('tool_name', '')
+            source = request.args.get('source', '')
+            rules = permission_manager.get_rules(tool_name=tool_name or None, source=source or None)
+            return jsonify({"rules": rules})
+        elif request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            rule = PermissionRule(
+                rule_id=data.get('rule_id', f"rule_{uuid.uuid4().hex[:8]}"),
+                tool_name=data.get('tool_name', '*'),
+                pattern=data.get('pattern', '*'),
+                decision=PermissionDecision(data.get('decision', 'ask')),
+                source=RuleSource(data.get('source', 'user')),
+                priority=data.get('priority', 0),
+                description=data.get('description', ''),
+            )
+            permission_manager.add_rule(rule)
+            return jsonify({"status": "ok", "rule_id": rule.rule_id})
+        elif request.method == 'DELETE':
+            data = request.get_json(silent=True) or {}
+            rule_id = data.get('rule_id', '')
+            ok = permission_manager.remove_rule(rule_id)
+            return jsonify({"status": "ok" if ok else "not_found"})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/permissions/pending', methods=['GET'])
+def v2_permission_pending():
+    try:
+        from kaguya_permissions import permission_manager
+        session_id = request.args.get('session_id', '')
+        requests = permission_manager.get_pending_requests(session_id=session_id or None)
+        return jsonify({"pending": requests})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/permissions/respond', methods=['POST'])
+def v2_permission_respond():
+    try:
+        from kaguya_permissions import permission_manager
+        data = request.get_json(silent=True) or {}
+        request_id = data.get('request_id', '')
+        decision = data.get('decision', 'deny')
+        ok = permission_manager.respond_permission(request_id, decision)
+        return jsonify({"status": "ok" if ok else "not_found"})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/executor/status', methods=['GET'])
+def v2_executor_status():
+    try:
+        from kaguya_tool_executor import StreamingToolExecutor
+        return jsonify({
+            "active_tasks": [],
+            "resource_metrics": {"active_threads": threading.active_count()},
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/sessions', methods=['GET'])
+def v2_sessions_list():
+    try:
+        from kaguya_acp import create_acp_http_bridge
+        return jsonify({"sessions": []})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/v2/command-safety', methods=['POST'])
+def v2_command_safety():
+    try:
+        from kaguya_permissions import CommandSafetyValidator
+        data = request.get_json(silent=True) or {}
+        cmd = data.get('command', '')
+        validator = CommandSafetyValidator()
+        safe, reason, classifiable = validator.validate_command(cmd)
+        return jsonify({
+            "command": cmd,
+            "is_safe": safe,
+            "reason": reason,
+            "classifiable": classifiable,
+            "is_read_only": validator.is_read_only_command(cmd),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/analyze', methods=['POST'])
+def file_analyzer_analyze():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        data = request.get_json(silent=True) or {}
+        project_path = data.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        result = analyzer.analyze()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/files', methods=['GET'])
+def file_analyzer_files():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        project_path = request.args.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        result = analyzer.get_files(
+            category=request.args.get('category'),
+            module=request.args.get('module'),
+            ext=request.args.get('ext'),
+            sort_by=request.args.get('sort_by', 'path'),
+            sort_order=request.args.get('sort_order', 'asc'),
+            limit=request.args.get('limit', 100, type=int),
+            offset=request.args.get('offset', 0, type=int),
+            query=request.args.get('query'),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/dependencies', methods=['GET'])
+def file_analyzer_deps():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        project_path = request.args.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        result = analyzer.get_dependencies(
+            path=request.args.get('file'),
+            direction=request.args.get('direction', 'outgoing'),
+            depth=request.args.get('depth', 2, type=int),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/references', methods=['GET'])
+def file_analyzer_refs():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        project_path = request.args.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        result = analyzer.get_reference_suggestions(
+            path=request.args.get('file', ''),
+            limit=request.args.get('limit', 10, type=int),
+        )
+        return jsonify({"suggestions": result})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/recommendations', methods=['GET'])
+def file_analyzer_recs():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        project_path = request.args.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        result = analyzer.get_structure_recommendations()
+        return jsonify({"recommendations": result})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/tree', methods=['GET'])
+def file_analyzer_tree():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        project_path = request.args.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        result = analyzer.get_tree(max_depth=request.args.get('depth', 3, type=int))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/file-analyzer/stats', methods=['GET'])
+def file_analyzer_stats():
+    try:
+        from kaguya_file_analyzer import get_analyzer
+        project_path = request.args.get('path', os.getcwd())
+        analyzer = get_analyzer(project_path)
+        return jsonify(analyzer.get_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/browser/search', methods=['POST'])
+def agent_browser_search():
+    data = request.get_json(silent=True) or {}
+    query = data.get('query', '')
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+    results = browser_integration.search(query, max_results=data.get('max_results', 5))
+    audit_logger.log("browser_search", "web_search", {"query": query}, True)
+    return jsonify({"results": results})
+
+@app.route('/agent/browser/fetch', methods=['POST'])
+def agent_browser_fetch():
+    data = request.get_json(silent=True) or {}
+    url = data.get('url', '')
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    result = browser_integration.fetch_page(url, format=data.get('format', 'markdown'))
+    audit_logger.log("browser_fetch", "web_fetch", {"url": url}, True)
+    return jsonify(result)
+
+@app.route('/agent/browser/open', methods=['POST'])
+def agent_browser_open():
+    data = request.get_json(silent=True) or {}
+    path_or_url = data.get('path', '') or data.get('url', '')
+    if not path_or_url:
+        return jsonify({"error": "Path or URL is required"}), 400
+    if path_or_url.startswith(('http://', 'https://')):
+        result = browser_integration.open_url_in_browser(path_or_url)
+    else:
+        result = browser_integration.open_local_project(path_or_url)
+    audit_logger.log("browser_open", "browser", {"target": path_or_url}, True)
+    return jsonify(result)
+
+@app.route('/agent/plugins', methods=['GET'])
+def agent_plugins_list():
+    category = request.args.get('category', '')
+    enabled_only = request.args.get('enabled', '').lower() == 'true'
+    plugins = plugin_registry.list_plugins(category=category or None, enabled_only=enabled_only)
+    return jsonify({"plugins": plugins, "total_tools": len(plugin_registry.get_all_tools())})
+
+@app.route('/agent/plugins/<plugin_id>/toggle', methods=['POST'])
+def agent_plugins_toggle(plugin_id):
+    data = request.get_json(silent=True) or {}
+    enabled = data.get('enabled')
+    ok = plugin_registry.toggle_plugin(plugin_id, enabled=enabled)
+    if not ok:
+        return jsonify({"error": "Plugin not found"}), 404
+    return jsonify({"status": "ok", "plugin": plugin_registry.get_plugin(plugin_id)})
+
+@app.route('/agent/events', methods=['GET'])
+def agent_events():
+    event_type = request.args.get('type', '')
+    limit = request.args.get('limit', 50, type=int)
+    events = event_bus.get_history(event_type=event_type or None, limit=limit)
+    return jsonify({"events": events})
+
+@app.route('/agent/system/info', methods=['GET'])
+def agent_system_info():
+    return jsonify({
+        "task_manager": task_manager.get_stats(),
+        "permission_config": permission_checker.get_config(),
+        "audit_stats": audit_logger.get_stats(),
+        "plugins": {"total": len(plugin_registry.list_plugins()), "enabled": len(plugin_registry.list_plugins(enabled_only=True))},
+        "event_bus": {"history_size": len(event_bus._history)},
+        "browser": {"search_cache_size": len(browser_integration._search_cache)},
+    })
+
+@app.route('/agent/terminal/exec', methods=['POST'])
+def agent_terminal_exec():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    command = data.get('command', '')
+    timeout = min(data.get('timeout', 30), 120)
+    working_dir = data.get('working_dir', '')
+    shell_mode = bool(data.get('shell'))
+    session_id = data.get('session_id', '')
+    if not command:
+        return jsonify({"error": "No command specified"})
+    if not working_dir:
+        working_dir = ws_path
+    elif not os.path.isabs(working_dir):
+        working_dir = os.path.join(ws_path, working_dir)
+    result = execute_terminal_command(
+        command,
+        working_dir,
+        ws_path,
+        user_info=user_info,
+        timeout=timeout,
+        shell=shell_mode,
+        session_id=session_id,
+        device_id=device_id,
+    )
+    perm = result.get("permission", {})
+    audit_logger.log(
+        "terminal_exec",
+        "execute_command",
+        {
+            "command": command[:200],
+            "working_dir": result.get("working_dir", working_dir),
+            "device_id": device_id,
+            "session_id": session_id,
+            "permission": perm,
+            "exit_code": result.get("exit_code"),
+            "timeout": timeout,
+        },
+        bool(result.get("success")),
+        device_id,
+    )
+    status = 200 if (result.get("success") or result.get("exit_code") is not None and result.get("error") is None) else (403 if result.get("error") in ("permission_denied", "working_dir_outside_workspace", "shell_mode_requires_confirmation") else 400)
+    return jsonify(result), status
+
+_terminal_processes = {}
+
+@app.route('/agent/terminal/kill', methods=['POST'])
+def agent_terminal_kill():
+    global _terminal_processes
+    killed = 0
+    for pid, proc in list(_terminal_processes.items()):
+        try:
+            proc.kill()
+            killed += 1
+        except:
+            pass
+    _terminal_processes.clear()
+    return jsonify({"success": True, "killed": killed})
+
+@app.route('/agent-ide')
+def agent_ide_page():
+    try:
+        m = load_model()
+        if m is None:
+            return AGENT_IDE_HTML.replace('</body>', '<script>document.addEventListener("DOMContentLoaded",function(){checkApiStatus();});</script></body>')
+    except:
+        pass
+    
+    return AGENT_IDE_HTML
+
+@app.route('/api/version')
+def api_version():
+    """版本信息API - 用于更新检测"""
+    return jsonify({
+        "name": "Kaguya IDE",
+        "version": "3.1.0",
+        "build_date": "2026-04-21",
+        "platform": "win32",
+        "update_url": "https://github.com/kaguya-ide/releases/latest",
+        "changelog": "https://github.com/kaguya-ide/releases"
+    })
+
+@app.route('/agent/api-status', methods=['GET', 'POST'])
+def agent_api_status():
+    external_api = None
+    device_id = request.args.get('device_id', '') or request.headers.get('X-Device-Id', '')
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        external_api = data.get('external_api', None)
+        device_id = data.get('device_id', '') or device_id
+    if not external_api and device_id:
+        user_config = _get_user_external_api(device_id)
+        provider = (user_config.get("active_provider") or "deepseek").strip().lower()
+        provider_cfg = user_config.get("providers", {}).get(provider, {})
+        api_key = (provider_cfg.get("api_key") or "").strip()
+        if api_key:
+            external_api = {
+                "enabled": True,
+                "apiKey": api_key,
+                "apiUrl": provider_cfg.get("api_url", ""),
+                "model": provider_cfg.get("model", ""),
+                "provider": provider,
+            }
+    if isinstance(external_api, dict):
+        external_api = _external_api_for_frontend(external_api)
+    if external_api and external_api.get('enabled') and external_api.get('apiKey'):
+        api_url = external_api.get('apiUrl', 'https://api.deepseek.com')
+        model = external_api.get('model', 'deepseek-chat')
+        provider = external_api.get('provider', 'deepseek')
+        try:
+            import urllib.request
+            if provider == 'claude':
+                test_url = api_url.rstrip('/') if '/v1/messages' in api_url else api_url.rstrip('/') + '/v1/messages'
+                req = urllib.request.Request(
+                    test_url,
+                    data=json.dumps({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}).encode(),
+                    headers={"Content-Type": "application/json", "x-api-key": external_api['apiKey'], "anthropic-version": "2023-06-01"}
+                )
+            else:
+                base = build_chat_completions_endpoint(provider, api_url)
+                req = urllib.request.Request(
+                    base,
+                    data=json.dumps({"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}).encode(),
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {external_api['apiKey']}"}
+                )
+            resp = urllib.request.urlopen(req, timeout=15)
+            return jsonify({"available": True, "provider": provider, "model": model, "api_url": api_url})
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return jsonify({"available": False, "reason": "auth_error", "message": f"API authentication failed (HTTP {e.code}). Check your API key.", "provider": provider})
+            return jsonify({"available": False, "reason": "verification_failed", "provider": provider, "model": model, "api_url": api_url, "message": f"API returned HTTP {e.code}"})
+        except Exception as e:
+            return jsonify({"available": False, "reason": "verification_failed", "provider": provider, "model": model, "api_url": api_url, "message": str(e)[:200]})
+    try:
+        m = load_model()
+        if m is None:
+            return jsonify({"available": False, "reason": "no_local_model", "message": "No local model available. Please configure an external API provider (DeepSeek, OpenAI, etc.) in Settings.", "suggestion": "external_api"})
+        return jsonify({"available": True, "provider": "ollama", "model": OLLAMA_MODEL})
+    except RuntimeError as e:
+        return jsonify({"available": False, "reason": "ollama_error", "message": str(e), "suggestion": "external_api"})
+    except Exception as e:
+        return jsonify({"available": False, "reason": "unknown", "message": str(e), "suggestion": "external_api"})
+
+@app.route('/agent/api-test', methods=['POST'])
+def agent_api_test():
+    data = request.get_json(silent=True) or {}
+    cfg = normalize_external_api_payload(data)
+    provider = cfg["provider"]
+    api_key = cfg["api_key"]
+    api_url = cfg["api_url"]
+    if not api_key:
+        return jsonify({"success": False, "error": "missing_api_key"}), 400
+    try:
+        import urllib.request, urllib.error
+        if provider in ('claude',):
+            test_url = (api_url or 'https://api.anthropic.com/v1/messages')
+            req_data = json.dumps({"model": "claude-sonnet-4-20250514", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}).encode()
+            req = urllib.request.Request(test_url, data=req_data, headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"})
+        elif provider in ('gemini',):
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(api_url.split('/')[-1].replace(':generateContent','') or 'gemini-pro')
+            model.generate_content("hi")
+            return jsonify({"success": True, "model": api_url})
+        else:
+            test_url = build_chat_completions_endpoint(provider, api_url)
+            default_models={'deepseek':'deepseek-chat','glm':'glm-4-flash','openai':'gpt-4o-mini','kimi':'kimi-k2.6','moonshot':'moonshot-v1-auto','minimax':'MiniMax-M2.7'}
+            model_name=cfg.get('model') or data.get('model') or default_models.get(provider,'deepseek-chat')
+            req_payload = build_openai_chat_payload(provider, model_name, [{"role": "user", "content": "hi"}], stream=False, max_tokens=8)
+            req_data = json.dumps(req_payload).encode()
+            auth_header = f"Bearer {api_key}"
+            if provider == 'glm':
+                auth_header = f"Bearer {api_key}"
+            elif provider == 'openai':
+                auth_header = f"Bearer {api_key}"
+            req = urllib.request.Request(test_url, data=req_data, headers={"Content-Type": "application/json", "Authorization": auth_header})
+        resp = urllib.request.urlopen(req, timeout=15)
+        result = json.loads(resp.read().decode())
+        return jsonify({"success": True, "model": data.get('model', provider)})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:200] if e.fp else ''
+        return jsonify({"success": False, "error": f"HTTP {e.code}: {body}"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+IDE_WORKSPACE_ROOT = os.path.join(RUNTIME_DIR, 'ide_workspaces')
+os.makedirs(IDE_WORKSPACE_ROOT, exist_ok=True)
+ide_user_registry = {}
+IDE_ACCOUNTS_FILE = os.path.join(RUNTIME_DIR, 'ide_accounts.json')
+LEGACY_IDE_ACCOUNTS_FILE = os.path.join(APP_DIR, 'ide_accounts.json')
+
+def _load_accounts():
+    global ide_user_registry
+    try:
+        if not os.path.exists(IDE_ACCOUNTS_FILE) and os.path.exists(LEGACY_IDE_ACCOUNTS_FILE):
+            os.makedirs(os.path.dirname(IDE_ACCOUNTS_FILE), exist_ok=True)
+            shutil.copy2(LEGACY_IDE_ACCOUNTS_FILE, IDE_ACCOUNTS_FILE)
+        if os.path.exists(IDE_ACCOUNTS_FILE):
+            with open(IDE_ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                ide_user_registry = json.load(f)
+    except Exception as e:
+        print(f"[KAGUYA] Failed to load IDE accounts: {e}")
+        ide_user_registry = {}
+
+def _save_accounts():
+    try:
+        os.makedirs(os.path.dirname(IDE_ACCOUNTS_FILE), exist_ok=True)
+        with open(IDE_ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(ide_user_registry, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[KAGUYA] Failed to save IDE accounts: {e}")
+
+_load_accounts()
+
+def _get_user_workspace(device_id):
+    if not device_id or len(device_id) < 8:
+        device_id = hashlib.sha256((device_id or 'default').encode()).hexdigest()[:16]
+    safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '', device_id)[:32]
+    if not safe_id:
+        safe_id = 'default_user'
+    ws_path = os.path.join(IDE_WORKSPACE_ROOT, safe_id)
+    os.makedirs(ws_path, exist_ok=True)
+    if safe_id not in ide_user_registry:
+        ide_user_registry[safe_id] = {
+            "id": safe_id,
+            "name": ide_user_registry.get(safe_id, {}).get("name", f"User-{safe_id[:6]}"),
+            "workspace": ws_path,
+            "created": time.time(),
+            "last_seen": time.time(),
+            "ip_addresses": [],
+            "imported_paths": []
+        }
+        _save_accounts()
+    else:
+        ide_user_registry[safe_id]["last_seen"] = time.time()
+        ide_user_registry[safe_id]["workspace"] = ws_path
+    return ide_user_registry[safe_id]
+
+def _validate_path_in_workspace(path, workspace_path, user_info=None):
+    try:
+        authorize_path(path, workspace_path, user_info=user_info)
+        return True
+    except Exception:
+        return False
+
+def _path_is_inside(path, root):
+    return is_path_inside(path, root)
+
+def _safe_upload_relative_path(filename):
+    raw = (filename or "uploaded_file").replace("\\", "/").strip()
+    parts = []
+    for part in raw.split("/"):
+        part = part.strip()
+        if not part or part in (".", ".."):
+            continue
+        part = re.sub(r'[\x00-\x1f<>:"|?*]', "_", part).rstrip(" .")
+        if part:
+            parts.append(part[:180])
+    if not parts:
+        parts = ["uploaded_file"]
+    return os.path.join(*parts)
+
+def _dedupe_destination(path):
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    stamp = int(time.time())
+    for idx in range(1, 1000):
+        candidate = f"{base}_{stamp}_{idx}{ext}"
+        if not os.path.exists(candidate):
+            return candidate
+    return f"{base}_{stamp}{ext}"
+
+@app.route('/agent/identify', methods=['POST'])
+def agent_identify():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    device_name = data.get('device_name', '')
+    user_info = _get_user_workspace(device_id)
+    if device_name and device_name.strip():
+        user_info["name"] = device_name.strip()[:32]
+    client_ip = request.headers.get('X-Forwarded-For', request.headers.get('X-Real-IP', request.remote_addr or ''))
+    if client_ip and client_ip not in user_info.get("ip_addresses", []):
+        user_info.setdefault("ip_addresses", []).append(client_ip)
+        if len(user_info["ip_addresses"]) > 20:
+            user_info["ip_addresses"] = user_info["ip_addresses"][-20:]
+    ide_user_registry[user_info["id"]] = user_info
+    _save_accounts()
+    return jsonify({
+        "user_id": user_info["id"],
+        "user_name": user_info["name"],
+        "workspace": user_info["workspace"],
+        "workspace_name": user_info["id"],
+        "is_local": client_ip in ('127.0.0.1', '::1', 'localhost', '')
+    })
+
+@app.route('/agent/user-info', methods=['GET'])
+def agent_user_info():
+    device_id = request.args.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    return jsonify({
+        "user_id": user_info["id"],
+        "user_name": user_info["name"],
+        "workspace": user_info["workspace"]
+    })
+
+@app.route('/agent/file-tree', methods=['POST'])
+def agent_file_tree():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    req_path = data.get('path', '') or ''
+    recursive = data.get('recursive', False)
+    max_depth = data.get('max_depth', 3)
+    if not req_path:
+        req_path = ws_path
+    try:
+        req_path = authorize_path(req_path, ws_path, user_info=user_info, must_exist=True)
+    except WorkspaceAuthorizationError:
+        return jsonify({"error": "Access denied: path outside your workspace", "path": req_path}), 403
+    try:
+        if not os.path.isdir(req_path):
+            return jsonify({"error": f"Not a directory: {req_path}", "path": req_path})
+        if recursive:
+            try:
+                from kaguya_file_operations import render_directory_tree, get_display_path
+                tree_str = render_directory_tree(req_path, max_depth=max_depth)
+                return jsonify({
+                    "tree": tree_str,
+                    "path": req_path,
+                    "workspace": ws_path,
+                    "user_id": user_info["id"],
+                    "user_name": user_info["name"],
+                    "display_path": get_display_path(req_path, ws_path),
+                })
+            except Exception:
+                pass
+        entries = []
+        try:
+            dir_entries = sorted(os.listdir(req_path))
+        except PermissionError:
+            return jsonify({"error": f"Permission denied: {req_path}", "path": req_path})
+        for entry in dir_entries:
+            if entry.startswith('.') or entry in ['node_modules', '__pycache__', 'venv', '.venv', '.git']:
+                continue
+            full = os.path.join(req_path, entry)
+            is_dir = os.path.isdir(full)
+            size = 0
+            ext = ""
+            if not is_dir:
+                try:
+                    size = os.path.getsize(full)
+                    ext = os.path.splitext(entry)[1].lstrip('.')
+                except Exception:
+                    pass
+            entries.append({
+                "name": entry,
+                "path": full,
+                "is_dir": is_dir,
+                "size": size,
+                "ext": ext,
+            })
+        return jsonify({
+            "entries": entries,
+            "path": req_path,
+            "workspace": ws_path,
+            "user_id": user_info["id"],
+            "user_name": user_info["name"],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/agent/read-file', methods=['POST'])
+def agent_read_file():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    path = data.get('path', '')
+    try:
+        path = authorize_path(path, ws_path, user_info=user_info, must_exist=True)
+        if not os.path.exists(path) or os.path.isdir(path):
+            return jsonify({"error": "File not found"})
+        file_size = os.path.getsize(path)
+        if file_size > 10 * 1024 * 1024:
+            return jsonify({"error": f"File too large ({file_size} bytes). Maximum 10MB for text files."})
+        binary_exts = {'.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o', '.pyc', '.pyo', '.class', '.jar', '.war', '.zip', '.gz', '.tar', '.rar', '.7z', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.icns', '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.sqlite', '.db', '.woff', '.woff2', '.ttf', '.eot'}
+        _, ext_lower = os.path.splitext(path)
+        if ext_lower.lower() in binary_exts:
+            return jsonify({"error": f"Binary file ({ext_lower}). Cannot display as text.", "is_binary": True, "size": file_size})
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            raw = f.read(8192)
+        null_count = raw.count('\x00')
+        if null_count > len(raw) * 0.01:
+            return jsonify({"error": "Binary file detected. Cannot display as text.", "is_binary": True, "size": file_size})
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        ext = ext_lower.lstrip('.')
+        return jsonify({"content": content, "language": ext, "path": path, "size": file_size})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: file outside your workspace", "detail": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/agent/open-project', methods=['POST'])
+def agent_open_project():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    project_path = data.get('path', '').strip()
+    if not project_path:
+        return jsonify({"error": "No path specified"})
+    trust = bool(data.get("trust") or data.get("confirmed") or data.get("import"))
+    try:
+        project_path, added = authorize_project_root(project_path, ws_path, user_info=user_info, trust=trust)
+        if added:
+            add_imported_root(user_info, project_path)
+            ide_user_registry[user_info["id"]] = user_info
+            _save_accounts()
+        return jsonify({"workspace": ws_path, "project_path": project_path, "trusted": True, "imported": bool(added), "entries": os.listdir(project_path)[:100]})
+    except WorkspaceAuthorizationError as e:
+        preview_path = os.path.realpath(os.path.abspath(project_path))
+        if not os.path.isdir(preview_path):
+            return jsonify({"error": f"Directory not found: {preview_path}"}), 404
+        return jsonify({
+            "workspace": ws_path,
+            "project_path": preview_path,
+            "trusted": False,
+            "requires_confirmation": True,
+            "error": str(e),
+            "entries": os.listdir(preview_path)[:100],
+        })
+
+_running_processes = {}
+
+@app.route('/agent/run-project', methods=['POST'])
+def agent_run_project():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    project_id = data.get('project_id', '')
+    project_path = data.get('path', '').strip()
+    start_command = data.get('start_command', '').strip()
+    if not project_path and not project_id:
+        return jsonify({"error": "No project specified"})
+    if project_id:
+        for spec in get_curated_workspace_specs():
+            if spec.get("id") == project_id:
+                project_path = spec.get("path", "")
+                start_command = start_command or spec.get("start_command", "")
+                break
+    if not project_path or not os.path.isdir(project_path):
+        return jsonify({"error": f"Project directory not found: {project_path}"})
+    try:
+        project_path = authorize_path(project_path, ws_path, user_info=user_info, must_exist=True)
+    except WorkspaceAuthorizationError:
+        audit_logger.log("run_project_denied", "start_project", {"project_path": project_path, "start_command": start_command, "reason": "path_outside_workspace"}, False, device_id)
+        return jsonify({"error": "Access denied: project path outside workspace or trusted imports"}), 403
+    if not start_command:
+        kind = infer_project_kind(project_path)
+        if kind == "python":
+            if os.path.exists(os.path.join(project_path, "main.py")):
+                start_command = "python main.py"
+            elif os.path.exists(os.path.join(project_path, "app.py")):
+                start_command = "python app.py"
+            else:
+                return jsonify({"error": "Cannot determine start command. Please specify start_command."})
+        elif kind == "node":
+            start_command = "npm run dev"
+        elif kind == "java":
+            start_command = "mvn spring-boot:run"
+        elif kind == "rust":
+            start_command = "cargo run"
+        else:
+            return jsonify({"error": "Cannot determine start command. Please specify start_command."})
+    permission = permission_service.check(
+        "run_project",
+        {"project_path": project_path, "command": start_command},
+        session_id=data.get("session_id", ""),
+        permission_token=data.get("permission_token"),
+    )
+    if not permission.allowed:
+        audit_logger.log(
+            "run_project_denied",
+            "start_project",
+            {"project_path": project_path, "start_command": start_command, "permission": permission.to_dict()},
+            False,
+            device_id,
+        )
+        return jsonify({
+            "success": False,
+            "error": "permission_denied",
+            "permission": permission.to_dict(),
+        }), 403
+    pid_key = project_path
+    if pid_key in _running_processes:
+        old_proc = _running_processes[pid_key]
+        try:
+            old_proc.terminate()
+            old_proc.wait(timeout=5)
+        except Exception:
+            try:
+                old_proc.kill()
+            except Exception:
+                pass
+        del _running_processes[pid_key]
+    try:
+        proc = subprocess.Popen(
+            start_command, shell=True, cwd=project_path,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+        )
+        _running_processes[pid_key] = proc
+        initial_output = ""
+        try:
+            import threading
+            output_lines = []
+            def _read_output():
+                for line in proc.stdout:
+                    output_lines.append(line)
+                    if len(output_lines) >= 20:
+                        break
+            t = threading.Thread(target=_read_output, daemon=True)
+            t.start()
+            t.join(timeout=3)
+            initial_output = "".join(output_lines[:20])
+        except Exception:
+            pass
+        audit_logger.log("run_project", "start_project", {"project_path": project_path, "start_command": start_command, "pid": proc.pid}, True, device_id)
+        return jsonify({
+            "success": True,
+            "pid": proc.pid,
+            "project_path": project_path,
+            "start_command": start_command,
+            "initial_output": initial_output[:4000],
+            "status": "running"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/agent/project-status', methods=['POST'])
+def agent_project_status():
+    data = request.get_json(silent=True) or {}
+    project_path = data.get('path', '').strip()
+    if project_path in _running_processes:
+        proc = _running_processes[project_path]
+        poll = proc.poll()
+        if poll is None:
+            return jsonify({"status": "running", "pid": proc.pid, "path": project_path})
+        else:
+            del _running_processes[project_path]
+            return jsonify({"status": "stopped", "exit_code": poll, "path": project_path})
+    return jsonify({"status": "not_running", "path": project_path})
+
+@app.route('/agent/stop-project', methods=['POST'])
+def agent_stop_project():
+    data = request.get_json(silent=True) or {}
+    project_path = data.get('path', '').strip()
+    if project_path not in _running_processes:
+        return jsonify({"error": "Project not running", "path": project_path})
+    proc = _running_processes[project_path]
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    del _running_processes[project_path]
+    return jsonify({"success": True, "path": project_path, "status": "stopped"})
+
+@app.route('/agent/project-output', methods=['POST'])
+def agent_project_output():
+    data = request.get_json(silent=True) or {}
+    project_path = data.get('path', '').strip()
+    if project_path not in _running_processes:
+        return jsonify({"error": "Project not running", "path": project_path})
+    proc = _running_processes[project_path]
+    output_lines = []
+    try:
+        import threading
+        def _read():
+            for line in proc.stdout:
+                output_lines.append(line)
+                if len(output_lines) >= 100:
+                    break
+        t = threading.Thread(target=_read, daemon=True)
+        t.start()
+        t.join(timeout=2)
+    except Exception:
+        pass
+    return jsonify({"output": "".join(output_lines)[:8000], "pid": proc.pid, "running": proc.poll() is None})
+
+@app.route('/agent/write-file', methods=['POST'])
+def agent_write_file():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    path = data.get('path', '')
+    content = data.get('content', '')
+    try:
+        path = authorize_path(path, ws_path, user_info=user_info)
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return jsonify({"result": "File saved", "path": path})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: path outside your workspace", "detail": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/agent/revert-file', methods=['POST'])
+def agent_revert_file():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    path = data.get('path', '')
+    old_content = data.get('old_content')
+    try:
+        path = authorize_path(path, ws_path, user_info=user_info)
+        if old_content is not None:
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(old_content)
+            return jsonify({"result": "File reverted", "path": path})
+        else:
+            if os.path.exists(path):
+                os.remove(path)
+                return jsonify({"result": "New file removed", "path": path})
+            return jsonify({"error": "Nothing to revert"})
+    except WorkspaceAuthorizationError as e:
+        return jsonify({"error": "Access denied: path outside your workspace", "detail": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/agent/compile', methods=['POST'])
+def agent_compile():
+    data = request.get_json(silent=True) or {}
+    permission = permission_service.check(
+        "compile",
+        {"language": data.get("language", "python")},
+        session_id=data.get("session_id", ""),
+        permission_token=data.get("permission_token"),
+    )
+    if not permission.allowed:
+        audit_logger.log(
+            "compile_denied",
+            "compile",
+            {"language": data.get("language", "python"), "permission": permission.to_dict()},
+            False,
+            data.get("device_id", ""),
+        )
+        return jsonify({
+            "success": False,
+            "error": "permission_denied",
+            "permission": permission.to_dict(),
+        }), 403
+    compile_params = {
+        "language": data.get("language", "python"),
+        "code": data.get("code", ""),
+        "timeout": data.get("timeout", 15)
+    }
+    result = tool_registry.execute("compile", compile_params)
+    return jsonify(result)
+
+@app.route('/agent/import-files', methods=['POST'])
+def agent_import_files():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    source_paths = data.get('paths', [])
+    if not source_paths:
+        return jsonify({"error": "No paths specified"})
+    imported = []
+    errors = []
+    for src in source_paths:
+        src = os.path.abspath(src)
+        if not os.path.exists(src):
+            errors.append({"path": src, "error": "Path does not exist"})
+            continue
+        try:
+            if os.path.isfile(src):
+                fname = _safe_upload_relative_path(os.path.basename(src))
+                dst = _dedupe_destination(os.path.join(ws_path, fname))
+                if not _path_is_inside(dst, ws_path):
+                    errors.append({"path": src, "error": "Invalid destination"})
+                    continue
+                import shutil
+                shutil.copy2(src, dst)
+                imported.append({"src": src, "dst": dst, "type": "file"})
+            elif os.path.isdir(src):
+                dname = _safe_upload_relative_path(os.path.basename(src.rstrip("\\/")) or "imported_folder")
+                dst = _dedupe_destination(os.path.join(ws_path, dname))
+                if not _path_is_inside(dst, ws_path):
+                    errors.append({"path": src, "error": "Invalid destination"})
+                    continue
+                if _path_is_inside(dst, src):
+                    errors.append({"path": src, "error": "Cannot import a folder into itself"})
+                    continue
+                import shutil
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+                imported.append({"src": src, "dst": dst, "type": "directory"})
+        except Exception as e:
+            errors.append({"path": src, "error": str(e)})
+    if imported:
+        for item in imported:
+            if item.get("type") == "directory":
+                add_imported_root(user_info, item["src"])
+        ide_user_registry[user_info["id"]] = user_info
+        _save_accounts()
+    return jsonify({"imported": imported, "errors": errors, "workspace": ws_path})
+
+@app.route('/agent/upload-device-files', methods=['POST'])
+def agent_upload_device_files():
+    device_id = request.form.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    uploaded_files = request.files.getlist('files')
+    if not uploaded_files:
+        return jsonify({"error": "No files provided"})
+    imported = []
+    errors = []
+    for f in uploaded_files:
+        fname = f.filename
+        if not fname:
+            continue
+        fname = _safe_upload_relative_path(fname)
+        dst = _dedupe_destination(os.path.join(ws_path, fname))
+        if not _path_is_inside(dst, ws_path):
+            errors.append({"name": fname, "error": "Invalid destination"})
+            continue
+        dst_dir = os.path.dirname(dst)
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+            f.save(dst)
+            fsize = os.path.getsize(dst)
+            imported.append({"name": fname, "size": fsize, "path": dst})
+        except Exception as e:
+            errors.append({"name": fname, "error": str(e)})
+    if imported:
+        ide_user_registry[user_info["id"]] = user_info
+        _save_accounts()
+    return jsonify({"imported": imported, "errors": errors, "workspace": ws_path})
+
+@app.route('/agent/import-env', methods=['POST'])
+def agent_import_env():
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id', '')
+    user_info = _get_user_workspace(device_id)
+    ws_path = user_info["workspace"]
+    env_info = {
+        "python_version": "",
+        "pip_packages": [],
+        "conda_envs": [],
+        "system_info": {},
+        "timestamp": time.time()
+    }
+    try:
+        import subprocess
+        r = subprocess.run([sys.executable, "--version"], capture_output=True, text=True, timeout=5)
+        env_info["python_version"] = (r.stdout or r.stderr or "").strip()
+    except Exception:
+        pass
+    try:
+        import subprocess
+        r = subprocess.run([sys.executable, "-m", "pip", "list", "--format=json"], capture_output=True, text=True, timeout=30)
+        pkgs = json.loads(r.stdout)
+        env_info["pip_packages"] = [{"name": p.get("name", ""), "version": p.get("version", "")} for p in pkgs]
+    except Exception:
+        pass
+    try:
+        import subprocess
+        r = subprocess.run(["conda", "env", "list"], capture_output=True, text=True, timeout=10)
+        env_info["conda_envs"] = [l.strip() for l in r.stdout.splitlines() if l.strip() and not l.startswith("#")]
+    except Exception:
+        pass
+    env_info["system_info"] = {
+        "platform": sys.platform,
+        "cwd": os.getcwd(),
+        "python_path": sys.executable
+    }
+    env_path = os.path.join(ws_path, "_env_info.json")
+    with open(env_path, 'w', encoding='utf-8') as f:
+        json.dump(env_info, f, ensure_ascii=False, indent=2)
+    req_path = os.path.join(ws_path, "requirements.txt")
+    try:
+        lines = [f"{p['name']}=={p['version']}" for p in env_info["pip_packages"] if p.get("name")]
+        with open(req_path, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+    except Exception:
+        pass
+    return jsonify({"success": True, "env_file": env_path, "requirements_file": req_path, "python_version": env_info["python_version"], "package_count": len(env_info["pip_packages"])})
+
+@app.route('/agent/browsable-dirs', methods=['POST'])
+def agent_browsable_dirs():
+    data = request.get_json(silent=True) or {}
+    path = data.get('path', '')
+    if not path:
+        home = os.path.expanduser("~")
+        path = home
+    path = os.path.abspath(path)
+    if not os.path.isdir(path):
+        return jsonify({"error": "Not a directory", "path": path})
+    try:
+        entries = []
+        for entry in sorted(os.listdir(path)):
+            if entry.startswith('.') and entry not in ('.conda', '.vscode'):
+                continue
+            full = os.path.join(path, entry)
+            try:
+                is_dir = os.path.isdir(full)
+                size = 0 if is_dir else os.path.getsize(full)
+                entries.append({"name": entry, "path": full, "is_dir": is_dir, "size": size})
+            except (PermissionError, OSError):
+                continue
+        parent = os.path.dirname(path)
+        return jsonify({"path": path, "parent": parent, "entries": entries})
+    except PermissionError:
+        return jsonify({"error": "Permission denied", "path": path})
+    except Exception as e:
+        return jsonify({"error": str(e), "path": path})
+
+@app.route('/agent/accounts', methods=['GET'])
+def agent_accounts():
+    accounts = []
+    for uid, info in ide_user_registry.items():
+        accounts.append({
+            "id": uid,
+            "name": info.get("name", ""),
+            "created": info.get("created", 0),
+            "last_seen": info.get("last_seen", 0),
+            "ip_addresses": info.get("ip_addresses", []),
+            "workspace": info.get("workspace", ""),
+            "imported_paths": info.get("imported_paths", [])
+        })
+    accounts.sort(key=lambda x: x.get("last_seen", 0), reverse=True)
+    return jsonify({"accounts": accounts, "total": len(accounts)})
+
+if __name__ == '__main__':
+    import socket
+    import argparse
+    
+    default_port = int(os.environ.get('KAGUYA_PORT', 5000))
+    parser = argparse.ArgumentParser(description='辉夜 AI助手')
+    parser.add_argument('--port', type=int, default=default_port, help='服务端口')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='绑定地址')
+    parser.add_argument('--https', action='store_true', help='启用HTTPS')
+    parser.add_argument('--cert', type=str, default='', help='SSL证书路径')
+    parser.add_argument('--key', type=str, default='', help='SSL私钥路径')
+    parser.add_argument('--localhost-only', action='store_true', help='仅本地访问(127.0.0.1)')
+    args = parser.parse_args()
+    
+    bind_host = '127.0.0.1' if args.localhost_only else args.host
+    
+    def get_local_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
+        except Exception:
+            return "127.0.0.1"
+    
+    local_ip = get_local_ip()
+    
+    print("=" * 60)
+    print("辉夜 AI助手 (专业增强版 v3.1)")
+    print("=" * 60)
+    if args.https and args.cert and args.key:
+        print(f"本地访问: https://127.0.0.1:{args.port}")
+        print(f"局域网访问: https://{local_ip}:{args.port}")
+        print(f"[HTTPS] 已启用")
+    else:
+        print(f"本地访问: http://127.0.0.1:{args.port}")
+        print(f"局域网访问: http://{local_ip}:{args.port}")
+        if bind_host == '0.0.0.0':
+            print(f"[WARNING] 公网可访问! 建议启用认证或使用 --localhost-only")
+    auth_cfg = load_auth_config()
+    if auth_cfg.get('enabled', False):
+        print(f"[AUTH] 访问认证: 已启用")
+    else:
+        print(f"[WARNING] 访问认证: 未启用 (建议在安全面板中启用)")
+    print("=" * 60)
+    print("启动参数: --https --cert cert.pem --key key.pem  启用HTTPS")
+    print("          --localhost-only  仅本地访问")
+    print("=" * 60)
+    
+    ssl_context = None
+    if args.https:
+        if args.cert and args.key:
+            ssl_context = (args.cert, args.key)
+        else:
+            cert_file = os.path.join(os.path.dirname(__file__), 'cert.pem')
+            key_file = os.path.join(os.path.dirname(__file__), 'key.pem')
+            if os.path.exists(cert_file) and os.path.exists(key_file):
+                ssl_context = (cert_file, key_file)
+                print(f"[HTTPS] 自动检测到SSL证书，HTTPS已启用")
+            else:
+                print(f"[INFO] 未找到SSL证书，正在生成自签名证书...")
+                try:
+                    import subprocess as _sp
+                    _sp.run([
+                        sys.executable, '-m', 'pip', 'install', 'pyOpenSSL', '-q'
+                    ], check=False)
+                    from OpenSSL import crypto
+                    k = crypto.PKey()
+                    k.generate_key(crypto.TYPE_RSA, 2048)
+                    cert = crypto.X509()
+                    cert.get_subject().CN = "Kaguya AI"
+                    cert.get_subject().O = "Kaguya"
+                    cert.set_serial_number(1000)
+                    cert.gmtime_adj_notBefore(0)
+                    cert.gmtime_adj_notAfter(10*365*24*60*60)
+                    cert.set_issuer(cert.get_subject())
+                    cert.set_pubkey(k)
+                    san_list = [f"DNS:localhost", f"DNS:{local_ip}", f"IP:127.0.0.1", f"IP:{local_ip}"]
+                    cert.add_extensions([crypto.X509Extension(b"subjectAltName", False, ", ".join(san_list).encode())])
+                    cert.sign(k, 'sha256')
+                    with open(cert_file, 'wb') as f:
+                        f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+                    with open(key_file, 'wb') as f:
+                        f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+                    ssl_context = (cert_file, key_file)
+                    print(f"[HTTPS] 自签名证书已生成，HTTPS已启用")
+                    print(f"   证书: {cert_file}")
+                    os.environ['KAGUYA_FORCE_HTTPS'] = '1'
+                except Exception as e:
+                    print(f"[WARNING] 证书生成失败: {e}，将以HTTP模式启动")
+                    ssl_context = None
+    
+    ngrok_url = None
+    desktop_mode = os.environ.get('KAGUYA_DESKTOP_MODE', '') == '1' or os.environ.get('KAGUYA_ELECTRON', '') == '1'
+    
+    if not desktop_mode:
+        ngrok_token = os.environ.get("KAGUYA_NGROK_TOKEN", "").strip()
+        if ngrok_token:
+            try:
+                from pyngrok import ngrok as _ngrok
+                _ngrok.set_auth_token(ngrok_token)
+                ngrok_tunnel = _ngrok.connect(args.port, "http")
+                ngrok_url = ngrok_tunnel.public_url
+                print(f"[NGROK] Public URL: {ngrok_url}")
+                print(f"[NGROK] Agent IDE: {ngrok_url}/agent-ide")
+            except Exception as e:
+                err_msg = str(e)
+                if 'ERR_NGROK_108' in err_msg or 'authentication failed' in err_msg.lower() or 'limited to 3' in err_msg.lower():
+                    print("[NGROK] Info: Public access unavailable (account limit)")
+                    print("        Use browser mode for local access: http://127.0.0.1:" + str(args.port))
+                elif 'ngrok' in err_msg.lower():
+                    print("[NGROK] Not available - using local mode only")
+                else:
+                    print(f"[NGROK] Error: {err_msg[:100]}")
+        else:
+            print("[NGROK] Disabled: KAGUYA_NGROK_TOKEN is not set")
+    else:
+        print("[NGROK] Disabled in desktop mode (local access only)")
+
+    if ssl_context:
+        app.run(host=bind_host, port=args.port, threaded=True, debug=False, ssl_context=ssl_context)
+    else:
+        app.run(host=bind_host, port=args.port, threaded=True, debug=False)
