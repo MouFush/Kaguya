@@ -348,13 +348,50 @@ func (s *Server) imageAsset(name string) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "asset_not_configured", "app-dir is not configured")
 			return
 		}
-		target, err := safeJoin(filepath.Join(s.cfg.AppDir, "assets"), name)
-		if err != nil {
-			writeError(w, http.StatusForbidden, "outside_assets", err.Error())
-			return
+		for _, candidate := range s.imageAssetCandidates(name) {
+			if _, err := os.Stat(candidate.root); err != nil {
+				continue
+			}
+			target, err := safeJoin(candidate.root, candidate.name)
+			if err != nil {
+				writeError(w, http.StatusForbidden, "outside_assets", err.Error())
+				return
+			}
+			info, err := os.Stat(target)
+			if err == nil && !info.IsDir() {
+				http.ServeFile(w, r, target)
+				return
+			}
 		}
-		http.ServeFile(w, r, target)
+		writeError(w, http.StatusNotFound, "asset_not_found", fmt.Sprintf("%s is not available", name))
 	}
+}
+
+type imageAssetCandidate struct {
+	root string
+	name string
+}
+
+func (s *Server) imageAssetCandidates(name string) []imageAssetCandidate {
+	appAssets := filepath.Join(s.cfg.AppDir, "assets")
+	electronAssets := filepath.Join(s.cfg.AppDir, "..", "app.asar.src", "assets")
+	candidates := []imageAssetCandidate{{root: appAssets, name: name}}
+
+	switch name {
+	case "sidebar-icon.png", "deepseek-icon.png":
+		candidates = append(candidates,
+			imageAssetCandidate{root: appAssets, name: "kaguya-welcome.png"},
+			imageAssetCandidate{root: appAssets, name: "kaguya-header.png"},
+			imageAssetCandidate{root: electronAssets, name: "kaguya.png"},
+		)
+	case "favicon.ico":
+		candidates = append(candidates,
+			imageAssetCandidate{root: electronAssets, name: "kaguya.ico"},
+			imageAssetCandidate{root: electronAssets, name: "temp_32.ico"},
+		)
+	}
+
+	return candidates
 }
 
 func (s *Server) apiConfig(w http.ResponseWriter, r *http.Request) {

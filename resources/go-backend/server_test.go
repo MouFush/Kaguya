@@ -572,7 +572,8 @@ func TestServesExtractedIndexWithoutPythonWorker(t *testing.T) {
 }
 
 func TestAssetAliasesUseAppDir(t *testing.T) {
-	appDir := t.TempDir()
+	rootDir := t.TempDir()
+	appDir := filepath.Join(rootDir, "python-app")
 	assetDir := filepath.Join(appDir, "assets")
 	if err := os.MkdirAll(assetDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -580,15 +581,35 @@ func TestAssetAliasesUseAppDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(assetDir, "kaguya-header.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(assetDir, "kaguya-welcome.png"), []byte("welcome"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	electronAssetDir := filepath.Join(rootDir, "app.asar.src", "assets")
+	if err := os.MkdirAll(electronAssetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(electronAssetDir, "kaguya.ico"), []byte("ico"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir(), AppDir: appDir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/header-img", nil)
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || rec.Body.String() != "png" {
-		t.Fatalf("asset alias failed: status=%d body=%q", rec.Code, rec.Body.String())
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{path: "/header-img", body: "png"},
+		{path: "/sidebar-icon", body: "welcome"},
+		{path: "/deepseek-icon", body: "welcome"},
+		{path: "/favicon.ico", body: "ico"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != tc.body {
+			t.Fatalf("%s asset alias failed: status=%d body=%q", tc.path, rec.Code, rec.Body.String())
+		}
 	}
 }
 

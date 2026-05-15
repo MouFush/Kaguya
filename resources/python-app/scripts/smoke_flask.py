@@ -92,27 +92,31 @@ def main() -> int:
             return 1
 
         checks = [
-            ("GET", "/", None),
-            ("POST", "/chat", {"message": "hello", "history": []}),
-            ("GET", "/agent/tasks", None),
-            ("GET", "/rag/documents", None),
-            ("GET", "/kaguya/features/flags", None),
-            ("GET", "/permissions/status", None),
-            ("GET", "/permissions/mode", None),
-            ("POST", "/permissions/check", {"tool_name": "read_file", "tool_input": {"path": "README.md"}}),
-            ("GET", "/api/model-status", None),
-            ("GET", "/models", None),
-            ("GET", "/api/config", None),
-            ("POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]}),
+            ("GET", "/", None, False),
+            ("GET", "/sidebar-icon", None, False),
+            ("GET", "/favicon.ico", None, False),
+            ("POST", "/chat", {"message": "hello", "history": []}, True),
+            ("GET", "/agent/tasks", None, True),
+            ("GET", "/rag/documents", None, True),
+            ("GET", "/kaguya/features/flags", None, True),
+            ("GET", "/permissions/status", None, True),
+            ("GET", "/permissions/mode", None, True),
+            ("POST", "/permissions/check", {"tool_name": "read_file", "tool_input": {"path": "README.md"}}, True),
+            ("GET", "/api/model-status", None, True),
+            ("GET", "/models", None, True),
+            ("GET", "/api/config", None, True),
+            ("POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]}, True),
         ]
         failures: list[str] = []
-        for method, path, payload in checks:
+        for method, path, payload, expect_json in checks:
             status, content_type, body = request(method, port, path, payload)
             is_json = "application/json" in content_type
             print(json.dumps({"method": method, "path": path, "status": status, "json": is_json}, ensure_ascii=False))
             if status == 500:
                 failures.append(f"{method} {path} returned 500")
-            if path != "/" and not is_json:
+            if status == 404:
+                failures.append(f"{method} {path} returned 404")
+            if expect_json and not is_json:
                 failures.append(f"{method} {path} did not return JSON: {body[:120]}")
         if failures:
             print(json.dumps({"success": False, "failures": failures}, ensure_ascii=False))
