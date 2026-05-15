@@ -374,6 +374,9 @@ func pcsErrorJSON(status int, cfg deviceConfig, code, message, detail string) ma
 	if out["detail"] == "" {
 		delete(out, "detail")
 	}
+	out["api_url"] = cfg.APIURL
+	out["apiUrl"] = cfg.APIURL
+	out["available"] = false
 	return out
 }
 

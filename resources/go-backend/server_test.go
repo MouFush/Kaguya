@@ -313,6 +313,45 @@ func TestExternalProviderChatUsesSavedOpenAICompatibleConfig(t *testing.T) {
 	}
 }
 
+func TestDeepSeekChatUsesGoProviderService(t *testing.T) {
+	var gotAuth, gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"deep pong"}}]}`))
+	}))
+	defer upstream.Close()
+
+	_, h := newTestServer(t)
+	key := "sk-deepseek-secret-abcdef"
+	rec := requestJSON(t, h, http.MethodPost, "/deepseek/chat", map[string]any{
+		"apiKey": key,
+		"apiUrl": upstream.URL + "/v1",
+		"messages": []map[string]any{{
+			"role":    "user",
+			"content": "ping",
+		}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer "+key {
+		t.Fatalf("auth header mismatch: %q", gotAuth)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path mismatch: %s", gotPath)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, key) || strings.Contains(body, "python_worker_unavailable") {
+		t.Fatalf("response leaked key or used worker fallback: %s", body)
+	}
+	decoded := decodeBody(t, rec)
+	if decoded["provider"] != "deepseek" || decoded["response"] != "deep pong" {
+		t.Fatalf("unexpected response: %#v", decoded)
+	}
+}
+
 func TestServerStreamUsesProviderChatServiceWhenConfigured(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -649,85 +648,6 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.chat(w, r)
 }
 
-func (s *Server) externalProviderChat(w http.ResponseWriter, r *http.Request, cfg deviceConfig, payload map[string]any) {
-	if payload["messages"] == nil {
-		message := firstString(payload, "message", "prompt", "input")
-		if message == "" {
-			writeError(w, http.StatusBadRequest, "missing_message", "messages or message is required")
-			return
-		}
-		payload["messages"] = []map[string]any{{"role": "user", "content": message}}
-	}
-	if payload["model"] == nil || payload["model"] == "" {
-		payload["model"] = cfg.Model
-	}
-	delete(payload, "api_key")
-	delete(payload, "apiKey")
-	delete(payload, "api_url")
-	delete(payload, "apiUrl")
-	delete(payload, "provider")
-
-	reqBody, err := json.Marshal(payload)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_payload", err.Error())
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(cfg.APIURL), bytes.NewReader(reqBody))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_api_url", err.Error())
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"success":  false,
-			"mode":     "go",
-			"provider": cfg.Provider,
-			"model":    cfg.Model,
-			"error":    "provider_request_failed",
-			"message":  err.Error(),
-		})
-		return
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if resp.StatusCode >= 400 {
-		writeJSON(w, resp.StatusCode, map[string]any{
-			"success":       false,
-			"mode":          "go",
-			"provider":      cfg.Provider,
-			"model":         cfg.Model,
-			"error":         "provider_error",
-			"status_code":   resp.StatusCode,
-			"upstream_body": string(respBody),
-		})
-		return
-	}
-	var upstream map[string]any
-	if err := json.Unmarshal(respBody, &upstream); err != nil {
-		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(respBody)
-		return
-	}
-	if r.URL.Path == "/chat/completions" {
-		writeJSON(w, resp.StatusCode, upstream)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":  true,
-		"mode":     "go",
-		"provider": cfg.Provider,
-		"model":    cfg.Model,
-		"response": extractAssistantContent(upstream),
-		"raw":      upstream,
-	})
-}
-
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 	_ = r.Body.Close()
@@ -901,27 +821,20 @@ func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[stri
 }
 
 func (s *Server) deepseekChat(w http.ResponseWriter, r *http.Request) {
-	if s.proxy != nil {
-		s.proxy.ServeHTTP(w, r)
-		return
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	_ = r.Body.Close()
+	var payload map[string]any
+	_ = json.Unmarshal(body, &payload)
+	if payload == nil {
+		payload = map[string]any{}
 	}
-	cfg, _ := s.loadDeviceConfig()
-	if !strings.EqualFold(cfg.Provider, "deepseek") {
-		cfg = deviceConfig{}
+	payload["provider"] = "deepseek"
+	existing, _ := s.loadDeviceConfig()
+	if !strings.EqualFold(existing.Provider, "deepseek") {
+		existing = deviceConfig{}
 	}
-	cfg.Provider = "deepseek"
-	normalizeProviderDefaults(&cfg)
-	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-		"success":   false,
-		"available": false,
-		"mode":      "go",
-		"provider":  cfg.Provider,
-		"api_url":   cfg.APIURL,
-		"apiUrl":    cfg.APIURL,
-		"model":     cfg.Model,
-		"error":     "python_worker_unavailable",
-		"message":   "DeepSeek chat requires the Python worker in this build.",
-	})
+	cfg := pcsNormalizeExternalProviderConfig(payload, existing)
+	s.providerChat.serve(w, r, cfg, payload, providerChatOptions{})
 }
 
 func (s *Server) agentAPIStatus(w http.ResponseWriter, r *http.Request) {
