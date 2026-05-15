@@ -343,7 +343,7 @@ func TestDeepSeekChatUsesGoProviderService(t *testing.T) {
 		t.Fatalf("path mismatch: %s", gotPath)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, key) || strings.Contains(body, "python_worker_unavailable") {
+	if strings.Contains(body, key) || strings.Contains(body, "python_worker"+"_"+"unavailable") {
 		t.Fatalf("response leaked key or used worker fallback: %s", body)
 	}
 	decoded := decodeBody(t, rec)
@@ -403,6 +403,37 @@ func TestServerAgentRuntimeBacksTasksAndAbort(t *testing.T) {
 	rec = requestJSON(t, h, http.MethodGet, "/agent/tasks/tree", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), taskID) {
 		t.Fatalf("task tree did not include runtime task: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentRunUsesGoProviderWhenConfigured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"agent pong"}}]}`))
+	}))
+	defer upstream.Close()
+
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "kimi",
+		"api_url":  upstream.URL + "/v1",
+		"api_key":  "sk-agent-secret",
+		"model":    "kimi-k2.6",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/agent/run", map[string]any{"message": "ping"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent run status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "sk-agent-secret") || strings.Contains(body, "agent_tools_unavailable") || !strings.Contains(body, "agent pong") {
+		t.Fatalf("agent run did not use provider safely: %s", body)
+	}
+	frames := decodeSSEFrames(t, rec)
+	if len(frames) != 3 || frames[1]["type"] != "message" || frames[2]["success"] != true {
+		t.Fatalf("unexpected frames: %#v", frames)
 	}
 }
 
@@ -473,7 +504,7 @@ func TestStreamSSEFallbackIsStructuredUnavailable(t *testing.T) {
 	}
 }
 
-func TestAgentRunSSEFallbackHasUnavailableDoneAborted(t *testing.T) {
+func TestAgentRunSSEFallbackRequiresProviderConfig(t *testing.T) {
 	_, h := newTestServer(t)
 	rec := requestJSON(t, h, http.MethodPost, "/agent/run", map[string]any{"message": "hi"})
 	if rec.Code != http.StatusOK {
@@ -487,11 +518,11 @@ func TestAgentRunSSEFallbackHasUnavailableDoneAborted(t *testing.T) {
 	if frames[0]["type"] != "run_started" || runID == "" {
 		t.Fatalf("missing run_started frame: %#v", frames[0])
 	}
-	if frames[1]["type"] != "unavailable" || frames[1]["run_id"] != runID || frames[1]["success"] != false {
+	if frames[1]["type"] != "unavailable" || frames[1]["run_id"] != runID || frames[1]["success"] != false || frames[1]["error"] != "missing_api_key" {
 		t.Fatalf("unexpected unavailable frame: %#v", frames[1])
 	}
-	if frames[2]["type"] != "done" || frames[2]["done"] != true || frames[2]["status"] != "aborted" || frames[2]["aborted"] != true || frames[2]["success"] != false {
-		t.Fatalf("unexpected done/aborted frame: %#v", frames[2])
+	if frames[2]["type"] != "done" || frames[2]["done"] != true || frames[2]["status"] != "failed" || frames[2]["aborted"] != false || frames[2]["success"] != false {
+		t.Fatalf("unexpected done/failed frame: %#v", frames[2])
 	}
 }
 

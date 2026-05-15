@@ -333,6 +333,16 @@ func (s *AgentRuntimeService) RunDone(runID string) (<-chan struct{}, bool) {
 	return state.ctx.Done(), true
 }
 
+func (s *AgentRuntimeService) RunContext(runID string) (context.Context, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	state, ok := s.runs[runID]
+	if !ok {
+		return nil, false
+	}
+	return state.ctx, true
+}
+
 func (s *AgentRuntimeService) RunStatus(runID string) (AgentRunSnapshot, bool) {
 	if strings.TrimSpace(runID) == "" {
 		return AgentRunSnapshot{}, false
@@ -475,7 +485,7 @@ func (s *AgentRuntimeService) DoneFrame(snapshot AgentRunSnapshot) AgentSSEPaylo
 		"aborted":   snapshot.Status == AgentRunStatusAborted,
 		"error":     snapshot.Error,
 		"mode":      "go",
-		"available": false,
+		"available": snapshot.Status == AgentRunStatusCompleted,
 	}
 }
 

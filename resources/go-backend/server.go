@@ -674,8 +674,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			"success":   false,
 			"available": false,
 			"mode":      "go",
-			"error":     "python_worker_unavailable",
-			"message":   "Streaming chat requires the Python worker in this build.",
+			"error":     "missing_api_key",
+			"message":   "Streaming chat requires a saved external provider API key.",
 		},
 		map[string]any{
 			"type":      "done",
@@ -716,8 +716,87 @@ func (s *Server) agentRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "agent_runtime_failed", err.Error())
 		return
 	}
-	snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusAborted, errors.New("python_worker_unavailable"))
-	writeSSE(w, start.Frame, s.agentRuntime.UnavailableFrame(start.RunID), s.agentRuntime.DoneFrame(snapshot))
+	if s.agentRuntime.CheckAbort(start.RunID) {
+		snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusAborted, errors.New("aborted"))
+		writeSSE(w, start.Frame, s.agentRuntime.AbortFrame(start.RunID), s.agentRuntime.DoneFrame(snapshot))
+		return
+	}
+	cfg := s.normalizedConfig(payload)
+	if cfg.APIKey == "" {
+		snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusFailed, errors.New("missing_external_provider_api_key"))
+		writeSSE(w, start.Frame, AgentSSEPayload{
+			"type":      AgentFrameUnavailable,
+			"success":   false,
+			"run_id":    start.RunID,
+			"available": false,
+			"error":     "missing_api_key",
+			"message":   "Agent run requires a saved external provider API key or an apiKey/api_key in the request.",
+			"mode":      "go",
+		}, s.agentRuntime.DoneFrame(snapshot))
+		return
+	}
+	runCtx, ok := s.agentRuntime.RunContext(start.RunID)
+	if !ok {
+		writeSSE(w, start.Frame, s.agentRuntime.AbortFrame(start.RunID))
+		return
+	}
+	result, err := s.providerChat.complete(runCtx, cfg, payload, providerChatOptions{})
+	if s.agentRuntime.CheckAbort(start.RunID) {
+		snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusAborted, errors.New("aborted"))
+		writeSSE(w, start.Frame, s.agentRuntime.AbortFrame(start.RunID), s.agentRuntime.DoneFrame(snapshot))
+		return
+	}
+	if err != nil {
+		snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusFailed, err)
+		writeSSE(w, start.Frame, AgentSSEPayload{
+			"type":    "error",
+			"success": false,
+			"run_id":  start.RunID,
+			"error":   "provider_request_failed",
+			"message": err.Error(),
+			"mode":    "go",
+		}, s.agentRuntime.DoneFrame(snapshot))
+		return
+	}
+	if result.StatusCode >= 400 {
+		msg := "provider request failed"
+		code := "provider_error"
+		if result.JSON != nil {
+			if v := firstString(result.JSON, "message"); v != "" {
+				msg = v
+			}
+			if v := firstString(result.JSON, "error"); v != "" {
+				code = v
+			}
+		}
+		snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusFailed, errors.New(code))
+		writeSSE(w, start.Frame, AgentSSEPayload{
+			"type":        "error",
+			"success":     false,
+			"run_id":      start.RunID,
+			"status_code": result.StatusCode,
+			"error":       code,
+			"message":     msg,
+			"mode":        "go",
+		}, s.agentRuntime.DoneFrame(snapshot))
+		return
+	}
+	response := ""
+	if result.JSON != nil {
+		response = firstString(result.JSON, "response")
+	}
+	snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusCompleted, nil)
+	writeSSE(w, start.Frame, AgentSSEPayload{
+		"type":     "message",
+		"success":  true,
+		"run_id":   start.RunID,
+		"task_id":  start.TaskID,
+		"role":     "assistant",
+		"content":  response,
+		"provider": cfg.Provider,
+		"model":    cfg.Model,
+		"mode":     "go",
+	}, s.agentRuntime.DoneFrame(snapshot))
 }
 
 func (s *Server) ragDocuments(w http.ResponseWriter, r *http.Request) {
@@ -818,7 +897,7 @@ func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[stri
 		"apiUrl":   cfg.APIURL,
 		"model":    cfg.Model,
 		"error":    "network_test_not_implemented",
-		"message":  "The Go facade validates configuration shape; live provider tests are delegated to the Python worker.",
+		"message":  "The Go backend validated configuration shape; send a chat request to perform a live provider call.",
 	})
 }
 
@@ -1453,7 +1532,7 @@ func (s *Server) proxyFallback(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("<!doctype html><meta charset=\"utf-8\"><title>Kaguya Go Backend</title><h1>Kaguya Go Backend</h1><p>Core APIs are online. Python compatibility worker is unavailable.</p>"))
 			return
 		}
-		writeError(w, http.StatusServiceUnavailable, "python_worker_unavailable", "route is implemented by the Python worker")
+		writeError(w, http.StatusServiceUnavailable, "route_not_implemented_in_go", "route is not implemented in the Go backend")
 		return
 	}
 	s.proxy.ServeHTTP(w, r)
