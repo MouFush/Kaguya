@@ -35,13 +35,16 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	cfg           ServerConfig
-	runtimeDir    string
-	workspaceRoot string
-	devicePath    string
-	mu            sync.Mutex
-	permissions   permissionState
-	proxy         http.Handler
+	cfg             ServerConfig
+	runtimeDir      string
+	workspaceRoot   string
+	devicePath      string
+	mu              sync.Mutex
+	permissions     permissionState
+	proxy           http.Handler
+	providerChat    providerChatService
+	agentRuntime    *AgentRuntimeService
+	securityPrivacy *SecurityPrivacyService
 }
 
 type permissionState struct {
@@ -77,7 +80,14 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		workspaceRoot: filepath.Join(cfg.RuntimeDir, "workspaces"),
 		devicePath:    filepath.Join(cfg.RuntimeDir, "device_vault.enc"),
 		permissions:   permissionState{Mode: "ask"},
+		providerChat:  newProviderChatService(nil),
+		agentRuntime:  NewAgentRuntimeService(),
 	}
+	securityPrivacy, err := NewSecurityPrivacyService(cfg.RuntimeDir)
+	if err != nil {
+		return nil, err
+	}
+	s.securityPrivacy = securityPrivacy
 	if cfg.PythonURL != "" {
 		u, err := url.Parse(cfg.PythonURL)
 		if err != nil {
@@ -621,7 +631,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	cfg := s.normalizedConfig(payload)
+	cfg := pcsNormalizeExternalProviderConfig(payload, deviceConfig{})
+	if cfg.APIKey == "" || cfg.APIURL == "" || cfg.Model == "" || cfg.Provider == "" {
+		cfg = s.normalizedConfig(payload)
+	}
 	if cfg.APIKey == "" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"success": false,
@@ -631,7 +644,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.externalProviderChat(w, r, cfg, payload)
+	s.providerChat.serve(w, r, cfg, payload, providerChatOptions{OpenAICompatibleResponse: r.URL.Path == "/chat/completions"})
 }
 
 func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -718,8 +731,21 @@ func (s *Server) externalProviderChat(w http.ResponseWriter, r *http.Request, cf
 }
 
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	_ = r.Body.Close()
 	if s.proxy != nil {
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		s.proxy.ServeHTTP(w, r)
+		return
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(body, &payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	cfg := s.normalizedConfig(payload)
+	if cfg.APIKey != "" {
+		s.providerChat.serve(w, r, cfg, payload, providerChatOptions{Stream: true})
 		return
 	}
 	writeSSE(w,
@@ -747,7 +773,7 @@ func (s *Server) agentTasks(w http.ResponseWriter, r *http.Request) {
 		s.proxy.ServeHTTP(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "tasks": []any{}, "mode": "go"})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "tasks": s.agentRuntime.Tasks(), "mode": "go"})
 }
 
 func (s *Server) agentRun(w http.ResponseWriter, r *http.Request) {
@@ -755,35 +781,23 @@ func (s *Server) agentRun(w http.ResponseWriter, r *http.Request) {
 		s.proxy.ServeHTTP(w, r)
 		return
 	}
-	runID := "go-" + time.Now().UTC().Format("20060102150405.000000000")
-	writeSSE(w,
-		map[string]any{
-			"type":    "run_started",
-			"run_id":  runID,
-			"success": false,
-			"mode":    "go",
-		},
-		map[string]any{
-			"type":      "unavailable",
-			"run_id":    runID,
-			"success":   false,
-			"available": false,
-			"error":     "python_worker_unavailable",
-			"message":   "Agent execution is delegated to the Python worker.",
-			"mode":      "go",
-		},
-		map[string]any{
-			"type":      "done",
-			"done":      true,
-			"run_id":    runID,
-			"success":   false,
-			"available": false,
-			"status":    "aborted",
-			"aborted":   true,
-			"error":     "python_worker_unavailable",
-			"mode":      "go",
-		},
-	)
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	start, err := s.agentRuntime.StartRun(r.Context(), AgentRunRequest{
+		Message:        firstString(payload, "message", "prompt", "input"),
+		WorkingDir:     firstString(payload, "working_dir", "workingDir", "cwd"),
+		DeviceID:       firstString(payload, "device_id", "deviceId"),
+		SessionID:      firstString(payload, "session_id", "sessionId"),
+		ParentTaskID:   firstString(payload, "parent_task_id", "parentTaskId"),
+		PermissionMode: s.permissions.Mode,
+		Metadata:       payload,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent_runtime_failed", err.Error())
+		return
+	}
+	snapshot, _ := s.agentRuntime.FinishRun(start.RunID, AgentRunStatusAborted, errors.New("python_worker_unavailable"))
+	writeSSE(w, start.Frame, s.agentRuntime.UnavailableFrame(start.RunID), s.agentRuntime.DoneFrame(snapshot))
 }
 
 func (s *Server) ragDocuments(w http.ResponseWriter, r *http.Request) {
@@ -803,16 +817,22 @@ func (s *Server) featureFlags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) securityStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":                 true,
-		"mode":                    "go",
-		"local_only":              true,
-		"permission_service":      "go",
-		"permission_mode":         s.permissions.Mode,
-		"csrf_required_remote":    true,
-		"terminal_shell_default":  false,
-		"workspace_escape_denied": true,
+	status := s.securityPrivacy.SecurityStatus(SecurityRuntimeConfig{
+		BindHost:              "127.0.0.1",
+		DesktopMode:           true,
+		AuthEnabled:           false,
+		CSRFEnabled:           true,
+		PermissionService:     "go",
+		PermissionMode:        s.permissions.Mode,
+		AuditLogging:          true,
+		WorkspaceEscapeDenied: true,
+		TerminalShellDefault:  false,
+		BackendMode:           "go",
+		PythonWorkerAvailable: s.proxy != nil,
+		IPWhitelistMode:       IPWhitelistModeLoopbackOnly,
+		IPWhitelist:           []string{"127.0.0.1", "::1"},
 	})
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) externalConfig(w http.ResponseWriter, r *http.Request) {
@@ -1089,7 +1109,7 @@ func (s *Server) agentTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentTasksTree(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "tree": []any{}})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "tree": s.agentRuntime.TaskTree()})
 }
 
 func (s *Server) terminalKill(w http.ResponseWriter, r *http.Request) {
@@ -1147,7 +1167,12 @@ func (s *Server) agentAbort(w http.ResponseWriter, r *http.Request) {
 		s.proxy.ServeHTTP(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": false, "run_id": runID, "aborted": false, "error": "run_not_found"})
+	result := s.agentRuntime.AbortRun(runID)
+	status := http.StatusOK
+	if !result.Success {
+		status = http.StatusNotFound
+	}
+	writeJSON(w, status, result)
 }
 
 func (s *Server) permissionsStatus(w http.ResponseWriter, r *http.Request) {
@@ -1633,10 +1658,10 @@ func (s *Server) kbSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) privacySettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		items, _ := s.loadCollection("privacy_settings")
-		settings := map[string]any{"telemetry": false, "crash_reports": false}
-		if len(items) > 0 {
-			settings = items[len(items)-1]
+		settings, err := s.securityPrivacy.LoadPrivacySettings()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "load_failed", err.Error())
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "settings": settings})
 		return
@@ -1650,22 +1675,32 @@ func (s *Server) privacySettings(w http.ResponseWriter, r *http.Request) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	payload["id"] = "settings"
-	payload["updated_at"] = time.Now().UTC().Format(time.RFC3339)
-	if err := s.saveCollection("privacy_settings", []map[string]any{payload}); err != nil {
+	settings := PrivacySettings{
+		ID:                 "settings",
+		Telemetry:          boolValue(payload["telemetry"]),
+		CrashReports:       boolValue(payload["crash_reports"]),
+		Analytics:          boolValue(payload["analytics"]),
+		ShareDiagnostics:   boolValue(payload["share_diagnostics"]),
+		Personalization:    boolValue(payload["personalization"]),
+		RetainLocalHistory: boolValue(payload["retain_local_history"]),
+		RetentionDays:      intValue(payload["retention_days"]),
+	}
+	settings, err := s.securityPrivacy.SavePrivacySettings(settings)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "settings": payload})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "settings": settings})
 }
 
 func (s *Server) privacyExport(w http.ResponseWriter, r *http.Request) {
+	bundle, err := s.securityPrivacy.PrivacyExport()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "privacy_export_failed", err.Error())
+		return
+	}
 	cfg, _ := s.loadDeviceConfig()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"mode":    "go",
-		"export":  map[string]any{"device": maskedDevice(cfg), "collections_dir": filepath.Join(s.runtimeDir, "go_collections")},
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "export": bundle, "device": maskedDevice(cfg)})
 }
 
 func (s *Server) privacyDelete(w http.ResponseWriter, r *http.Request) {
@@ -1673,14 +1708,22 @@ func (s *Server) privacyDelete(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	removed := []string{}
-	for _, rel := range []string{"go_collections", "audit_logs"} {
-		path := filepath.Join(s.runtimeDir, rel)
-		if err := os.RemoveAll(path); err == nil {
-			removed = append(removed, rel)
+	var payload map[string]any
+	_ = readJSON(r, &payload)
+	scopes := []string{}
+	if raw, ok := payload["scopes"].([]any); ok {
+		for _, item := range raw {
+			if s, ok := item.(string); ok {
+				scopes = append(scopes, s)
+			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "deleted": removed})
+	result, err := s.securityPrivacy.DeletePrivacyData(scopes...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "privacy_delete_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) loadDeviceConfig() (deviceConfig, error) {
@@ -2015,11 +2058,41 @@ func firstString(payload map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if v, ok := payload[key]; ok {
 			if s, ok := v.(string); ok {
-				return s
+				return strings.TrimSpace(s)
 			}
 		}
 	}
 	return ""
+}
+
+func boolValue(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	default:
+		return false
+	}
+}
+
+func intValue(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	case string:
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 func maskAPIKey(key string) string {

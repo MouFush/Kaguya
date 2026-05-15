@@ -313,6 +313,76 @@ func TestExternalProviderChatUsesSavedOpenAICompatibleConfig(t *testing.T) {
 	}
 }
 
+func TestServerStreamUsesProviderChatServiceWhenConfigured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "kimi",
+		"api_url":  upstream.URL + "/v1",
+		"api_key":  "sk-stream-secret",
+		"model":    "kimi-k2.6",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/stream", map[string]any{"message": "ping"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stream status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("expected stream content type, got %s", rec.Header().Get("Content-Type"))
+	}
+	if strings.Contains(rec.Body.String(), "sk-stream-secret") || !strings.Contains(rec.Body.String(), "hi") {
+		t.Fatalf("stream leaked key or missed content: %s", rec.Body.String())
+	}
+}
+
+func TestServerAgentRuntimeBacksTasksAndAbort(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/agent/run", map[string]any{"message": "runtime smoke"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent run status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	frames := decodeSSEFrames(t, rec)
+	if len(frames) != 3 {
+		t.Fatalf("expected 3 frames, got %#v", frames)
+	}
+	taskID, _ := frames[0]["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("run_started frame lacks task_id: %#v", frames[0])
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/agent/tasks", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), taskID) {
+		t.Fatalf("tasks did not include runtime task: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/agent/tasks/tree", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), taskID) {
+		t.Fatalf("task tree did not include runtime task: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServerSecurityAndPrivacyUseSecurityPrivacyService(t *testing.T) {
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodGet, "/security/status", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "high_risk_remote_policy") {
+		t.Fatalf("security status not service-backed: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/privacy/settings", map[string]any{"retain_local_history": true, "retention_days": 3})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("privacy save status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/privacy/settings", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "\"retention_days\":3") {
+		t.Fatalf("privacy settings not persisted through service: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestStreamSSEFallbackIsStructuredUnavailable(t *testing.T) {
 	_, h := newTestServer(t)
 	rec := requestJSON(t, h, http.MethodPost, "/stream", map[string]any{"message": "hi"})
