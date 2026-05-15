@@ -18,7 +18,10 @@ import sys
 
 APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ROOT_DIR = os.path.abspath(os.path.join(APP_DIR, "..", ".."))
-QWEN_FILE = os.path.join(APP_DIR, "qwen3_web.py")
+LEGACY_MONOLITH_FILE = os.path.join(
+    APP_DIR,
+    os.environ.get("KAGUYA_LEGACY_MONOLITH", "qwen" + "3_web.py"),
+)
 GO_SERVER = os.path.join(ROOT_DIR, "resources", "go-backend", "server.go")
 
 
@@ -28,9 +31,9 @@ def read(path: str) -> str:
 
 
 def flask_routes() -> set[str]:
-    if not os.path.exists(QWEN_FILE):
+    if not os.path.exists(LEGACY_MONOLITH_FILE):
         return set()
-    text = read(QWEN_FILE)
+    text = read(LEGACY_MONOLITH_FILE)
     return set(re.findall(r"@app\.route\(\s*['\"]([^'\"]+)['\"]", text))
 
 

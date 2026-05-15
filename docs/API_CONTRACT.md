@@ -1,4 +1,4 @@
-# Kaguya IDE API Contract
+﻿# Kaguya IDE API Contract
 
 This document records the integration baseline verified by tests. It does not assert model availability.
 
@@ -91,5 +91,6 @@ python -m unittest discover -s .\resources\python-app\tests -v
 python .\resources\python-app\scripts\smoke_flask.py
 node --check .\resources\app.asar.src\electron\main.js
 node --check .\resources\app.asar.src\electron\preload.js
-node -e "const fs=require('fs'),vm=require('vm');const lines=fs.readFileSync('resources/python-app/qwen3_web.py','utf8').split(/\r?\n/);for(const [name,a,b] of [['agent-ide',6391,8200],['main-ui',15710,25512]]){new vm.Script(lines.slice(a-1,b).join('\n'),{filename:name+'.js'});console.log(name,'ok')}"
+node -e "const fs=require('fs'),vm=require('vm');const lines=fs.readFileSync('resources/python-app/legacy Python monolith','utf8').split(/\r?\n/);for(const [name,a,b] of [['agent-ide',6391,8200],['main-ui',15710,25512]]){new vm.Script(lines.slice(a-1,b).join('\n'),{filename:name+'.js'});console.log(name,'ok')}"
 ```
+

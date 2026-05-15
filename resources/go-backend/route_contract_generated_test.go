@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestGeneratedQwen3RouteContractsCoverLegacySurface(t *testing.T) {
-	stats := qwen3RouteContractStats()
+	stats := legacyRouteContractStats()
 	if stats["total"] < 200 {
 		t.Fatalf("route contract catalog is unexpectedly small: %#v", stats)
 	}
@@ -19,7 +19,7 @@ func TestGeneratedQwen3RouteContractsCoverLegacySurface(t *testing.T) {
 }
 
 func TestGeneratedQwen3RouteContractsCarryDeletionGates(t *testing.T) {
-	for _, contract := range qwen3RouteContracts {
+	for _, contract := range legacyRouteContracts {
 		if contract.Endpoint == "" || contract.LegacySymbol == "" || contract.GoPattern == "" {
 			t.Fatalf("incomplete contract: %#v", contract)
 		}
@@ -35,7 +35,7 @@ func TestGeneratedQwen3RouteContractsCarryDeletionGates(t *testing.T) {
 }
 
 func TestGeneratedQwen3RouteContractsCanFilterDomains(t *testing.T) {
-	agentRoutes := qwen3RouteContractsByDomain("agent")
+	agentRoutes := legacyRouteContractsByDomain("agent")
 	if len(agentRoutes) == 0 {
 		t.Fatal("expected agent domain contracts")
 	}

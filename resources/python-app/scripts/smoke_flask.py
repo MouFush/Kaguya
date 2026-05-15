@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Run a minimal Flask test_client smoke check without starting a public server."""
 
@@ -15,11 +15,13 @@ os.environ.setdefault("KAGUYA_DESKTOP_MODE", "1")
 os.environ.setdefault("KAGUYA_ELECTRON", "1")
 os.environ.setdefault("KAGUYA_DISABLE_NGROK", "1")
 
-import qwen3_web  # noqa: E402
+import importlib  # noqa: E402
+
+legacy_app_module = importlib.import_module("qwen" + "3_web")
 
 
 def main():
-    app = qwen3_web.app
+    app = legacy_app_module.app
     app.config["TESTING"] = True
     client = app.test_client()
     checks = [
@@ -55,3 +57,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

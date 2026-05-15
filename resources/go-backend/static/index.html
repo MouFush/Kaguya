@@ -1,4 +1,4 @@
-
+﻿
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -3232,7 +3232,7 @@
                         <div class="git-status-grid" id="gitStatusGrid">
                             <div class="git-repo-card">
                                 <div class="git-repo-header">
-                                    <span class="git-repo-name">📁 qwen3_web</span>
+                                    <span class="git-repo-name">📁 kaguya_backend</span>
                                     <span class="git-branch">🌿 main</span>
                                 </div>
                                 <div class="git-repo-stats">
@@ -3241,9 +3241,9 @@
                                     <span class="git-stat">⏳ 1 待推送</span>
                                 </div>
                                 <div class="git-repo-actions">
-                                    <button class="git-btn" onclick="gitCommit('qwen3_web')">提交</button>
-                                    <button class="git-btn" onclick="gitPush('qwen3_web')">推送</button>
-                                    <button class="git-btn" onclick="gitPull('qwen3_web')">拉取</button>
+                                    <button class="git-btn" onclick="gitCommit('kaguya_backend')">提交</button>
+                                    <button class="git-btn" onclick="gitPush('kaguya_backend')">推送</button>
+                                    <button class="git-btn" onclick="gitPull('kaguya_backend')">拉取</button>
                                 </div>
                             </div>
                         </div>
@@ -3318,7 +3318,7 @@
                         <div class="deploy-history" id="deployHistoryList">
                             <div class="deploy-record success">
                                 <div class="deploy-info">
-                                    <span class="deploy-project">qwen3_web</span>
+                                    <span class="deploy-project">kaguya_backend</span>
                                     <span class="deploy-target">→ 本地环境</span>
                                 </div>
                                 <div class="deploy-meta">
@@ -5530,11 +5530,11 @@
                             <div style="color:#059669;margin-top:8px;"># 启动 Web UI (推荐)</div>
                             <div style="color:var(--text-primary);">llamafactory-cli webui</div>
                             <div style="color:#059669;margin-top:8px;"># 命令行训练示例</div>
-                            <div style="color:var(--text-primary);">llamafactory-cli train examples/train_lora/qwen3_lora_sft.yaml</div>
+                            <div style="color:var(--text-primary);">llamafactory-cli train examples/train_lora/qwen_lora_sft.yaml</div>
                             <div style="color:#059669;margin-top:8px;"># 多卡训练 (DeepSpeed ZeRO-3)</div>
-                            <div style="color:var(--text-primary);">FORCE_TORCHRUN=1 llamafactory-cli train examples/train_lora/qwen3_lora_sft_ds3.yaml</div>
+                            <div style="color:var(--text-primary);">FORCE_TORCHRUN=1 llamafactory-cli train examples/train_lora/qwen_lora_sft_ds.yaml</div>
                             <div style="color:#059669;margin-top:8px;"># Ray 分布式训练 (4 GPU)</div>
-                            <div style="color:var(--text-primary);">USE_RAY=1 llamafactory-cli train examples/train_lora/qwen3_lora_sft_ray.yaml</div>
+                            <div style="color:var(--text-primary);">USE_RAY=1 llamafactory-cli train examples/train_lora/qwen_lora_sft_ray.yaml</div>
                         </div>
                         <div style="margin-top:12px;">
                             <b style="color:var(--text-primary);">🎯 YAML 核心配置参数详解:</b>
@@ -13917,13 +13917,13 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 {id:'gemini-2.5-pro',label:'Gemini 2.5 Pro (均衡)'}
             ],docUrl:'https://ai.google.dev'},
             qwen:{name:'Qwen (通义千问)',color:'#ff6a00',icon:'&#x1F525;',url:'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',models:[
-                {id:'qwen3-235b-a22b',label:'Qwen3-235B-A22B (旗舰MoE)'},
-                {id:'qwen3-30b-a3b',label:'Qwen3-30B-A3B (轻量MoE)'},
-                {id:'qwen3-32b',label:'Qwen3-32B (Dense)'},
-                {id:'qwen3.5-72b',label:'Qwen3.5-72B (最新旗舰)'},
-                {id:'qwen3.5-32b',label:'Qwen3.5-32B (均衡)'},
-                {id:'qwen3.6-72b',label:'Qwen3.6-72B (下一代)'},
-                {id:'qwen3.6-32b',label:'Qwen3.6-32B (轻量)'}
+                {id:'qwen-max',label:'Qwen-Max'},
+                {id:'qwen-plus',label:'Qwen-Plus'},
+                {id:'qwen-turbo',label:'Qwen-Turbo'},
+                {id:'qwen-long',label:'Qwen-Long'},
+                {id:'qwen-coder-plus',label:'Qwen-Coder-Plus'},
+                {id:'qwen-vl-max',label:'Qwen-VL-Max'},
+                {id:'qwen-math-plus',label:'Qwen-Math-Plus'}
             ],docUrl:'https://dashscope.console.aliyun.com'}
         };
         let _currentApiProvider=localStorage.getItem('active_api_provider')||'deepseek';
@@ -15978,3 +15978,5 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         </script>
 <script>window.__CSRF_TOKEN__="1310b1467f8e2dd7016d9f16df5c68ed";</script></body>
 </html>
+
+

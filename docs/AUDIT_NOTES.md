@@ -1,17 +1,17 @@
-# KaguyaIDE 3.1.0 Audit Notes
+﻿# KaguyaIDE 3.1.0 Audit Notes
 
 ## Entrypoints
 
 - Electron entry: `resources/app.asar.src/electron/main.js`.
 - Electron preload: `resources/app.asar.src/electron/preload.js`.
-- Python backend entry used by Electron: temporary `kaguya_launcher.py` created by `startPythonServer()`, which runs `resources/python-app/qwen3_web.py`.
+- Python backend entry used by Electron: temporary `kaguya_launcher.py` created by `startPythonServer()`, which runs `resources/python-app/legacy Python monolith`.
 - Python CLI entry: `resources/python-app/start_server.py`.
-- Flask app: `qwen3_web.py`, with bootstrap routes registered from `kaguya_bootstrap.py`.
+- Flask app: `legacy Python monolith`, with bootstrap routes registered from `kaguya_bootstrap.py`.
 
 ## Binding
 
 - Desktop launcher binds Flask to `127.0.0.1` on the selected local port.
-- `qwen3_web.py --localhost-only` binds to `127.0.0.1`; non-localhost binding is treated as remote exposure and high-risk routes require auth or are rejected.
+- `legacy Python monolith --localhost-only` binds to `127.0.0.1`; non-localhost binding is treated as remote exposure and high-risk routes require auth or are rejected.
 
 ## Runtime Data
 
@@ -53,3 +53,4 @@ These are runtime/user data, not source:
 - `/agent/open-project` previews external folders but does not trust them unless the request includes explicit confirmation.
 - Terminal execution uses `shell=False` by default and is denied unless the command is classified as low risk.
 - Remote high-risk POST requests are rejected when auth is disabled.
+

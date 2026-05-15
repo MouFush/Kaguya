@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Print backend startup diagnostics without claiming the app is healthy."""
+"""Print startup diagnostics for the Go backend package."""
 
-import importlib.util
 import json
 import os
 import sys
@@ -17,33 +16,26 @@ def file_state(path):
 
 
 def main():
-    qwen = os.path.join(APP_DIR, "qwen3_web.py")
-    bootstrap = os.path.join(APP_DIR, "kaguya_bootstrap.py")
-    permissions = os.path.join(APP_DIR, "kaguya_permissions.py")
+    go_dir = os.path.join(ROOT_DIR, "resources", "go-backend")
+    go_exe = os.path.join(go_dir, "kaguya-go-backend.exe")
     electron_main = os.path.join(ROOT_DIR, "resources", "app.asar.src", "electron", "main.js")
     electron_preload = os.path.join(ROOT_DIR, "resources", "app.asar.src", "electron", "preload.js")
     info = {
         "python": sys.executable,
         "cwd": os.getcwd(),
         "app_dir": APP_DIR,
+        "go_backend_dir": go_dir,
         "files": {
-            "qwen3_web": file_state(qwen),
-            "kaguya_bootstrap": file_state(bootstrap),
-            "kaguya_permissions": file_state(permissions),
+            "go_backend_exe": file_state(go_exe),
+            "go_backend_static_index": file_state(os.path.join(go_dir, "static", "index.html")),
             "electron_main": file_state(electron_main),
             "electron_preload": file_state(electron_preload),
-        },
-        "optional_modules": {
-            "flask": importlib.util.find_spec("flask") is not None,
-            "ollama": importlib.util.find_spec("ollama") is not None,
-            "torch": importlib.util.find_spec("torch") is not None,
-            "transformers": importlib.util.find_spec("transformers") is not None,
-            "peft": importlib.util.find_spec("peft") is not None,
+            "python_worker_adapter": file_state(os.path.join(APP_DIR, "kaguya_worker_adapter.py")),
         },
         "env": {
             "KAGUYA_DESKTOP_MODE": os.environ.get("KAGUYA_DESKTOP_MODE", ""),
             "KAGUYA_ELECTRON": os.environ.get("KAGUYA_ELECTRON", ""),
-            "KAGUYA_NGROK_TOKEN": "set" if os.environ.get("KAGUYA_NGROK_TOKEN") else "unset",
+            "KAGUYA_GO_BACKEND": os.environ.get("KAGUYA_GO_BACKEND", ""),
         },
     }
     print(json.dumps(info, ensure_ascii=False, indent=2))
