@@ -24,7 +24,7 @@ The packaged frontend and Electron shell call these core paths:
 - `/api/account/auto-fill`
 - Compatibility paths: `/api/chat`, `/api/model-status`, `/api/config`, `/models`, `/chat/completions`
 
-Dynamic paths such as `/agent/tasks/<task_id>`, `/rag/delete/<doc_id>`, `/rag/preview/<doc_id>`, and `/services/<service_id>/restart` are exposed by Flask.
+Dynamic paths such as `/agent/tasks/<task_id>`, `/rag/delete/<doc_id>`, `/rag/preview/<doc_id>`, and `/services/<service_id>/restart` are exposed by the Go router.
 
 ## Compatibility Shims
 
@@ -34,7 +34,7 @@ These routes exist to support older Electron or frontend callers:
 - `GET|POST /api/model-status` returns structured backend/model status and does not claim Ollama is available when it is not.
 - `GET /models` returns local and external model metadata; external providers require keys and are not marked available by default.
 - `GET /api/config` returns basic runtime configuration.
-- `POST /chat/completions` provides an OpenAI-compatible response only when an explicit external API config is supplied; otherwise it returns structured `501` JSON.
+- `POST /chat/completions` provides an OpenAI-compatible response only when an explicit external API config is supplied; otherwise it returns structured unavailable JSON.
 
 ## Agent Cancellation
 
@@ -45,8 +45,8 @@ These routes exist to support older Electron or frontend callers:
 
 ## Device API Config
 
-- Full Flask mode stores device API config through the existing per-device account store and returns only masked keys.
-- Full Flask mode stores runtime config under `KAGUYA_RUNTIME_DIR` or the platform user-data directory, not under `resources/python-app`.
+- Go backend mode stores device API config in the local encrypted vault and returns only masked keys.
+- Go backend mode stores runtime config under `KAGUYA_RUNTIME_DIR` or the platform user-data directory, not under `resources/python-app`.
 - Electron mini mode stores the same config in `userData/kaguya/device_vault.enc`; full keys are not returned to the renderer.
 - `apiKey`/`apiUrl` and `api_key`/`api_url` payloads are normalized to `api_key`/`api_url` before use.
 - `/api/account/auto-fill` intentionally does not return the full API key.
@@ -56,19 +56,20 @@ These routes exist to support older Electron or frontend callers:
 
 - `kimi` and `moonshot` default to `https://api.moonshot.ai/v1`.
 - Kimi K2-family chat payloads disable thinking explicitly and use `max_completion_tokens`; arbitrary `temperature` is omitted to avoid provider-side parameter rejection.
+- `/agent/api-test` and `/deepseek/test` perform a real provider `/models` verification request. They return `success:false` with structured errors for rejected keys or network failures and never return the full API key.
 
 ## Mini Fallback
 
-- Mini fallback is only used when the Python backend does not become healthy.
+- Mini fallback is only used when the Go backend does not become healthy.
 - Mini responses identify themselves with `mode:"mini"` and `backend_available:false`.
-- Mini chat returns `backend_unavailable` unless an encrypted external provider config exists. It must not claim Ollama or the Python backend is online.
+- Mini chat returns `backend_unavailable` unless an encrypted external provider config exists. It must not claim Ollama or the Go backend is online.
 
 ## IDE File Upload
 
 - `POST /agent/upload-device-files` accepts multipart file uploads with `files`, `device_id`, and optional `batch_index`/`batch_total` metadata.
 - The web fallback batches large folder uploads at 100 files or 64 MB per request. This avoids browser or Werkzeug aborts that surface only as `Failed to fetch`.
 - Electron native import should be preferred when the desktop preload bridge is available, because it imports by local path instead of sending a huge multipart body through Chromium.
-- Upload failures must be surfaced as structured JSON when the request reaches Flask; browser-level aborts remain visible in the terminal log with batch context.
+- Upload failures must be surfaced as structured JSON when the request reaches Go; browser-level aborts remain visible in the terminal log with batch context.
 
 ## Optional Dependencies
 
@@ -80,7 +81,7 @@ The base app must import and serve core APIs without these optional dependencies
 - `peft`
 - CLIP model weights
 
-When Ollama is unavailable, chat endpoints return structured JSON with `available:false`, `reason:"ollama_unavailable"`, and a remediation message.
+When no external provider key is configured, chat endpoints return structured JSON with `available:false` or `success:false`, a missing-key/backend-unavailable reason, and a remediation message.
 
 ## Test Commands
 

@@ -8,7 +8,8 @@ The desktop backend has been moved to `resources/go-backend`. The former giant P
 - If no binary is present and `go` exists on PATH, Electron can run `go run .` from `resources/go-backend`.
 - If Go cannot start, Electron opens the diagnostic/setup flow and may start mini server mode. Mini mode is not a full backend.
 - Go serves `resources/go-backend/static/index.html` for `/`.
-- Go serves assets from `--app-dir` for `/static/*`, `/assets/*`, `/header-img`, `/hero-img`, `/welcome-img`, `/background`, `/wallpaper`, and `/favicon.ico`.
+- Go serves assets from `--app-dir` for `/static/*`, `/assets/*`, `/header-img`, `/hero-img`, `/welcome-img`, `/background`, `/wallpaper`, `/deepseek-icon`, `/sidebar-icon`, and `/favicon.ico`.
+- Desktop chrome image routes use explicit fallback aliases when legacy icon filenames are not present in `python-app/assets`.
 - Optional Python worker mode uses `resources/python-app/start_server.py --backend bootstrap` and is enabled only by `KAGUYA_ENABLE_PYTHON_WORKER=1`.
 
 ## Go-Owned APIs
@@ -24,6 +25,8 @@ Go owns the core API surface:
 - `/api/account/saved-config`
 - `/api/account/auto-fill`
 - `/models`
+- `/agent/api-test`
+- `/deepseek/test`
 - `/chat`
 - `/api/chat`
 - `/chat/completions`
@@ -57,6 +60,8 @@ The archived route catalog tracks 241 historical routes and the Go router covers
 `/agent/run` now emits a Go-owned SSE lifecycle. With a saved external provider key it sends the prompt through the Go provider client and emits an assistant message frame; without a key it returns a structured `missing_api_key` frame.
 
 `/agent/compile` and `/agent/run-project` execute through the Go workspace and terminal permission services. Medium/high risk commands are denied in default `ask` mode and only execute after permission mode allows them.
+
+`/agent/api-test` and `/deepseek/test` perform real OpenAI-compatible `/models` verification through the Go provider client. Kimi/Moonshot defaults use `https://api.moonshot.ai/v1` and `kimi-k2.6`; rejected keys and network errors return structured JSON without leaking the key.
 
 ## Safety Boundaries
 
