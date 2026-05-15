@@ -96,6 +96,47 @@ func TestDeviceBindMasksAndPersistsAPIKey(t *testing.T) {
 	}
 }
 
+func TestDeviceVaultSurvivesServerRestart(t *testing.T) {
+	runtimeDir := t.TempDir()
+	key := "sk-restart-secret-abcdef"
+	s1, err := NewServer(ServerConfig{RuntimeDir: runtimeDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h1 := s1.Handler()
+	rec := requestJSON(t, h1, http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "kimi",
+		"apiKey":   key,
+		"apiUrl":   "https://api.moonshot.ai/v1",
+		"model":    "kimi-k2.6",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	s2, err := NewServer(ServerConfig{RuntimeDir: runtimeDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2 := s2.Handler()
+	rec = requestJSON(t, h2, http.MethodGet, "/api/account/saved-config", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("saved-config status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got := decodeBody(t, rec)
+	if got["has_config"] != true || got["provider"] != "kimi" || got["model"] != "kimi-k2.6" {
+		t.Fatalf("saved config did not survive restart: %#v", got)
+	}
+	if strings.Contains(rec.Body.String(), key) {
+		t.Fatalf("saved config leaked cleartext key after restart: %s", rec.Body.String())
+	}
+	rec = requestJSON(t, h2, http.MethodGet, "/api/model-status", nil)
+	status := decodeBody(t, rec)
+	if status["available"] != true || status["provider"] != "kimi" {
+		t.Fatalf("model status did not use restored config: %#v", status)
+	}
+}
+
 func TestMaskedRoundTripPreservesSavedKey(t *testing.T) {
 	_, h := newTestServer(t)
 	key := "sk-preserve-123456"
