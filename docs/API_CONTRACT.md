@@ -40,7 +40,8 @@ These routes exist to support older Electron or frontend callers:
 
 - `POST /agent/run` sends an SSE `run_started` frame with a `run_id` before model/tool work starts.
 - `POST /agent/abort` sets the backend abort event for that `run_id`; the frontend browser abort alone is not treated as sufficient cancellation.
-- Agent loops check the abort event around loop turns, tool calls, permission waits, and SSE emission. Long-running subprocesses may still need their own process-level kill path.
+- Go-owned agent runs check the abort event before provider work and before terminal frames. With a saved provider key they emit an assistant `message` SSE frame; without a key they emit structured `missing_api_key`.
+- Project subprocesses use terminal timeout handling rather than a persistent PTY-style process manager.
 
 ## Device API Config
 

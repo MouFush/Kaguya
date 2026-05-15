@@ -54,6 +54,10 @@ Go owns the core API surface:
 
 The archived route catalog tracks 241 historical routes and the Go router covers them through exact handlers or explicit prefix handlers.
 
+`/agent/run` now emits a Go-owned SSE lifecycle. With a saved external provider key it sends the prompt through the Go provider client and emits an assistant message frame; without a key it returns a structured `missing_api_key` frame.
+
+`/agent/compile` and `/agent/run-project` execute through the Go workspace and terminal permission services. Medium/high risk commands are denied in default `ask` mode and only execute after permission mode allows them.
+
 ## Safety Boundaries
 
 - API keys are persisted in `device_vault.enc` with AES-GCM using a local runtime-derived key.

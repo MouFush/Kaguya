@@ -42,10 +42,11 @@ The Go backend owns:
 - Static UI and asset serving
 - Device API key vault and masked API-key responses
 - OpenAI-compatible provider chat for Kimi, Moonshot, DeepSeek, OpenAI-compatible custom providers, and others
-- Agent run IDs, SSE start frames, abort registry, and task snapshots
+- Agent run IDs, SSE start frames, abort registry, provider-backed chat runs, and task snapshots
 - Workspace path authorization and trusted project allowlist
 - File tree, read, write, upload, and revert snapshots
 - Terminal command parsing, risk classification, permission decisions, execution, timeout handling, and audit log
+- Project compile/run execution through the same workspace and terminal permission services
 - Local KB/RAG document store, search, stats, preview, delete, and cache clear
 - Auth/account compatibility routes
 - Security and privacy status/export/delete routes
