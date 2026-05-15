@@ -124,8 +124,8 @@ func TestSafeJoinRejectsWorkspaceEscape(t *testing.T) {
 }
 
 func TestReadWriteFileWithinWorkspace(t *testing.T) {
-	_, h := newTestServer(t)
-	root := t.TempDir()
+	s, h := newTestServer(t)
+	root := s.workspace.WorkspaceRoot()
 	rec := requestJSON(t, h, http.MethodPost, "/agent/write-file", map[string]any{
 		"workspace": root,
 		"path":      "nested/file.txt",
@@ -176,8 +176,8 @@ func TestUnknownRouteProxiesToPythonWorker(t *testing.T) {
 }
 
 func TestUploadDeviceFilesStaysInWorkspace(t *testing.T) {
-	_, h := newTestServer(t)
-	root := t.TempDir()
+	s, h := newTestServer(t)
+	root := s.workspace.WorkspaceRoot()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	if err := mw.WriteField("workspace", root); err != nil {

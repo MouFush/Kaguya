@@ -17,11 +17,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +43,10 @@ type Server struct {
 	providerChat    providerChatService
 	agentRuntime    *AgentRuntimeService
 	securityPrivacy *SecurityPrivacyService
+	workspace       *WorkspaceProjectService
+	terminal        *TerminalPermissionService
+	knowledge       *KnowledgeRAGService
+	authAccount     *authAccountService
 }
 
 type permissionState struct {
@@ -74,20 +76,36 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if err := os.MkdirAll(cfg.RuntimeDir, 0o700); err != nil {
 		return nil, err
 	}
+	workspaceRoot := filepath.Join(cfg.RuntimeDir, "workspaces")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		return nil, err
+	}
 	s := &Server{
 		cfg:           cfg,
 		runtimeDir:    cfg.RuntimeDir,
-		workspaceRoot: filepath.Join(cfg.RuntimeDir, "workspaces"),
+		workspaceRoot: workspaceRoot,
 		devicePath:    filepath.Join(cfg.RuntimeDir, "device_vault.enc"),
 		permissions:   permissionState{Mode: "ask"},
 		providerChat:  newProviderChatService(nil),
 		agentRuntime:  NewAgentRuntimeService(),
+		terminal:      NewTerminalPermissionService(filepath.Join(cfg.RuntimeDir, "audit_logs", "terminal_audit.jsonl")),
+		authAccount:   newAuthAccountService(cfg.RuntimeDir),
 	}
 	securityPrivacy, err := NewSecurityPrivacyService(cfg.RuntimeDir)
 	if err != nil {
 		return nil, err
 	}
 	s.securityPrivacy = securityPrivacy
+	workspace, err := NewWorkspaceProjectService(cfg.RuntimeDir, s.workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	s.workspace = workspace
+	knowledge, err := NewKnowledgeRAGService(cfg.RuntimeDir)
+	if err != nil {
+		return nil, err
+	}
+	s.knowledge = knowledge
 	if cfg.PythonURL != "" {
 		u, err := url.Parse(cfg.PythonURL)
 		if err != nil {
@@ -179,6 +197,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/agent/v2/", s.agentV2)
 	mux.HandleFunc("/rag/documents", s.ragDocuments)
 	mux.HandleFunc("/rag/add_text", s.ragAddText)
+	mux.HandleFunc("/rag/upload_metadata", s.knowledge.handleUploadMetadata)
+	mux.HandleFunc("/rag/upload-metadata", s.knowledge.handleUploadMetadata)
+	mux.HandleFunc("/rag/search", s.knowledge.handleSearch)
+	mux.HandleFunc("/rag/stats", s.knowledge.handleStats)
+	mux.HandleFunc("/rag/preview", s.knowledge.handlePreview)
+	mux.HandleFunc("/rag/delete", s.knowledge.handleDelete)
+	mux.HandleFunc("/rag/clear_cache", s.knowledge.handleClearCache)
+	mux.HandleFunc("/rag/clear-cache", s.knowledge.handleClearCache)
+	mux.HandleFunc("/rag/analysis", s.knowledge.handleStructuredUnavailable("rag_analysis"))
+	mux.HandleFunc("/rag/build-graph", s.knowledge.handleStructuredUnavailable("rag_knowledge_graph"))
 	mux.HandleFunc("/rag/", s.structuredUnavailable("rag"))
 	mux.HandleFunc("/kaguya/features/flags", s.featureFlags)
 	mux.HandleFunc("/security/status", s.securityStatus)
@@ -200,7 +228,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ab/", s.collectionFacade("ab"))
 	mux.HandleFunc("/integrations", s.collectionFacade("integrations"))
 	mux.HandleFunc("/integrations/", s.collectionFacade("integrations"))
-	mux.HandleFunc("/workspace/projects", s.collectionFacade("workspace_projects"))
+	mux.HandleFunc("/workspace/projects", s.workspaceProjects)
 	mux.HandleFunc("/workspace/projects/", s.collectionFacade("workspace_projects"))
 	mux.HandleFunc("/console/", s.consoleStatus)
 	mux.HandleFunc("/system/metrics", s.systemMetrics)
@@ -420,89 +448,59 @@ func (s *Server) loraList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) accountProfile(w http.ResponseWriter, r *http.Request) {
-	cfg, _ := s.loadDeviceConfig()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"mode":    "go",
-		"account": map[string]any{
-			"id":             s.deviceID(),
-			"display_name":   "Local desktop user",
-			"auth_required":  false,
-			"provider":       cfg.Provider,
-			"masked_api_key": maskAPIKey(cfg.APIKey),
-		},
-	})
+	if r.URL.Path == "/auth/account" {
+		s.authAccount.handleAuthAccountV2(w, r)
+		return
+	}
+	s.authAccount.handleAccountProfileV2(w, r)
 }
 
 func (s *Server) accountSessions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"mode":    "go",
-		"sessions": []map[string]any{{
-			"id":         s.deviceID(),
-			"type":       "desktop_loopback",
-			"created_at": time.Now().UTC().Format(time.RFC3339),
-		}},
-	})
+	s.authAccount.handleAccountSessionsV2(w, r)
 }
 
 func (s *Server) accountTokens(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost || r.Method == http.MethodDelete {
-		writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "token mutation requires the auth worker")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "tokens": []any{}})
+	s.authAccount.handleAccountTokensV2(w, r)
 }
 
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"mode":    "go",
-		"auth":    "desktop_loopback",
-		"message": "Desktop loopback mode does not require password login.",
-	})
+	s.authAccount.handleAuthLoginV2(w, r)
 }
 
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "logged_out": true})
+	if strings.HasSuffix(r.URL.Path, "/logout-all") {
+		s.authAccount.handleAuthLogoutAllV2(w, r)
+		return
+	}
+	s.authAccount.handleAuthLogoutV2(w, r)
 }
 
 func (s *Server) authRegister(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "account registration requires the auth worker")
+	s.authAccount.handleAuthRegisterV2(w, r)
 }
 
 func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":        true,
-		"mode":           "go",
-		"setup_required": false,
-		"auth_required":  false,
-	})
+	s.authAccount.handleAuthSetupV2(w, r)
 }
 
 func (s *Server) authToken(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"mode":    "go",
-		"token":   "",
-		"message": "No browser-readable auth token is issued in desktop loopback mode.",
-	})
+	s.authAccount.handleAuthTokenV2(w, r)
 }
 
 func (s *Server) authPasswordReset(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "password reset requires the auth worker")
+	if strings.HasSuffix(r.URL.Path, "/confirm") {
+		s.authAccount.handleAuthPasswordResetConfirmV2(w, r)
+		return
+	}
+	s.authAccount.handleAuthPasswordResetRequestV2(w, r)
 }
 
 func (s *Server) authAdminAccounts(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "accounts": []any{}})
-		return
-	}
-	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "account administration requires the auth worker")
+	s.authAccount.handleAuthAdminAccountsV2(w, r)
 }
 
 func (s *Server) authAdminRole(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "auth_worker_unavailable", "role administration requires the auth worker")
+	s.authAccount.handleAuthAdminRoleV2(w, r)
 }
 
 func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {
@@ -801,15 +799,11 @@ func (s *Server) agentRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ragDocuments(w http.ResponseWriter, r *http.Request) {
-	if s.proxy != nil {
-		s.proxy.ServeHTTP(w, r)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "documents": []any{}, "mode": "go", "available": false, "reason": "python_worker_unavailable"})
+	s.knowledge.handleDocuments(w, r)
 }
 
 func (s *Server) ragAddText(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "rag_worker_unavailable", "RAG indexing is delegated to the Python worker")
+	s.knowledge.handleAddText(w, r)
 }
 
 func (s *Server) featureFlags(w http.ResponseWriter, r *http.Request) {
@@ -946,34 +940,27 @@ func (s *Server) agentIDE(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) auditLogs(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(s.runtimeDir, "audit_logs", "go_audit.jsonl")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "logs": []any{}})
-		return
+	limit := 200
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed := intFromString(raw); parsed > 0 {
+			limit = parsed
+		}
 	}
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	logs := make([]map[string]any, 0, len(lines))
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		var item map[string]any
-		if json.Unmarshal([]byte(line), &item) == nil {
-			logs = append(logs, item)
-		}
+	logs, err := s.terminal.Audit.Read(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "audit_read_failed", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "logs": logs})
 }
 
 func (s *Server) auditStats(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(s.runtimeDir, "audit_logs", "go_audit.jsonl")
-	b, _ := os.ReadFile(path)
-	count := 0
-	if len(b) > 0 {
-		count = len(strings.Split(strings.TrimSpace(string(b)), "\n"))
+	stats, err := s.terminal.Audit.Stats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "audit_stats_failed", err.Error())
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "total": count})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "stats": stats, "total": stats.Total})
 }
 
 func (s *Server) auditClear(w http.ResponseWriter, r *http.Request) {
@@ -981,8 +968,7 @@ func (s *Server) auditClear(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	path := filepath.Join(s.runtimeDir, "audit_logs", "go_audit.jsonl")
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := s.terminal.Audit.Clear(); err != nil {
 		writeError(w, http.StatusInternalServerError, "audit_clear_failed", err.Error())
 		return
 	}
@@ -1000,11 +986,16 @@ func (s *Server) securityIPWhitelist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) browsableDirs(w http.ResponseWriter, r *http.Request) {
-	root := s.workspaceFor(s.deviceID())
+	root := s.workspace.WorkspaceRoot()
+	projects, _ := s.workspace.TrustedProjects()
+	dirs := []map[string]any{{"path": root, "trusted": true, "scope": "workspace"}}
+	for _, project := range projects {
+		dirs = append(dirs, map[string]any{"path": project.Root, "trusted": project.Trusted, "scope": "imported_project", "name": project.Name})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"mode":    "go",
-		"dirs":    []map[string]any{{"path": root, "trusted": true, "scope": "workspace"}},
+		"dirs":    dirs,
 	})
 }
 
@@ -1021,13 +1012,42 @@ func (s *Server) importEnv(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) importFiles(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "import_requires_picker", "file import must be performed through the desktop picker and workspace upload API")
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var payload map[string]any
+	if err := readJSON(r, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if !boolValue(payload["confirmed"]) && !boolValue(payload["user_confirmed"]) && !boolValue(payload["trusted"]) {
+		writeError(w, http.StatusForbidden, "confirmation_required", "project import requires explicit user confirmation from the desktop picker")
+		return
+	}
+	path := firstString(payload, "path", "root", "project_path", "projectPath")
+	project, err := s.workspace.TrustProject(path, "desktop_picker")
+	if err != nil {
+		writeError(w, http.StatusForbidden, "import_denied", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "project": project})
 }
 
 func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]any
 	_ = readJSON(r, &payload)
-	root, err := workspaceRoot(payload)
+	root := firstString(payload, "path", "root", "workspace", "workspace_root", "workspaceRoot")
+	if boolValue(payload["confirmed"]) || boolValue(payload["user_confirmed"]) || boolValue(payload["trusted"]) {
+		project, err := s.workspace.TrustProject(root, "desktop_picker")
+		if err != nil {
+			writeError(w, http.StatusForbidden, "trust_project_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "project": project, "trusted": true})
+		return
+	}
+	preview, err := s.workspace.PreviewProject(root, 50)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_workspace", err.Error())
 		return
@@ -1035,7 +1055,8 @@ func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":               true,
 		"mode":                  "go",
-		"path":                  root,
+		"preview":               preview,
+		"path":                  preview.Root,
 		"trusted":               false,
 		"requires_confirmation": true,
 		"message":               "Go backend can preview this project path but does not trust it until the desktop picker confirms import.",
@@ -1065,8 +1086,49 @@ func (s *Server) projectStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "running": false, "processes": []any{}})
 }
 
+func (s *Server) workspaceProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		projects, err := s.workspace.TrustedProjects()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "trusted_projects_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":        true,
+			"mode":           "go",
+			"workspace_root": s.workspace.WorkspaceRoot(),
+			"projects":       projects,
+		})
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.importFiles(w, r)
+		return
+	}
+	methodNotAllowed(w)
+}
+
 func (s *Server) revertFile(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "history_unavailable", "file history is not configured in the Go backend")
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var payload map[string]any
+	if err := readJSON(r, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	snapshotID := firstString(payload, "snapshot_id", "snapshotId", "id")
+	if snapshotID == "" {
+		writeError(w, http.StatusBadRequest, "missing_snapshot_id", "snapshot_id is required")
+		return
+	}
+	result, err := s.workspace.RevertSnapshot(snapshotID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "revert_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "result": result})
 }
 
 func (s *Server) projectCommand(action string) http.HandlerFunc {
@@ -1201,6 +1263,7 @@ func (s *Server) permissionsMode(w http.ResponseWriter, r *http.Request) {
 	switch mode {
 	case "ask", "allow", "deny":
 		s.permissions.Mode = mode
+		s.terminal.Mode = mode
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode})
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_mode", "mode must be ask, allow, or deny")
@@ -1216,6 +1279,45 @@ func (s *Server) permissionsCheck(w http.ResponseWriter, r *http.Request) {
 			tool = v
 		}
 	}
+	if tool == "execute_command" || tool == "terminal_exec" || tool == "run_project" || tool == "compile" {
+		toolInput, _ := payload["tool_input"].(map[string]any)
+		if toolInput == nil {
+			toolInput, _ = payload["input"].(map[string]any)
+		}
+		req := TerminalCommandRequest{
+			Command: firstString(toolInput, "command"),
+			Argv:    commandArgs(toolInput["argv"]),
+			Shell:   boolValue(toolInput["shell"]),
+		}
+		normalized, err := s.terminal.Normalize(req)
+		if err != nil {
+			decision := PermissionDecision{Allowed: false, Reason: err.Error(), RiskLevel: RiskCritical, RequiresConfirmation: true}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success":               true,
+				"allowed":               false,
+				"auto_approved":         false,
+				"requires_confirmation": decision.RequiresConfirmation,
+				"mode":                  s.permissions.Mode,
+				"tool_name":             tool,
+				"risk_level":            decision.RiskLevel,
+				"reason":                decision.Reason,
+			})
+			return
+		}
+		decision := s.terminal.Check(normalized)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":               true,
+			"allowed":               decision.Allowed,
+			"auto_approved":         decision.Allowed,
+			"requires_confirmation": decision.RequiresConfirmation,
+			"mode":                  s.permissions.Mode,
+			"tool_name":             tool,
+			"risk_level":            decision.RiskLevel,
+			"reason":                decision.Reason,
+			"permission_id":         decision.PermissionID,
+		})
+		return
+	}
 	risk := classifyTool(tool)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":               true,
@@ -1230,63 +1332,35 @@ func (s *Server) permissionsCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fileTree(w http.ResponseWriter, r *http.Request) {
-	root, rel, err := workspaceAndPath(r)
+	root, rel, err := workspaceRequestRootPath(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_path", err.Error())
 		return
 	}
-	target, err := safeJoin(root, rel)
+	depth := intFromString(r.URL.Query().Get("depth"))
+	if depth == 0 {
+		depth = 1
+	}
+	entries, err := s.workspace.FileTree(root, rel, depth)
 	if err != nil {
-		writeError(w, http.StatusForbidden, "outside_workspace", err.Error())
+		writeError(w, http.StatusForbidden, "workspace_denied", err.Error())
 		return
 	}
-	entries, err := os.ReadDir(target)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "read_dir_failed", err.Error())
-		return
-	}
-	type entry struct {
-		Name  string `json:"name"`
-		Path  string `json:"path"`
-		IsDir bool   `json:"is_dir"`
-		Size  int64  `json:"size,omitempty"`
-	}
-	items := make([]entry, 0, len(entries))
-	for _, e := range entries {
-		info, _ := e.Info()
-		size := int64(0)
-		if info != nil {
-			size = info.Size()
-		}
-		childRel, _ := filepath.Rel(root, filepath.Join(target, e.Name()))
-		items = append(items, entry{Name: e.Name(), Path: filepath.ToSlash(childRel), IsDir: e.IsDir(), Size: size})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].IsDir != items[j].IsDir {
-			return items[i].IsDir
-		}
-		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"root": root, "path": filepath.ToSlash(rel), "entries": items})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "root": root, "path": filepath.ToSlash(rel), "entries": entries})
 }
 
 func (s *Server) readFile(w http.ResponseWriter, r *http.Request) {
-	root, rel, err := workspaceAndPath(r)
+	root, rel, err := workspaceRequestRootPath(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_path", err.Error())
 		return
 	}
-	target, err := safeJoin(root, rel)
+	result, err := s.workspace.ReadFile(root, rel)
 	if err != nil {
-		writeError(w, http.StatusForbidden, "outside_workspace", err.Error())
+		writeError(w, http.StatusForbidden, "read_denied", err.Error())
 		return
 	}
-	b, err := os.ReadFile(target)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "read_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"path": filepath.ToSlash(rel), "content": string(b)})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "path": result.Path, "content": result.Content, "size": result.Size, "modified_at": result.ModifiedAt})
 }
 
 func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
@@ -1299,27 +1373,15 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
-	root, err := workspaceRoot(payload)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_workspace", err.Error())
-		return
-	}
+	root := firstString(payload, "workspace", "workspace_root", "workspaceRoot", "root")
 	rel := firstString(payload, "path", "file_path", "filePath")
-	target, err := safeJoin(root, rel)
-	if err != nil {
-		writeError(w, http.StatusForbidden, "outside_workspace", err.Error())
-		return
-	}
 	content := firstString(payload, "content")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, "mkdir_failed", err.Error())
+	result, err := s.workspace.WriteFile(root, rel, content, boolValue(payload["is_dir"]) || boolValue(payload["isDir"]))
+	if err != nil {
+		writeError(w, http.StatusForbidden, "write_denied", err.Error())
 		return
 	}
-	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
-		writeError(w, http.StatusInternalServerError, "write_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": filepath.ToSlash(rel)})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "ok": true, "mode": "go", "result": result, "path": result.Path, "snapshot_id": result.SnapshotID})
 }
 
 func (s *Server) uploadDeviceFiles(w http.ResponseWriter, r *http.Request) {
@@ -1331,17 +1393,16 @@ func (s *Server) uploadDeviceFiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_multipart", err.Error())
 		return
 	}
-	rootRaw := r.FormValue("workspace")
-	if rootRaw == "" {
-		rootRaw = r.FormValue("workspace_root")
-	}
-	root, err := normalizeRoot(rootRaw)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_workspace", err.Error())
-		return
-	}
-	count := 0
 	pathOverrides := r.MultipartForm.Value["paths"]
+	root := r.FormValue("workspace")
+	if root == "" {
+		root = r.FormValue("workspace_root")
+	}
+	type pendingUpload struct {
+		header *multipart.FileHeader
+		meta   UploadMetadata
+	}
+	pending := []pendingUpload{}
 	fileIndex := 0
 	for _, headers := range r.MultipartForm.File {
 		for _, header := range headers {
@@ -1349,41 +1410,52 @@ func (s *Server) uploadDeviceFiles(w http.ResponseWriter, r *http.Request) {
 			if fileIndex < len(pathOverrides) && pathOverrides[fileIndex] != "" {
 				rel = pathOverrides[fileIndex]
 			}
-			if err := s.saveUploadedFile(root, header, rel); err != nil {
-				writeError(w, http.StatusForbidden, "upload_failed", err.Error())
-				return
-			}
+			pending = append(pending, pendingUpload{
+				header: header,
+				meta:   s.workspace.BuildUploadMetadata(header.Filename, rel, header.Size, nil),
+			})
 			fileIndex++
-			count++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "uploaded": count})
-}
-
-func (s *Server) saveUploadedFile(root string, header *multipart.FileHeader, relativeName string) error {
-	src, err := header.Open()
+	metas := make([]UploadMetadata, 0, len(pending))
+	for _, item := range pending {
+		metas = append(metas, item.meta)
+	}
+	prepared, err := s.workspace.PrepareUploadEntries(root, metas)
 	if err != nil {
-		return err
+		writeError(w, http.StatusForbidden, "upload_denied", err.Error())
+		return
 	}
-	defer src.Close()
-	name := filepath.Clean(filepath.FromSlash(relativeName))
-	if filepath.IsAbs(name) {
-		name = filepath.Base(name)
+	for i, upload := range prepared {
+		src, err := pending[i].header.Open()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "upload_open_failed", err.Error())
+			return
+		}
+		if err := os.MkdirAll(filepath.Dir(upload.Target), 0o755); err != nil {
+			_ = src.Close()
+			writeError(w, http.StatusInternalServerError, "upload_mkdir_failed", err.Error())
+			return
+		}
+		dst, err := os.OpenFile(upload.Target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			_ = src.Close()
+			writeError(w, http.StatusInternalServerError, "upload_create_failed", err.Error())
+			return
+		}
+		_, copyErr := io.Copy(dst, src)
+		closeErr := dst.Close()
+		_ = src.Close()
+		if copyErr != nil {
+			writeError(w, http.StatusInternalServerError, "upload_write_failed", copyErr.Error())
+			return
+		}
+		if closeErr != nil {
+			writeError(w, http.StatusInternalServerError, "upload_close_failed", closeErr.Error())
+			return
+		}
 	}
-	target, err := safeJoin(root, name)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	dst, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
-	_, err = io.Copy(dst, src)
-	return err
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "ok": true, "mode": "go", "uploaded": len(prepared), "files": prepared})
 }
 
 func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
@@ -1396,70 +1468,54 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
-	argv := commandArgs(payload["command"])
-	if len(argv) == 0 {
-		argv = commandArgs(payload["argv"])
+	root := firstString(payload, "workspace", "workspace_root", "workspaceRoot", "root")
+	cwdRel := firstString(payload, "cwd", "working_dir", "workingDir")
+	decision, err := s.workspace.AuthorizePath("execute_command", root, cwdRel, false)
+	if err != nil {
+		reqArgv := commandArgs(payload["argv"])
+		if len(reqArgv) == 0 {
+			reqArgv = commandArgs(payload["command"])
+		}
+		perm := PermissionDecision{Allowed: false, Reason: "working_dir denied: " + err.Error(), RiskLevel: RiskHigh, RequiresConfirmation: true}
+		event := s.terminal.appendAudit("terminal_exec", perm, TerminalAuditEvent{
+			Allowed:    false,
+			RiskLevel:  perm.RiskLevel,
+			Reason:     perm.Reason,
+			Command:    reqArgv,
+			WorkingDir: cwdRel,
+			Error:      err.Error(),
+		})
+		perm.AuditID = event.AuditID
+		writeJSON(w, http.StatusForbidden, TerminalExecutionResult{
+			Success:    false,
+			Executed:   false,
+			Decision:   perm,
+			Command:    reqArgv,
+			RiskLevel:  perm.RiskLevel,
+			WorkingDir: cwdRel,
+			ExitCode:   -1,
+			Error:      err.Error(),
+			AuditID:    event.AuditID,
+		})
+		return
 	}
-	if len(argv) == 0 {
+	req := TerminalCommandRequest{
+		Command:    firstString(payload, "command"),
+		Argv:       commandArgs(payload["argv"]),
+		WorkingDir: decision.Target,
+		Shell:      boolValue(payload["shell"]),
+		TimeoutMs:  intValue(payload["timeout_ms"]),
+	}
+	if req.Command == "" && len(req.Argv) == 0 {
 		writeError(w, http.StatusBadRequest, "missing_command", "command or argv is required")
 		return
 	}
-	risk := classifyCommand(strings.Join(argv, " "))
-	if reason := dangerousCommand(argv); reason != "" {
-		s.audit("terminal_exec", map[string]any{"allowed": false, "risk_level": risk, "command": argv, "reason": reason})
-		writeError(w, http.StatusForbidden, "dangerous_command", reason)
-		return
+	result := s.terminal.Execute(r.Context(), req)
+	status := http.StatusOK
+	if !result.Executed && !result.Decision.Allowed {
+		status = http.StatusForbidden
 	}
-	if risk == "high" || risk == "critical" {
-		s.audit("terminal_exec", map[string]any{"allowed": false, "risk_level": risk, "command": argv, "reason": "permission_required"})
-		writeError(w, http.StatusForbidden, "permission_required", "high risk commands require explicit permission")
-		return
-	}
-	root, err := workspaceRoot(payload)
-	if err != nil {
-		s.audit("terminal_exec", map[string]any{"allowed": false, "risk_level": risk, "command": argv, "reason": err.Error()})
-		writeError(w, http.StatusBadRequest, "bad_workspace", err.Error())
-		return
-	}
-	cwd := firstString(payload, "cwd")
-	if cwd == "" {
-		cwd = root
-	}
-	cwd, err = safeJoin(root, cwd)
-	if err != nil {
-		s.audit("terminal_exec", map[string]any{"allowed": false, "risk_level": risk, "command": argv, "working_dir": cwd, "reason": err.Error()})
-		writeError(w, http.StatusForbidden, "outside_workspace", err.Error())
-		return
-	}
-	timeout := 30 * time.Second
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Dir = cwd
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	exitCode := 0
-	if err != nil {
-		exitCode = 1
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			exitCode = ee.ExitCode()
-		}
-	}
-	timedOut := ctx.Err() == context.DeadlineExceeded
-	s.audit("terminal_exec", map[string]any{"allowed": true, "risk_level": risk, "command": argv, "working_dir": cwd, "exit_code": exitCode, "timeout": timedOut})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":    err == nil && !timedOut,
-		"ok":         err == nil && !timedOut,
-		"exit_code":  exitCode,
-		"stdout":     stdout.String(),
-		"stderr":     stderr.String(),
-		"shell":      false,
-		"risk_level": risk,
-		"timeout":    timedOut,
-	})
+	writeJSON(w, status, result)
 }
 
 func (s *Server) proxyFallback(w http.ResponseWriter, r *http.Request) {
@@ -1614,46 +1670,11 @@ func (s *Server) dataflowStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) kbAdd(w http.ResponseWriter, r *http.Request) {
-	var payload map[string]any
-	_ = readJSON(r, &payload)
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	text := firstString(payload, "text", "content", "document")
-	if strings.TrimSpace(text) == "" {
-		writeError(w, http.StatusBadRequest, "missing_text", "text is required")
-		return
-	}
-	item := map[string]any{
-		"id":         "kb-" + time.Now().UTC().Format("20060102150405.000000000"),
-		"text":       text,
-		"created_at": time.Now().UTC().Format(time.RFC3339),
-	}
-	items, _ := s.loadCollection("knowledge_base")
-	items = append(items, item)
-	if err := s.saveCollection("knowledge_base", items); err != nil {
-		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "item": item})
+	s.knowledge.handleAddText(w, r)
 }
 
 func (s *Server) kbSearch(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
-	if query == "" {
-		var payload map[string]any
-		_ = readJSON(r, &payload)
-		query = firstString(payload, "q", "query", "text")
-	}
-	items, _ := s.loadCollection("knowledge_base")
-	results := []map[string]any{}
-	for _, item := range items {
-		text := strings.ToLower(firstString(item, "text", "content"))
-		if query == "" || strings.Contains(text, strings.ToLower(query)) {
-			results = append(results, item)
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "query": query, "results": results})
+	s.knowledge.handleSearch(w, r)
 }
 
 func (s *Server) privacySettings(w http.ResponseWriter, r *http.Request) {
@@ -1838,6 +1859,25 @@ func workspaceAndPath(r *http.Request) (string, string, error) {
 		return "", "", err
 	}
 	return root, firstString(payload, "path", "file_path", "filePath"), nil
+}
+
+func workspaceRequestRootPath(r *http.Request) (string, string, error) {
+	if r.Method == http.MethodGet {
+		root := r.URL.Query().Get("workspace")
+		if root == "" {
+			root = r.URL.Query().Get("workspace_root")
+		}
+		if root == "" {
+			root = r.URL.Query().Get("root")
+		}
+		return root, r.URL.Query().Get("path"), nil
+	}
+	var payload map[string]any
+	if err := readJSON(r, &payload); err != nil {
+		return "", "", err
+	}
+	return firstString(payload, "workspace", "workspace_root", "workspaceRoot", "root"),
+		firstString(payload, "path", "file_path", "filePath"), nil
 }
 
 func workspaceRoot(payload map[string]any) (string, error) {
@@ -2093,6 +2133,10 @@ func intValue(value any) int {
 		}
 	}
 	return 0
+}
+
+func intFromString(value string) int {
+	return intValue(strings.TrimSpace(value))
 }
 
 func maskAPIKey(key string) string {
