@@ -152,7 +152,7 @@ class RegexBasedStrategy(ThinkingFilterStrategy):
 class OllamaConfig:
     """Ollama 配置"""
     base_url: str = "http://localhost:11434"
-    model: str = "qwen3.5:4b"
+    model: str = "llama3.2:3b"
     temperature: float = 0.7
     max_tokens: int = 4096
     top_p: float = 0.9
@@ -633,7 +633,7 @@ def get_ollama_adapter(config: OllamaConfig = None) -> OllamaAdapter:
     return _ollama_instance
 
 
-def load_ollama_model(model_name: str = "qwen3.5:4b") -> Tuple[OllamaModel, OllamaTokenizer]:
+def load_ollama_model(model_name: str = "llama3.2:3b") -> Tuple[OllamaModel, OllamaTokenizer]:
     """
     加载 Ollama 模型（兼容原 load_model 接口）
     
@@ -734,7 +734,7 @@ if __name__ == '__main__':
         for model in adapter.list_models():
             print(f"  - {model.get('name')} ({model.get('size', 'unknown')})")
         
-        print(f"\n模型 qwen3.5:4b 可用: {adapter.is_model_available('qwen3.5:4b')}")
+        print(f"\n模型 llama3.2:3b 可用: {adapter.is_model_available('llama3.2:3b')}")
         
         print("\n测试对话...")
         response = chat_with_ollama(

@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 """Generate the Go-side legacy route parity contract.
 
-This is intentionally generated from the restored legacy monolith. It does not
-claim behavior parity by itself; it creates a compile-time Go catalog that lets
-tests and reviewers see every legacy HTTP surface before the legacy monolith can be
-physically deleted.
+This script is kept for auditors that still have a private copy of the removed
+legacy monolith. The checked-in generated Go catalog is the source of truth in
+the public tree after physical deletion of that monolith.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ROOT_DIR = os.path.abspath(os.path.join(APP_DIR, "..", ".."))
 LEGACY_MONOLITH_FILE = os.path.join(
     APP_DIR,
-    os.environ.get("KAGUYA_LEGACY_MONOLITH", "qwen" + "3_web.py"),
+    os.environ.get("KAGUYA_LEGACY_MONOLITH", "legacy_monolith.py"),
 )
 GO_SERVER = os.path.join(ROOT_DIR, "resources", "go-backend", "server.go")
 OUT_FILE = os.path.join(ROOT_DIR, "resources", "go-backend", "route_contract_generated.go")

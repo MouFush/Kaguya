@@ -986,7 +986,7 @@ class AcpAgent:
 
     def _get_available_models(self) -> List[SessionModel]:
         return [
-            SessionModel(id="qwen3", name="Qwen3", description="Qwen3 default"),
+            SessionModel(id="local-ollama", name="Local Ollama", description="Local Ollama default"),
             SessionModel(id="deepseek", name="DeepSeek", description="DeepSeek V3/R1"),
             SessionModel(id="ollama", name="Ollama", description="Local Ollama"),
         ]

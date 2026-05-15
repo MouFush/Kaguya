@@ -1,55 +1,50 @@
 # KaguyaIDE 3.1.0 Audit Notes
 
-This file records observed integration facts from the current desktop package source. It is not a security guarantee.
+This file records the current executable facts after the Go backend migration.
 
 ## Entrypoints
 
 - Electron entry: `resources/app.asar.src/electron/main.js`
 - Electron preload: `resources/app.asar.src/electron/preload.js`
-- Packaged Electron archive used by the app: `resources/app.asar`
-- Python backend entry used by Electron: `resources/python-app/qwen3_web.py`
-- Alternate bootstrap entry: `resources/python-app/start_server.py`
-- Bootstrap module registered by `qwen3_web.py`: `resources/python-app/kaguya_bootstrap.py`
+- Primary backend entry: `resources/go-backend/kaguya-go-backend.exe`
+- Go source entry: `resources/go-backend/main.go`
+- Optional Python worker entry: `resources/python-app/start_server.py --backend bootstrap`
+- Static UI served by Go: `resources/go-backend/static/index.html`
 
 ## Startup And Binding
 
-- Electron launches Python with `KAGUYA_ELECTRON=1`, `KAGUYA_DESKTOP_MODE=1`, `KAGUYA_DISABLE_NGROK=1`, and `KAGUYA_RUNTIME_DIR=<Electron userData>/kaguya/python-app`.
-- Electron loads the web UI from `http://127.0.0.1:<port>/`.
-- `qwen3_web.py --localhost-only` binds Flask to `127.0.0.1`; the generic CLI default still accepts `--host` for non-desktop usage.
-- Desktop mode must not be treated as unlimited file-system permission.
+- Electron starts the Go backend on `127.0.0.1:<port>`.
+- Python is not part of the default desktop startup path.
+- Optional Python worker mode is opt-in through `KAGUYA_ENABLE_PYTHON_WORKER=1`.
+- Mini server is a diagnostic fallback only and must report `mode: "mini"` plus `backend_available: false`.
 
 ## Runtime Data
 
-Python runtime/user data should live under `KAGUYA_RUNTIME_DIR` or the platform default user-data directory, not under `resources/python-app`.
+Runtime/user data must live under Electron `userData/kaguya` or a caller-provided `--runtime-dir`, not under source directories.
 
-Runtime paths include:
+Excluded runtime paths include:
 
+- `__pycache__/`
+- `.pytest_cache/`
+- `smoke-*.log`
+- `ide_accounts.json`
+- `ide_workspaces/`
+- `audit_logs/`
 - `uploads/`
-- `audio_cache/`
 - `code_executions/`
 - `rag_data/`
-- `data/`
-- `project_center/`
-- `external_api/`
-- `memory_system/`
-- `multimodal/`
-- `finetune/`
-- `.kaguya/`
-- `.kaguya_file_history/`
-- `audit_logs/`
+- `audio_cache/`
 - `security_data/`
-- `ide_accounts.json`
-
-These paths are excluded by `.gitignore`, `.packageignore`, and `.asarignore`.
+- `data/`
 
 ## Permission Entry Points
 
-- Flask permission status/check routes are registered through `kaguya_bootstrap.py`.
-- API-side permission decisions are centralized through `resources/python-app/kaguya_api_permissions.py`.
-- Terminal execution is centralized through `resources/python-app/kaguya_terminal_service.py`.
-- Workspace path authorization is centralized through `resources/python-app/kaguya_workspace_security.py`.
+- Go permission and terminal policy: `resources/go-backend/terminal_permission_service.go`
+- Go workspace authorization: `resources/go-backend/workspace_project_service.go`
+- Go security/privacy status: `resources/go-backend/security_privacy_service.go`
+- Go auth/account compatibility: `resources/go-backend/auth_account_service.go`
 
-## File/Command Sensitive APIs
+## Sensitive APIs
 
 File/project APIs:
 
@@ -67,16 +62,8 @@ Command/project execution APIs:
 - `POST /agent/terminal/exec`
 - `POST /agent/run-project`
 - `POST /agent/compile`
-
-External/network/model APIs:
-
-- `POST /api/chat`
-- `POST /chat`
-- `POST /chat/completions`
-- `POST /deepseek/chat`
-- `POST /deepseek/test`
-- `GET|POST /api/model-status`
-- `GET|POST /api/config`
+- `POST /tool/execute`
+- `POST /code/execute`
 
 Device API-key APIs:
 
@@ -86,6 +73,10 @@ Device API-key APIs:
 - `GET /api/account/saved-config`
 - `GET /api/account/auto-fill`
 
-## Electron IPC Surface
+## Current Security Model
 
-The preload exposes only `kaguyaDesktop` with app info, device vault, and file/folder dialogs. Generic file-system and shell IPC handlers in `main.js` return disabled errors; the renderer should use Flask APIs for workspace-scoped actions.
+- Desktop mode does not bypass workspace authorization.
+- Default file access is limited to the Go-managed workspace root.
+- Explicit trusted project imports are stored and checked with real path plus common path rules.
+- Terminal execution uses argv execution, shell mode is denied by default, and denied commands are audited.
+- Electron preload exposes a narrow `kaguyaDesktop` API; generic shell and file-system IPC is disabled.

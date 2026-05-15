@@ -310,19 +310,30 @@ function findFreePort() {
 }
 
 function getResourcePath() {
-    if (app.isPackaged) {
-        const packagedPath = path.join(process.resourcesPath, 'python-app');
+    const hasPythonApp = (dir) => {
+        try {
+            return fs.existsSync(dir) && fs.statSync(dir).isDirectory();
+        } catch (e) {
+            return false;
+        }
+    };
+    const record = (dir) => {
         updateStartupDiagnostics({
             appIsPackaged: app.isPackaged,
             resourcesPath: process.resourcesPath,
-            resourcePath: packagedPath,
-            qwen3Exists: fs.existsSync(path.join(packagedPath, 'qwen3_web.py')),
+            resourcePath: dir,
+            pythonAppExists: hasPythonApp(dir),
+            pythonWorkerScriptExists: fs.existsSync(path.join(dir, 'start_server.py')),
         });
+        return dir;
+    };
+    if (app.isPackaged) {
+        const packagedPath = path.join(process.resourcesPath, 'python-app');
         console.log('[Startup] app.isPackaged:', app.isPackaged);
         console.log('[Startup] process.resourcesPath:', process.resourcesPath);
         console.log('[Startup] resourcePath:', packagedPath);
-        console.log('[Startup] qwen3_web.py exists:', fs.existsSync(path.join(packagedPath, 'qwen3_web.py')));
-        return packagedPath;
+        console.log('[Startup] python-app exists:', hasPythonApp(packagedPath));
+        return record(packagedPath);
     }
     
     const homeDir = process.env.USERPROFILE || process.env.HOME || os.homedir();
@@ -330,26 +341,23 @@ function getResourcePath() {
     
     if (sourceDir) {
         const sourcePath = path.resolve(sourceDir);
-        if (fs.existsSync(path.join(sourcePath, 'qwen3_web.py'))) {
+        if (hasPythonApp(sourcePath)) {
             console.log('[Main] Using KAGUYA_SOURCE_DIR:', sourcePath);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: sourcePath, qwen3Exists: true });
-            return sourcePath;
+            return record(sourcePath);
         }
     }
     
     if (homeDir) {
         const desktopAppPath = path.join(homeDir, '.conda', 'kaguya-desktop', 'dist', 'KaguyaIDE-3.1.0-full', 'app');
-        if (fs.existsSync(path.join(desktopAppPath, 'qwen3_web.py'))) {
+        if (hasPythonApp(desktopAppPath)) {
             console.log('[Main] Using USERPROFILE path:', desktopAppPath);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: desktopAppPath, qwen3Exists: true });
-            return desktopAppPath;
+            return record(desktopAppPath);
         }
         
         const condaPath = path.join(homeDir, '.conda');
-        if (fs.existsSync(path.join(condaPath, 'qwen3_web.py'))) {
+        if (hasPythonApp(condaPath)) {
             console.log('[Main] Using conda path:', condaPath);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: condaPath, qwen3Exists: true });
-            return condaPath;
+            return record(condaPath);
         }
     }
     
@@ -358,10 +366,9 @@ function getResourcePath() {
         if (appPath) {
             const parentDir = path.dirname(path.dirname(appPath));
             const appDir = path.join(parentDir, 'app');
-            if (fs.existsSync(path.join(appDir, 'qwen3_web.py'))) {
+            if (hasPythonApp(appDir)) {
                 console.log('[Main] Using app path:', appDir);
-                updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: appDir, qwen3Exists: true });
-                return appDir;
+                return record(appDir);
             }
         }
     } catch(e) {}
@@ -370,17 +377,15 @@ function getResourcePath() {
         const electronDir = __dirname;
         const parentDir = path.dirname(electronDir);
         const appDir = path.join(parentDir, 'app');
-        if (fs.existsSync(path.join(appDir, 'qwen3_web.py'))) {
+        if (hasPythonApp(appDir)) {
             console.log('[Main] Using __dirname path:', appDir);
-            updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: appDir, qwen3Exists: true });
-            return appDir;
+            return record(appDir);
         }
     } catch(e) {}
     
     console.log('[Main] WARNING: Could not find app directory, falling back to homeDir/.conda');
     const fallbackPath = path.join(homeDir || os.homedir(), '.conda');
-    updateStartupDiagnostics({ appIsPackaged: app.isPackaged, resourcesPath: process.resourcesPath, resourcePath: fallbackPath, qwen3Exists: false });
-    return fallbackPath;
+    return record(fallbackPath);
 }
 
 function getPythonPath() {
@@ -536,16 +541,15 @@ function waitForBackend(port, route = '/') {
 async function startGoServer(port) {
     const backend = findGoBackendExecutable();
     const resourcePath = getResourcePath();
-    const pythonPath = getPythonPath();
-    const qwenPath = path.join(resourcePath, 'qwen3_web.py');
+    const workerScript = path.join(resourcePath, 'start_server.py');
     const runtimeDir = path.join(app.getPath('userData'), 'kaguya', 'go-backend');
     updateStartupDiagnostics({
         backendModeAttempted: 'go',
         goBackendDir: getGoBackendDir(),
         goBackendFound: !!backend,
         goRuntimeDir: runtimeDir,
-        goPythonScript: qwenPath,
-        goPythonScriptExists: fs.existsSync(qwenPath),
+        pythonWorkerScript: workerScript,
+        pythonWorkerScriptExists: fs.existsSync(workerScript),
     });
     if (!backend) {
         throw new Error(`Go backend executable not found. Expected ${path.join(getGoBackendDir(), process.platform === 'win32' ? 'kaguya-go-backend.exe' : 'kaguya-go-backend')} or a Go toolchain for go run.`);
@@ -559,7 +563,11 @@ async function startGoServer(port) {
         '--static-dir', path.join(getGoBackendDir(), 'static'),
     ]);
     if (process.env.KAGUYA_ENABLE_PYTHON_WORKER === '1') {
-        args.push('--python-script', qwenPath, '--python', pythonPath);
+        const pythonPath = getPythonPath();
+        if (!fs.existsSync(workerScript)) {
+            throw new Error(`Python worker requested but start_server.py was not found at ${workerScript}`);
+        }
+        args.push('--python-script', workerScript, '--python', pythonPath);
     }
     console.log('[Main] Starting Go backend:', backend.command, args.join(' '));
     updateStartupDiagnostics({
@@ -622,15 +630,8 @@ async function startBackendServer(port) {
         await startGoServer(port);
         return { port, mode: 'go' };
     } catch (goErr) {
-        updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'disabled' });
-        if (process.env.KAGUYA_ALLOW_LEGACY_QWEN3 === '1') {
-            console.warn('[Main] Go backend unavailable, legacy qwen3 fallback explicitly enabled:', goErr.message);
-            updateStartupDiagnostics({ backendFallback: 'python' });
-            await startPythonServer(port);
-            updateStartupDiagnostics({ backendMode: 'python' });
-            return { port, mode: 'python' };
-        }
-        throw new Error(`Go backend unavailable and legacy qwen3 fallback is disabled. ${goErr.message}`);
+        updateStartupDiagnostics({ goBackendError: goErr.message, backendFallback: 'mini' });
+        throw new Error(`Go backend unavailable. ${goErr.message}`);
     }
 }
 
@@ -639,7 +640,6 @@ async function startPythonServer(port) {
     const launcherScript = path.join(tmpDir, 'kaguya_launcher.py');
     
     const resourcePath = getResourcePath();
-    const qwenPath = path.join(resourcePath, 'qwen3_web.py');
     const startServerPath = path.join(resourcePath, 'start_server.py');
     const pythonPath = getPythonPath();
     updateStartupDiagnostics({
@@ -650,9 +650,9 @@ async function startPythonServer(port) {
         pythonPath,
         launcherScript,
         flaskPort: port,
-        attemptedScript: qwenPath,
-        qwen3Path: qwenPath,
-        qwen3Exists: fs.existsSync(qwenPath),
+        attemptedScript: startServerPath,
+        pythonWorkerScript: startServerPath,
+        pythonWorkerScriptExists: fs.existsSync(startServerPath),
         startServerExists: fs.existsSync(startServerPath),
     });
     console.log('[Startup] app.isPackaged:', app.isPackaged);
@@ -661,29 +661,19 @@ async function startPythonServer(port) {
     console.log('[Startup] Python path:', pythonPath);
     console.log('[Startup] launcherScript:', launcherScript);
     console.log('[Startup] Flask port:', port);
-    console.log('[Startup] qwen3_web.py exists:', fs.existsSync(qwenPath));
+    console.log('[Startup] start_server.py exists:', fs.existsSync(startServerPath));
 
-    if (!fs.existsSync(qwenPath)) {
-        throw new Error(`qwen3_web.py not found at ${qwenPath}. The packaged resources/python-app directory is missing or corrupt.`);
+    if (!fs.existsSync(startServerPath)) {
+        throw new Error(`start_server.py not found at ${startServerPath}. The packaged resources/python-app directory is missing or corrupt.`);
     }
     
     const launcherContent = `
 import os, sys
 
 app_dir = r'${resourcePath.replace(/\\/g, '\\\\')}'
-if not os.path.exists(os.path.join(app_dir, 'qwen3_web.py')):
-    import pathlib
-    home = str(pathlib.Path.home())
-    for candidate in [
-        os.path.join(home, '.conda', 'kaguya-desktop', 'dist', 'KaguyaIDE-3.1.0-full', 'app'),
-        os.path.join(home, '.conda'),
-    ]:
-        if os.path.exists(os.path.join(candidate, 'qwen3_web.py')):
-            app_dir = candidate
-            break
-
-if not os.path.exists(os.path.join(app_dir, 'qwen3_web.py')):
-    print('[LAUNCHER ERROR] qwen3_web.py not found in:', app_dir, file=sys.stderr)
+script = os.path.join(app_dir, 'start_server.py')
+if not os.path.exists(script):
+    print('[LAUNCHER ERROR] start_server.py not found in:', app_dir, file=sys.stderr)
     sys.exit(1)
 
 os.chdir(app_dir)
@@ -697,11 +687,11 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 os.environ['PYTHONUTF8'] = '1'
 
 print('[LAUNCHER] App dir:', app_dir)
-print('[LAUNCHER] Starting Flask on port ${port}...')
+print('[LAUNCHER] Starting Python worker on port ${port}...')
 
-sys.argv = ['qwen3_web.py', '--port', '${port}', '--localhost-only']
+sys.argv = ['start_server.py', '--port', '${port}', '--localhost-only', '--backend', 'bootstrap']
 import runpy
-runpy.run_path(os.path.join(app_dir, 'qwen3_web.py'), run_name='__main__')
+runpy.run_path(script, run_name='__main__')
 `;
     
     try {
@@ -736,7 +726,6 @@ runpy.run_path(os.path.join(app_dir, 'qwen3_web.py'), run_name='__main__')
     const env = Object.assign({}, process.env, {
         'KAGUYA_DESKTOP_MODE': '1',
         'KAGUYA_PORT': String(port),
-        'KAGUYA_PERMISSION_MODE': 'bypassPermissions',
         'KAGUYA_ELECTRON': '1',
         'KAGUYA_DISABLE_NGROK': '1',
         'KAGUYA_RUNTIME_DIR': path.join(app.getPath('userData'), 'kaguya', 'python-app'),
@@ -880,10 +869,10 @@ function startMiniServer(port) {
             resourcePath: startupDiagnostics.resourcePath || '',
             pythonAppPath: startupDiagnostics.pythonAppPath || '',
             pythonPath: startupDiagnostics.pythonPath || '',
-            attemptedScript: startupDiagnostics.attemptedScript || startupDiagnostics.qwen3Path || '',
+            attemptedScript: startupDiagnostics.attemptedScript || startupDiagnostics.pythonWorkerScript || '',
             port,
             cwd: process.cwd(),
-            qwen3Exists: startupDiagnostics.qwen3Exists || false,
+            pythonWorkerScriptExists: startupDiagnostics.pythonWorkerScriptExists || false,
             startServerExists: startupDiagnostics.startServerExists || false,
             stdoutTail: startupDiagnostics.lastPythonStdout || '',
             stderrTail: startupDiagnostics.lastPythonStderr || '',
@@ -1293,7 +1282,7 @@ function createSetupWindow() {
         pythonPath: startupDiagnostics.pythonPath || '',
         launcherScript: startupDiagnostics.launcherScript || '',
         flaskPort: setupPort,
-        qwen3Exists: startupDiagnostics.qwen3Exists || false,
+        pythonWorkerScriptExists: startupDiagnostics.pythonWorkerScriptExists || false,
         lastError: startupDiagnostics.lastError || '',
         lastPythonStderr: startupDiagnostics.lastPythonStderr || '',
     }, startupDiagnostics);
@@ -1381,7 +1370,7 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#7c5cfc,#0
 <p>To use a local AI model instead:</p>
 <ol>
 <li>Install <a href="https://ollama.com" style="color:#7c5cfc">Ollama</a></li>
-<li>Run: <code>ollama pull qwen3.5:4b</code></li>
+<li>Run: <code>ollama pull llama3.2:3b</code></li>
 <li>Install <a href="https://www.python.org/downloads/" style="color:#7c5cfc">Python 3.9+</a> with Flask</li>
 <li>Restart Kaguya IDE</li>
 </ol>

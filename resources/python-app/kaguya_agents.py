@@ -857,7 +857,7 @@ class AgentExecutor:
             return context.model
         if model and model != "inherit":
             return model
-        return context.model or "qwen3"
+        return context.model or "local-ollama"
 
     def _resolve_tools(self, agent_def: AgentDefinition, context: AgentContext) -> List[str]:
         if "*" in (agent_def.tools or []):

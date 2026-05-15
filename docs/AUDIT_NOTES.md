@@ -1,56 +1,48 @@
-﻿# KaguyaIDE 3.1.0 Audit Notes
+# Audit Notes
+
+KaguyaIDE 3.1.0 now uses the Go backend as the primary desktop backend.
 
 ## Entrypoints
 
-- Electron entry: `resources/app.asar.src/electron/main.js`.
-- Electron preload: `resources/app.asar.src/electron/preload.js`.
-- Python backend entry used by Electron: temporary `kaguya_launcher.py` created by `startPythonServer()`, which runs `resources/python-app/legacy Python monolith`.
-- Python CLI entry: `resources/python-app/start_server.py`.
-- Flask app: `legacy Python monolith`, with bootstrap routes registered from `kaguya_bootstrap.py`.
+- Electron: `resources/app.asar.src/electron/main.js`
+- Preload: `resources/app.asar.src/electron/preload.js`
+- Backend binary: `resources/go-backend/kaguya-go-backend.exe`
+- Backend source: `resources/go-backend/main.go`
+- Optional Python worker: `resources/python-app/start_server.py --backend bootstrap`
 
 ## Binding
 
-- Desktop launcher binds Flask to `127.0.0.1` on the selected local port.
-- `legacy Python monolith --localhost-only` binds to `127.0.0.1`; non-localhost binding is treated as remote exposure and high-risk routes require auth or are rejected.
+- Desktop HTTP binds to `127.0.0.1`.
+- The Go backend owns API routing, static assets, device vault, workspace access, terminal permission, RAG/KB storage, and account compatibility routes.
+- Python worker mode is optional and disabled by default.
 
 ## Runtime Data
 
-These are runtime/user data, not source:
+Runtime data is excluded from source and packages:
 
-- `resources/python-app/ide_accounts.json`
-- `resources/python-app/ide_workspaces/`
-- `resources/python-app/audit_logs/`
-- `resources/python-app/uploads/`
-- `resources/python-app/code_executions/`
-- `resources/python-app/rag_data/`
-- `resources/python-app/audio_cache/`
-- `resources/python-app/security_data/`
-- `resources/python-app/data/`
-- `resources/python-app/.kaguya/`
-- `__pycache__/`, `.pytest_cache/`, `smoke-*.log`
-
-## Permission Entrypoints
-
-- API permission service: `resources/python-app/kaguya_api_permissions.py`.
-- Legacy ACP permission manager: `resources/python-app/kaguya_permissions.py`.
-- Bootstrap permission endpoint: `POST /permissions/check`.
-- Workspace authorization: `resources/python-app/kaguya_workspace_security.py`.
-- Terminal execution policy: `resources/python-app/kaguya_terminal_service.py`.
+- `__pycache__/`
+- `.pytest_cache/`
+- `smoke-*.log`
+- `ide_accounts.json`
+- `ide_workspaces/`
+- `audit_logs/`
+- `uploads/`
+- `code_executions/`
+- `rag_data/`
+- `audio_cache/`
+- `security_data/`
+- `data/`
 
 ## High-Risk APIs
 
-- File tree/read/write: `POST /agent/file-tree`, `POST /agent/read-file`, `POST /agent/write-file`, `POST /agent/file-write`.
-- File mutation/revert/import/upload: `POST /agent/revert-file`, `POST /agent/import-files`, `POST /agent/upload-device-files`.
-- Project trust/run: `POST /agent/open-project`, `POST /agent/run-project`, `POST /agent/stop-project`.
-- Code/command execution: `POST /agent/terminal/exec`, `POST /agent/compile`, `POST /tool/execute`, `POST /code/execute`.
-- External/network actions: `POST /agent/api-test`, `/deepseek/*`, `/external/*`, web fetch/search tools.
+- File APIs: `/agent/file-tree`, `/agent/read-file`, `/agent/write-file`, `/agent/file-write`, `/agent/revert-file`, `/agent/import-files`, `/agent/upload-device-files`
+- Execution APIs: `/agent/terminal/exec`, `/agent/run-project`, `/agent/compile`, `/tool/execute`, `/code/execute`
+- External provider APIs: `/api/chat`, `/chat`, `/chat/completions`, `/external/*`, `/deepseek/*`
+- Device vault APIs: `/api/device/info`, `/api/device/bind`, `/api/device/unbind`, `/api/account/saved-config`, `/api/account/auto-fill`
 
-## Current Security Model
+## Security Model
 
-- Desktop mode no longer bypasses workspace authorization.
-- Default file access is workspace-only.
-- Explicit trusted imports are stored in `imported_paths` and validated with `realpath + commonpath`.
-- `/agent/open-project` previews external folders but does not trust them unless the request includes explicit confirmation.
-- Terminal execution uses `shell=False` by default and is denied unless the command is classified as low risk.
-- Remote high-risk POST requests are rejected when auth is disabled.
-
+- Workspace paths are authorized by `workspace_project_service.go`.
+- Terminal commands are classified and executed by `terminal_permission_service.go`.
+- Device API keys are encrypted in the local vault and are never returned in full to renderer/API responses.
+- Electron IPC is documented in `IPC_CONTRACT.md` and does not expose arbitrary shell or file-system access.

@@ -4,7 +4,7 @@
 
 The route catalog proves HTTP surface coverage. This symbol catalog tracks the
 remaining internal migration work: functions, classes, risk classification, and
-the invariants that must stay true when the legacy monolith is finally deleted.
+the invariants that must stay true after the legacy monolith has been deleted.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ROOT_DIR = os.path.abspath(os.path.join(APP_DIR, "..", ".."))
 LEGACY_MONOLITH_FILE = os.path.join(
     APP_DIR,
-    os.environ.get("KAGUYA_LEGACY_MONOLITH", "qwen" + "3_web.py"),
+    os.environ.get("KAGUYA_LEGACY_MONOLITH", "legacy_monolith.py"),
 )
 OUT_FILE = os.path.join(ROOT_DIR, "resources", "go-backend", "legacy_symbol_catalog_generated.go")
 

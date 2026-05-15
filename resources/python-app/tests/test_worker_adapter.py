@@ -91,7 +91,7 @@ class WorkerAdapterTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertFalse(payload["available"])
         self.assertEqual(payload["provider"], "ollama")
-        self.assertEqual(payload["model"], "qwen3.5:4b")
+        self.assertEqual(payload["model"], "llama3.2:3b")
         self.assertEqual(payload["reason"], "ollama_unavailable")
         self.assertEqual(payload["detail"], "offline")
 

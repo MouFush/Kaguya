@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Compare legacy Flask routes with Go backend handlers.
+"""Compare archived legacy route contracts with Go backend handlers.
 
 This is a migration gate, not a smoke test. Deleting the legacy monolith is
 allowed only after Go owns the same externally visible route surface or each
@@ -20,9 +20,10 @@ APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ROOT_DIR = os.path.abspath(os.path.join(APP_DIR, "..", ".."))
 LEGACY_MONOLITH_FILE = os.path.join(
     APP_DIR,
-    os.environ.get("KAGUYA_LEGACY_MONOLITH", "qwen" + "3_web.py"),
+    os.environ.get("KAGUYA_LEGACY_MONOLITH", "legacy_monolith.py"),
 )
 GO_SERVER = os.path.join(ROOT_DIR, "resources", "go-backend", "server.go")
+GO_ROUTE_CONTRACT = os.path.join(ROOT_DIR, "resources", "go-backend", "route_contract_generated.go")
 
 
 def read(path: str) -> str:
@@ -32,9 +33,16 @@ def read(path: str) -> str:
 
 def flask_routes() -> set[str]:
     if not os.path.exists(LEGACY_MONOLITH_FILE):
-        return set()
+        return archived_contract_routes()
     text = read(LEGACY_MONOLITH_FILE)
     return set(re.findall(r"@app\.route\(\s*['\"]([^'\"]+)['\"]", text))
+
+
+def archived_contract_routes() -> set[str]:
+    if not os.path.exists(GO_ROUTE_CONTRACT):
+        return set()
+    text = read(GO_ROUTE_CONTRACT)
+    return set(re.findall(r"Endpoint:\s*`([^`]+)`", text))
 
 
 def go_routes() -> set[str]:

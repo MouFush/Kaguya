@@ -1,4 +1,4 @@
-"""Small compatibility helpers extracted from qwen3_web.py.
+"""Small compatibility helpers for optional Python worker mode.
 
 This module intentionally contains pure functions only. The Go backend can own
 the process/security boundary while the legacy Python worker keeps heavier
@@ -110,7 +110,7 @@ def structured_unavailable(
     reason: str = "ollama_unavailable",
     *,
     provider: str = "ollama",
-    model: str = "qwen3.5:4b",
+    model: str = "llama3.2:3b",
     detail: str | None = None,
 ) -> dict[str, Any]:
     return {
