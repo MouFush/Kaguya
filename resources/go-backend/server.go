@@ -46,6 +46,7 @@ type Server struct {
 	terminal        *TerminalPermissionService
 	knowledge       *KnowledgeRAGService
 	authAccount     *authAccountService
+	projectExec     *ProjectExecutionService
 }
 
 type permissionState struct {
@@ -105,6 +106,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, err
 	}
 	s.knowledge = knowledge
+	s.projectExec = NewProjectExecutionService(s.workspace, s.terminal)
 	if cfg.PythonURL != "" {
 		u, err := url.Parse(cfg.PythonURL)
 		if err != nil {
@@ -992,11 +994,14 @@ func (s *Server) agentPermission(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) projectOutput(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "output": "", "running": false})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "project": s.projectExec.Output(64 * 1024)})
 }
 
 func (s *Server) projectStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "running": false, "processes": []any{}})
+	status := s.projectExec.Status()
+	status["success"] = true
+	status["mode"] = "go"
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) workspaceProjects(w http.ResponseWriter, r *http.Request) {
@@ -1046,24 +1051,31 @@ func (s *Server) revertFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) projectCommand(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		risk := classifyTool(action)
-		if s.permissions.Mode != "allow" && risk != "low" {
-			s.audit(action, map[string]any{"allowed": false, "risk_level": risk, "reason": "permission_required"})
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"success":               false,
-				"allowed":               false,
-				"requires_confirmation": true,
-				"risk_level":            risk,
-				"error":                 "permission_required",
-			})
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
 			return
 		}
-		writeError(w, http.StatusServiceUnavailable, action+"_unavailable", "project execution is delegated to the Python worker")
+		var payload map[string]any
+		if err := readJSON(r, &payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+			return
+		}
+		s.terminal.Mode = s.permissions.Mode
+		record, err := s.projectExec.Execute(r.Context(), action, payload)
+		if err != nil {
+			writeError(w, http.StatusForbidden, action+"_denied", err.Error())
+			return
+		}
+		status := http.StatusOK
+		if !record.Result.Executed && !record.Result.Decision.Allowed {
+			status = http.StatusForbidden
+		}
+		writeJSON(w, status, map[string]any{"success": record.Result.Success, "mode": "go", "project_run": record, "result": record.Result})
 	}
 }
 
 func (s *Server) projectStop(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "mode": "go", "stopped": false, "reason": "no_go_managed_process"})
+	writeJSON(w, http.StatusOK, s.projectExec.Stop())
 }
 
 func (s *Server) agentSystemInfo(w http.ResponseWriter, r *http.Request) {

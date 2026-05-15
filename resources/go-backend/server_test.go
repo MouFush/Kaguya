@@ -406,6 +406,36 @@ func TestServerAgentRuntimeBacksTasksAndAbort(t *testing.T) {
 	}
 }
 
+func TestProjectCommandUsesGoTerminalPermission(t *testing.T) {
+	s, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/agent/compile", map[string]any{
+		"workspace": s.workspace.WorkspaceRoot(),
+		"command":   []string{"go", "test", "./..."},
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected permission denial for medium-risk compile, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "Python") || strings.Contains(body, "worker") {
+		t.Fatalf("project command still reports worker fallback: %s", body)
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/permissions/mode", map[string]any{"mode": "allow"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("permission mode status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodPost, "/agent/compile", map[string]any{
+		"workspace": s.workspace.WorkspaceRoot(),
+		"command":   []string{"go", "version"},
+	})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "go version") {
+		t.Fatalf("allowed project command failed status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/agent/project-status", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "compile") {
+		t.Fatalf("project status missing run record status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestServerSecurityAndPrivacyUseSecurityPrivacyService(t *testing.T) {
 	_, h := newTestServer(t)
 	rec := requestJSON(t, h, http.MethodGet, "/security/status", nil)
