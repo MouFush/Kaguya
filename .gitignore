@@ -22,4 +22,7 @@ resources/python-app/memory_store/
 resources/python-app/multimodal/
 resources/python-app/finetune/
 
+# Generated icon scratch files are not source assets.
+resources/app.asar.src/assets/temp_*.ico
+
 # Keep packaged desktop archive in this release-package repository.

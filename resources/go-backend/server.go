@@ -388,7 +388,6 @@ func (s *Server) imageAssetCandidates(name string) []imageAssetCandidate {
 	case "favicon.ico":
 		candidates = append(candidates,
 			imageAssetCandidate{root: electronAssets, name: "kaguya.ico"},
-			imageAssetCandidate{root: electronAssets, name: "temp_32.ico"},
 		)
 	}
 
