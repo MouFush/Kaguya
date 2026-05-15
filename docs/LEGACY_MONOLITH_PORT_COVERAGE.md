@@ -1,8 +1,8 @@
-# Legacy Monolith Port Coverage
+﻿# Legacy Monolith Port Coverage
 
 Updated: 2026-05-15
 
-The former Python HTTP monolith has been physically removed from this repository. Its externally visible route surface is preserved as a generated Go contract in `resources/go-backend/route_contract_generated.go`.
+The former Python HTTP monolith has been physically removed from this repository. Its externally visible route surface is preserved as a generated Go contract in `desktop/resources/go-backend/route_contract_generated.go`.
 
 ## Current Gate Data
 
@@ -27,11 +27,11 @@ Examples of remaining compatibility areas:
 ## Validation Commands
 
 ```powershell
-python resources\python-app\scripts\go_route_coverage.py --fail-under 100
+python desktop\resources\python-app\scripts\go_route_coverage.py --fail-under 100
 C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\.tools\go\bin\go.exe test ./...
-python -m unittest discover -s resources\python-app\tests -v
-node --check resources\app.asar.src\electron\main.js
-node --check resources\app.asar.src\electron\preload.js
+python -m unittest discover -s desktop\resources\python-app\tests -v
+node --check desktop\resources\app.asar.src\electron\main.js
+node --check desktop\resources\app.asar.src\electron\preload.js
 ```
 
 ## Deletion Status
@@ -40,3 +40,4 @@ node --check resources\app.asar.src\electron\preload.js
 - Electron default backend: Go.
 - Python worker mode: optional, via `start_server.py --backend bootstrap`.
 - Route contract source: checked-in generated Go catalog.
+

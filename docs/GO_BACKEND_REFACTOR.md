@@ -1,16 +1,16 @@
-# Go Backend Refactor Notes
+﻿# Go Backend Refactor Notes
 
-The desktop backend has been moved to `resources/go-backend`. The former giant Python HTTP entry has been removed from this repository.
+The desktop backend has been moved to `desktop/resources/go-backend`. The former giant Python HTTP entry has been removed from this repository.
 
 ## Startup Model
 
-- Electron starts `resources/go-backend/kaguya-go-backend.exe`.
-- If no binary is present and `go` exists on PATH, Electron can run `go run .` from `resources/go-backend`.
+- Electron starts `desktop/resources/go-backend/kaguya-go-backend.exe`.
+- If no binary is present and `go` exists on PATH, Electron can run `go run .` from `desktop/resources/go-backend`.
 - If Go cannot start, Electron opens the diagnostic/setup flow and may start mini server mode. Mini mode is not a full backend.
-- Go serves `resources/go-backend/static/index.html` for `/`.
+- Go serves `desktop/resources/go-backend/static/index.html` for `/`.
 - Go serves assets from `--app-dir` for `/static/*`, `/assets/*`, `/header-img`, `/hero-img`, `/welcome-img`, `/background`, `/wallpaper`, `/deepseek-icon`, `/sidebar-icon`, and `/favicon.ico`.
 - Desktop chrome image routes use explicit fallback aliases when legacy icon filenames are not present in `python-app/assets`.
-- Optional Python worker mode uses `resources/python-app/start_server.py --backend bootstrap` and is enabled only by `KAGUYA_ENABLE_PYTHON_WORKER=1`.
+- Optional Python worker mode uses `desktop/resources/python-app/start_server.py --backend bootstrap` and is enabled only by `KAGUYA_ENABLE_PYTHON_WORKER=1`.
 
 ## Go-Owned APIs
 
@@ -75,7 +75,7 @@ The archived route catalog tracks 241 historical routes and the Go router covers
 ## Build
 
 ```powershell
-cd resources\go-backend
+cd desktop\resources\go-backend
 C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\.tools\go\bin\gofmt.exe -w .
 C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\.tools\go\bin\go.exe test ./...
 C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\.tools\go\bin\go.exe build -o kaguya-go-backend.exe .
@@ -85,5 +85,6 @@ C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\.tools\go\bin\go.exe bui
 
 - Former Python HTTP monolith: deleted.
 - Electron default backend: Go.
-- Route coverage gate: `python resources\python-app\scripts\go_route_coverage.py --fail-under 100`.
+- Route coverage gate: `python desktop\resources\python-app\scripts\go_route_coverage.py --fail-under 100`.
 - Remaining Python modules are compatibility helpers, optional worker modules, or tests/scripts.
+

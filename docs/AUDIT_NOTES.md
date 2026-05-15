@@ -1,24 +1,28 @@
-# Audit Notes
+﻿# KaguyaIDE 3.1.0 Audit Notes
 
-KaguyaIDE 3.1.0 now uses the Go backend as the primary desktop backend.
+This file records the current executable facts after the Go backend migration.
 
 ## Entrypoints
 
-- Electron: `resources/app.asar.src/electron/main.js`
-- Preload: `resources/app.asar.src/electron/preload.js`
-- Backend binary: `resources/go-backend/kaguya-go-backend.exe`
-- Backend source: `resources/go-backend/main.go`
-- Optional Python worker: `resources/python-app/start_server.py --backend bootstrap`
+- Electron entry: `desktop/resources/app.asar.src/electron/main.js`
+- Electron preload: `desktop/resources/app.asar.src/electron/preload.js`
+- Primary backend entry: `desktop/resources/go-backend/kaguya-go-backend.exe`
+- Go source entry: `desktop/resources/go-backend/main.go`
+- Optional Python worker entry: `desktop/resources/python-app/start_server.py --backend bootstrap`
+- Static UI served by Go: `desktop/resources/go-backend/static/index.html`
 
-## Binding
+## Startup And Binding
 
-- Desktop HTTP binds to `127.0.0.1`.
-- The Go backend owns API routing, static assets, device vault, workspace access, terminal permission, RAG/KB storage, and account compatibility routes.
-- Python worker mode is optional and disabled by default.
+- Electron starts the Go backend on `127.0.0.1:<port>`.
+- Python is not part of the default desktop startup path.
+- Optional Python worker mode is opt-in through `KAGUYA_ENABLE_PYTHON_WORKER=1`.
+- Mini server is a diagnostic fallback only and must report `mode: "mini"` plus `backend_available: false`.
 
 ## Runtime Data
 
-Runtime data is excluded from source and packages:
+Runtime/user data must live under Electron `userData/kaguya` or a caller-provided `--runtime-dir`, not under source directories.
+
+Excluded runtime paths include:
 
 - `__pycache__/`
 - `.pytest_cache/`
@@ -33,16 +37,47 @@ Runtime data is excluded from source and packages:
 - `security_data/`
 - `data/`
 
-## High-Risk APIs
+## Permission Entry Points
 
-- File APIs: `/agent/file-tree`, `/agent/read-file`, `/agent/write-file`, `/agent/file-write`, `/agent/revert-file`, `/agent/import-files`, `/agent/upload-device-files`
-- Execution APIs: `/agent/terminal/exec`, `/agent/run-project`, `/agent/compile`, `/tool/execute`, `/code/execute`
-- External provider APIs: `/api/chat`, `/chat`, `/chat/completions`, `/external/*`, `/deepseek/*`
-- Device vault APIs: `/api/device/info`, `/api/device/bind`, `/api/device/unbind`, `/api/account/saved-config`, `/api/account/auto-fill`
+- Go permission and terminal policy: `desktop/resources/go-backend/terminal_permission_service.go`
+- Go workspace authorization: `desktop/resources/go-backend/workspace_project_service.go`
+- Go security/privacy status: `desktop/resources/go-backend/security_privacy_service.go`
+- Go auth/account compatibility: `desktop/resources/go-backend/auth_account_service.go`
 
-## Security Model
+## Sensitive APIs
 
-- Workspace paths are authorized by `workspace_project_service.go`.
-- Terminal commands are classified and executed by `terminal_permission_service.go`.
-- Device API keys are encrypted in the local vault and are never returned in full to renderer/API responses.
-- Electron IPC is documented in `IPC_CONTRACT.md` and does not expose arbitrary shell or file-system access.
+File/project APIs:
+
+- `POST /agent/read-file`
+- `POST /agent/write-file`
+- `POST /agent/file-write`
+- `POST /agent/revert-file`
+- `POST /agent/file-tree`
+- `POST /agent/open-project`
+- `POST /agent/import-files`
+- `POST /agent/upload-device-files`
+
+Command/project execution APIs:
+
+- `POST /agent/terminal/exec`
+- `POST /agent/run-project`
+- `POST /agent/compile`
+- `POST /tool/execute`
+- `POST /code/execute`
+
+Device API-key APIs:
+
+- `GET /api/device/info`
+- `POST /api/device/bind`
+- `POST /api/device/unbind`
+- `GET /api/account/saved-config`
+- `GET /api/account/auto-fill`
+
+## Current Security Model
+
+- Desktop mode does not bypass workspace authorization.
+- Default file access is limited to the Go-managed workspace root.
+- Explicit trusted project imports are stored and checked with real path plus common path rules.
+- Terminal execution uses argv execution, shell mode is denied by default, and denied commands are audited.
+- Electron preload exposes a narrow `kaguyaDesktop` API; generic shell and file-system IPC is disabled.
+

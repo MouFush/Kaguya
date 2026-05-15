@@ -1,37 +1,38 @@
-# KaguyaIDE 3.1.0 Desktop Backend
+﻿# KaguyaIDE 3.1.0 Desktop Backend
 
-KaguyaIDE 3.1.0 is a desktop distribution source tree. The desktop backend is now the Go service under `resources/go-backend`. The former giant Python HTTP entry has been physically removed from this repository.
+KaguyaIDE 3.1.0 is a desktop distribution source tree. The desktop backend is now the Go service under `desktop/resources/go-backend`. The former giant Python HTTP entry has been physically removed from this repository.
 
 ## Current Layout
 
 ```text
 KaguyaIDE-3.1.0-win64-Desktop/
-|-- Kaguya IDE.exe
-|-- resources/
-|   |-- app.asar
-|   |-- app.asar.src/
-|   |   |-- electron/
-|   |   |   |-- main.js
-|   |   |   |-- preload.js
-|   |   |   `-- tests/
-|   |   `-- assets/
-|   |-- go-backend/
-|   |   |-- main.go
-|   |   |-- server.go
-|   |   |-- *_service.go
-|   |   |-- *_test.go
-|   |   |-- route_contract_generated.go
-|   |   |-- legacy_symbol_catalog_generated.go
-|   |   |-- static/
-|   |   `-- kaguya-go-backend.exe
-|   `-- python-app/
-|       |-- kaguya_*.py
-|       |-- start_server.py
-|       |-- scripts/
-|       `-- tests/
+|-- desktop/
+|   |-- Kaguya IDE.exe
+|   |-- *.dll / *.pak / Electron runtime files
+|   |-- locales/
+|   `-- resources/
+|       |-- app.asar
+|       |-- app.asar.src/
+|       |   |-- electron/
+|       |   |   |-- main.js
+|       |   |   |-- preload.js
+|       |   |   `-- tests/
+|       |   `-- assets/
+|       |-- go-backend/
+|       |   |-- main.go
+|       |   |-- server.go
+|       |   |-- *_service.go
+|       |   |-- *_test.go
+|       |   |-- route_contract_generated.go
+|       |   |-- legacy_symbol_catalog_generated.go
+|       |   |-- static/
+|       |   `-- kaguya-go-backend.exe
+|       `-- python-app/
+|           |-- kaguya_*.py
+|           |-- start_server.py
+|           |-- scripts/
+|           `-- tests/
 |-- docs/
-|-- AUDIT_NOTES.md
-|-- IPC_CONTRACT.md
 `-- README.md
 ```
 
@@ -53,7 +54,7 @@ The Go backend owns:
 - Auth/account compatibility routes.
 - Security and privacy status/export/delete routes.
 
-Python is not the default HTTP backend. `resources/python-app/start_server.py --backend bootstrap` remains only as an optional compatibility worker entry for isolated Python capabilities.
+Python is not the default HTTP backend. `desktop/resources/python-app/start_server.py --backend bootstrap` remains only as an optional compatibility worker entry for isolated Python capabilities.
 
 ## Runtime Rules
 
@@ -70,16 +71,16 @@ Python is not the default HTTP backend. `resources/python-app/start_server.py --
 Run from repository root:
 
 ```powershell
-python -m compileall .\resources\python-app
-python -m unittest discover -s .\resources\python-app\tests -v
-python .\resources\python-app\scripts\go_route_coverage.py --fail-under 100
-python .\resources\python-app\scripts\smoke_flask.py
-node --check .\resources\app.asar.src\electron\main.js
-node --check .\resources\app.asar.src\electron\preload.js
-node .\resources\app.asar.src\electron\tests\check-electron-ipc.js
+python -m compileall .\desktop\resources\python-app
+python -m unittest discover -s .\desktop\resources\python-app\tests -v
+python .\desktop\resources\python-app\scripts\go_route_coverage.py --fail-under 100
+python .\desktop\resources\python-app\scripts\smoke_flask.py
+node --check .\desktop\resources\app.asar.src\electron\main.js
+node --check .\desktop\resources\app.asar.src\electron\preload.js
+node .\desktop\resources\app.asar.src\electron\tests\check-electron-ipc.js
 ```
 
-Run from `resources/go-backend`:
+Run from `desktop/resources/go-backend`:
 
 ```powershell
 C:\Users\Lanzao\Downloads\KaguyaIDE-3.1.0-win64-Desktop\.tools\go\bin\go.exe test ./...
@@ -91,3 +92,4 @@ The smoke script name is historical; it starts the Go backend and validates the 
 ## GitHub
 
 The active repository target is [MouFush/Kaguya](https://github.com/MouFush/Kaguya).
+

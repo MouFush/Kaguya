@@ -1,28 +1,29 @@
-# Runtime data and caches must not be shipped as source.
+﻿# Runtime data and caches must not be shipped as source.
 __pycache__/
 .pytest_cache/
 *.py[cod]
 smoke-*.log
 
-resources/python-app/ide_accounts.json
-resources/python-app/ide_workspaces/
-resources/python-app/audit_logs/
-resources/python-app/uploads/
-resources/python-app/code_executions/
-resources/python-app/rag_data/
-resources/python-app/audio_cache/
-resources/python-app/security_data/
-resources/python-app/data/
-resources/python-app/.kaguya/
-resources/python-app/.kaguya_file_history/
-resources/python-app/external_api/
-resources/python-app/project_center/
-resources/python-app/memory_system/
-resources/python-app/memory_store/
-resources/python-app/multimodal/
-resources/python-app/finetune/
+desktop/resources/python-app/ide_accounts.json
+desktop/resources/python-app/ide_workspaces/
+desktop/resources/python-app/audit_logs/
+desktop/resources/python-app/uploads/
+desktop/resources/python-app/code_executions/
+desktop/resources/python-app/rag_data/
+desktop/resources/python-app/audio_cache/
+desktop/resources/python-app/security_data/
+desktop/resources/python-app/data/
+desktop/resources/python-app/.kaguya/
+desktop/resources/python-app/.kaguya_file_history/
+desktop/resources/python-app/external_api/
+desktop/resources/python-app/project_center/
+desktop/resources/python-app/memory_system/
+desktop/resources/python-app/memory_store/
+desktop/resources/python-app/multimodal/
+desktop/resources/python-app/finetune/
 
 # Generated icon scratch files are not source assets.
-resources/app.asar.src/assets/temp_*.ico
+desktop/resources/app.asar.src/assets/temp_*.ico
 
 # Keep packaged desktop archive in this release-package repository.
+

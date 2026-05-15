@@ -46,7 +46,7 @@ These routes exist to support older Electron or frontend callers:
 ## Device API Config
 
 - Go backend mode stores device API config in the local encrypted vault and returns only masked keys.
-- Go backend mode stores runtime config under `KAGUYA_RUNTIME_DIR` or the platform user-data directory, not under `resources/python-app`.
+- Go backend mode stores runtime config under `KAGUYA_RUNTIME_DIR` or the platform user-data directory, not under `desktop/resources/python-app`.
 - Electron mini mode stores the same config in `userData/kaguya/device_vault.enc`; full keys are not returned to the renderer.
 - `apiKey`/`apiUrl` and `api_key`/`api_url` payloads are normalized to `api_key`/`api_url` before use.
 - `/api/account/auto-fill` intentionally does not return the full API key.
@@ -88,11 +88,12 @@ When no external provider key is configured, chat endpoints return structured JS
 Run from the packaged project root:
 
 ```powershell
-python -m compileall .\resources\python-app
-python -m unittest discover -s .\resources\python-app\tests -v
-python .\resources\python-app\scripts\smoke_flask.py
-node --check .\resources\app.asar.src\electron\main.js
-node --check .\resources\app.asar.src\electron\preload.js
-python .\resources\python-app\scripts\go_route_coverage.py --fail-under 100
+python -m compileall .\desktop\resources\python-app
+python -m unittest discover -s .\desktop\resources\python-app\tests -v
+python .\desktop\resources\python-app\scripts\smoke_flask.py
+node --check .\desktop\resources\app.asar.src\electron\main.js
+node --check .\desktop\resources\app.asar.src\electron\preload.js
+python .\desktop\resources\python-app\scripts\go_route_coverage.py --fail-under 100
 ```
+
 

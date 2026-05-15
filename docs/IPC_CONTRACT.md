@@ -1,34 +1,58 @@
-# Electron IPC Contract
+﻿# Electron IPC Contract
 
-Renderer access is intentionally narrow. Generic filesystem, shell, and native terminal IPC are disabled; renderer workflows must call the Flask backend, where workspace and permission checks run.
+This contract describes the IPC surface exposed by `desktop/resources/app.asar.src/electron/preload.js` and handled in `desktop/resources/app.asar.src/electron/main.js`.
 
-| API | Direction | Purpose | Risk | Permission |
-| --- | --- | --- | --- | --- |
-| `app-getInfo` | renderer -> main | Read app version/platform/resource path | Low | None |
-| `app-getTheme` | renderer -> main | Read native theme | Low | None |
-| `app-checkForUpdates` | renderer -> main | Ask updater for update metadata | Medium | Main process only |
-| `device-getInfo` | renderer -> main | Read non-sensitive device identity and masked vault state | Low | None |
-| `device-bind` | renderer -> main | Save external API config to encrypted device vault | High | Must not return full API key |
-| `device-unbind` | renderer -> main | Delete encrypted device vault | High | User action |
-| `dialog-openFile` | renderer -> main | Native file picker only | Medium | User-selected paths only |
-| `dialog-openFolder` | renderer -> main | Native folder picker only | Medium | User-selected paths only |
-| `dialog-saveFile` | renderer -> main | Native save picker only | Medium | User-selected path only |
+## Exposed Renderer API
 
-## Disabled IPC
+The renderer receives one object: `window.kaguyaDesktop`.
 
-These handlers return structured denial if called and are not exposed by preload:
+| API | Purpose | Risk | Permission/Boundary |
+| --- | --- | --- | --- |
+| `isDesktop()` | Desktop feature detection | low | No native capability |
+| `getAppInfo()` | Read app/runtime metadata | low | No secrets |
+| `getTheme()` | Read native theme | low | No secrets |
+| `checkForUpdates()` | Trigger updater check | medium | No shell execution |
+| `device.getInfo()` | Read device identity and masked vault metadata | medium | Must not return full API key |
+| `device.bind(config)` | Save provider config in encrypted device vault | high | Normalize `apiKey/api_key`, never echo full key |
+| `device.unbind()` | Delete encrypted device vault | medium | No full key returned |
+| `dialog.openFile(options)` | User-selected file picker | medium | User gesture only; returns chosen paths |
+| `dialog.openFolder(options)` | User-selected folder picker | medium | User gesture only; returns chosen paths |
+| `dialog.saveFile(options)` | User-selected save picker | medium | User gesture only; returns chosen path |
+| `on('open-settings', cb)` | App event callback | low | Whitelisted channel only |
 
-- `terminal-create`, `terminal-write`, `terminal-resize`, `terminal-kill`
-- `fs-readFile`, `fs-writeFile`, `fs-readDir`, `fs-stat`, `fs-mkdir`, `fs-remove`, `fs-rename`, `fs-copy`, `fs-exists`
-- `shell-execute`, `shell-showItemInFolder`, `shell-openPath`
+## Disabled Native Capabilities
 
-`shell-openExternal` is not exposed by preload and only allows `https:`, `http:`, and `mailto:` when called internally.
+The following handlers exist only for compatibility and must return disabled errors:
 
-## BrowserWindow
+- `terminal-create`
+- `fs-readFile`
+- `fs-writeFile`
+- `fs-readDir`
+- `fs-stat`
+- `fs-mkdir`
+- `fs-remove`
+- `fs-rename`
+- `fs-copy`
+- `fs-exists`
+- `shell-execute`
+- `shell-showItemInFolder`
+- `shell-openPath`
 
-- `nodeIntegration: false`
+Workspace file actions and terminal commands must go through Go backend routes so workspace authorization, permission checks, and audit logging apply.
+
+## Navigation Boundary
+
+- Main BrowserWindow loads only `http://127.0.0.1:<port>/`.
+- `will-navigate` blocks non-local app URLs.
+- `setWindowOpenHandler` allows local app URLs and opens only `http:`, `https:`, or `mailto:` externally.
+- `file:`, `javascript:`, and `data:` external opens are blocked.
+
+## BrowserWindow Security Settings
+
+Both setup and main windows use:
+
 - `contextIsolation: true`
+- `nodeIntegration: false`
 - `sandbox: true`
 - `webSecurity: true`
-- Navigation is limited to the local Flask origin (`127.0.0.1`/`localhost`).
-- New windows only open local app URLs directly; external URLs are passed to the OS only when the protocol is allowed.
+
