@@ -191,6 +191,40 @@ func (p providerChatService) complete(ctx context.Context, cfg deviceConfig, pay
 	return p.readJSONResponse(resp, cfg, opts)
 }
 
+func (p providerChatService) testConfig(ctx context.Context, cfg deviceConfig) providerChatResult {
+	if cfg.APIKey == "" {
+		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, "missing_api_key", "No API key is configured.", 0, "")}
+	}
+	if cfg.APIURL == "" {
+		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, "missing_api_url", "External provider API URL is not configured.", 0, "")}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, providerModelsURL(cfg.APIURL), nil)
+	if err != nil {
+		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, "invalid_api_url", err.Error(), 0, "")}
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, "provider_request_failed", "External provider verification request failed.", 0, err.Error())}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, pcsMaxBodyBytes))
+	body = pcsRedactSecrets(body, cfg.APIKey)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, true, "", "External provider verified.", resp.StatusCode, "")}
+	}
+	errorCode := "provider_verification_failed"
+	message := "External provider verification failed."
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		errorCode = "provider_auth_failed"
+		message = "Provider rejected the API key."
+	}
+	return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, errorCode, message, resp.StatusCode, string(body))}
+}
+
 func (p providerChatService) serve(w http.ResponseWriter, r *http.Request, cfg deviceConfig, payload map[string]any, opts providerChatOptions) {
 	result, err := p.complete(r.Context(), cfg, payload, opts)
 	if err != nil {
@@ -377,6 +411,31 @@ func pcsErrorJSON(status int, cfg deviceConfig, code, message, detail string) ma
 	out["api_url"] = cfg.APIURL
 	out["apiUrl"] = cfg.APIURL
 	out["available"] = false
+	return out
+}
+
+func pcsProviderTestJSON(cfg deviceConfig, ok bool, errorCode string, message string, upstreamStatus int, detail string) map[string]any {
+	out := map[string]any{
+		"success":        ok,
+		"ok":             ok,
+		"available":      ok,
+		"mode":           "go",
+		"provider":       cfg.Provider,
+		"api_url":        cfg.APIURL,
+		"apiUrl":         cfg.APIURL,
+		"model":          cfg.Model,
+		"masked_api_key": maskAPIKey(cfg.APIKey),
+		"message":        pcsRedactString(message, cfg.APIKey),
+	}
+	if errorCode != "" {
+		out["error"] = errorCode
+	}
+	if upstreamStatus > 0 {
+		out["status_code"] = upstreamStatus
+	}
+	if detail != "" {
+		out["detail"] = pcsRedactString(detail, cfg.APIKey)
+	}
 	return out
 }
 

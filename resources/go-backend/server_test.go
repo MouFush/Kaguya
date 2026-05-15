@@ -313,6 +313,40 @@ func TestExternalProviderChatUsesSavedOpenAICompatibleConfig(t *testing.T) {
 	}
 }
 
+func TestAgentAPITestVerifiesKimiProviderWithoutLeakingKey(t *testing.T) {
+	key := "sk-kimi-secret-abcdef"
+	var gotPath, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"kimi-k2.6"}]}`))
+	}))
+	defer upstream.Close()
+
+	s, h := newTestServer(t)
+	s.providerChat = newProviderChatService(upstream.Client())
+	rec := requestJSON(t, h, http.MethodPost, "/agent/api-test", map[string]any{
+		"provider": "kimi",
+		"apiUrl":   upstream.URL + "/v1",
+		"apiKey":   key,
+		"model":    "kimi-k2.6",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got := decodeBody(t, rec)
+	if got["success"] != true || got["available"] != true || got["provider"] != "kimi" {
+		t.Fatalf("unexpected provider test response: %#v", got)
+	}
+	if gotPath != "/v1/models" || gotAuth != "Bearer "+key {
+		t.Fatalf("provider test path/auth mismatch path=%s auth=%s", gotPath, gotAuth)
+	}
+	if strings.Contains(rec.Body.String(), key) {
+		t.Fatalf("provider test leaked api key: %s", rec.Body.String())
+	}
+}
+
 func TestDeepSeekChatUsesGoProviderService(t *testing.T) {
 	var gotAuth, gotPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

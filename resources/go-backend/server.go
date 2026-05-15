@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -913,29 +914,8 @@ func (s *Server) deepseekTest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) externalTestWithPayload(w http.ResponseWriter, payload map[string]any) {
 	cfg := s.normalizedConfig(payload)
-	if cfg.APIKey == "" {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"success":  false,
-			"ok":       false,
-			"provider": cfg.Provider,
-			"api_url":  cfg.APIURL,
-			"apiUrl":   cfg.APIURL,
-			"model":    cfg.Model,
-			"error":    "missing_api_key",
-			"message":  "No API key is configured.",
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":  false,
-		"ok":       false,
-		"provider": cfg.Provider,
-		"api_url":  cfg.APIURL,
-		"apiUrl":   cfg.APIURL,
-		"model":    cfg.Model,
-		"error":    "network_test_not_implemented",
-		"message":  "The Go backend validated configuration shape; send a chat request to perform a live provider call.",
-	})
+	result := s.providerChat.testConfig(context.Background(), cfg)
+	writeJSON(w, result.StatusCode, result.JSON)
 }
 
 func (s *Server) deepseekChat(w http.ResponseWriter, r *http.Request) {
@@ -2236,6 +2216,17 @@ func chatCompletionsURL(base string) string {
 		return base
 	}
 	return base + "/chat/completions"
+}
+
+func providerModelsURL(base string) string {
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/models") {
+		return base
+	}
+	if strings.HasSuffix(base, "/chat/completions") {
+		return strings.TrimSuffix(base, "/chat/completions") + "/models"
+	}
+	return base + "/models"
 }
 
 func extractAssistantContent(upstream map[string]any) string {
