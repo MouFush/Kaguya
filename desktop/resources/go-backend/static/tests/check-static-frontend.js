@@ -5,6 +5,7 @@ const staticRoot = path.resolve(__dirname, '..');
 const index = fs.readFileSync(path.join(staticRoot, 'index.html'), 'utf8');
 const apiClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-api-client.js'), 'utf8');
 const agentClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-agent.js'), 'utf8');
+const uploadClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-file-upload.js'), 'utf8');
 
 function assert(condition, message) {
   if (!condition) {
@@ -14,6 +15,7 @@ function assert(condition, message) {
 
 assert(index.includes('/static/js/kaguya-api-client.js'), 'index must load the shared API client');
 assert(index.includes('/static/js/kaguya-agent.js'), 'index must load the shared agent client');
+assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the shared upload client');
 assert(apiClient.includes('window.KaguyaAPI'), 'API client must expose window.KaguyaAPI');
 assert(apiClient.includes('normalizeProviderPayload'), 'API client must normalize provider payloads');
 assert(apiClient.includes('/api/account/saved-config'), 'API client must support saved-config reload');
@@ -23,6 +25,12 @@ assert(agentClient.includes('window.KaguyaAgent'), 'Agent client must expose win
 assert(agentClient.includes('currentAgentRunId'), 'Agent client must track backend run id');
 assert(agentClient.includes('currentAgentAbortController'), 'Agent client must track browser abort controller');
 assert(agentClient.includes('abortAgent'), 'Agent client must call backend abort');
+assert(uploadClient.includes('window.KaguyaUpload'), 'Upload client must expose window.KaguyaUpload');
+assert(uploadClient.includes('makeBatches'), 'Upload client must support batching');
+assert(uploadClient.includes('batch_index'), 'Upload client must submit batch metadata');
+assert(uploadClient.includes('batch_total'), 'Upload client must submit batch metadata');
+assert(index.includes('KaguyaUpload.uploadForm'), 'RAG single upload must use shared upload client');
+assert(index.includes('KaguyaUpload.uploadFiles'), 'RAG batch upload must use shared upload client');
 assert(index.includes('KaguyaAgent.begin'), 'Agent run must register browser abort controller');
 assert(index.includes('KaguyaAgent.observeFrame'), 'Agent SSE frames must be observed for run_id');
 assert(index.includes("data.type === 'run_started'"), 'Agent SSE run_started frame must be handled');

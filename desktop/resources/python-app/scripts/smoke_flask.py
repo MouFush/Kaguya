@@ -95,6 +95,7 @@ def main() -> int:
             ("GET", "/", None, False),
             ("GET", "/static/js/kaguya-api-client.js", None, False),
             ("GET", "/static/js/kaguya-agent.js", None, False),
+            ("GET", "/static/js/kaguya-file-upload.js", None, False),
             ("GET", "/sidebar-icon", None, False),
             ("GET", "/favicon.ico", None, False),
             ("POST", "/chat", {"message": "hello", "history": []}, True),

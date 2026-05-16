@@ -13,6 +13,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="/static/js/kaguya-api-client.js"></script>
     <script src="/static/js/kaguya-agent.js"></script>
+    <script src="/static/js/kaguya-file-upload.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -6778,42 +6779,50 @@
             }
         }
         
-        function uploadRagFile(event) {
+        async function uploadRagFile(event) {
             const files = event.target.files;
             if (!files || !files.length) return;
-            
-            if (files.length === 1) {
-                const file = files[0];
-                const formData = new FormData();
-                formData.append('file', file);
-                showToast('正在上传: ' + file.name);
-                fetch('/rag/upload', {
-                    method: 'POST',
-                    body: formData
-                }).then(r => r.json()).then(data => {
+            try {
+                if (files.length === 1) {
+                    const file = files[0];
+                    const formData = new FormData();
+                    formData.append('file', file, file.name);
+                    showToast('正在上传: ' + file.name);
+                    const data = window.KaguyaUpload ? await window.KaguyaUpload.uploadForm('/rag/upload', formData) : await fetch('/rag/upload', { method: 'POST', body: formData }).then(r => r.json());
                     if (data.success) {
-                        showToast('上传成功: ' + data.document.filename);
+                        showToast('上传成功: ' + ((data.document && data.document.filename) || file.name));
                         loadRagDocuments();
                     } else {
-                        showToast('上传失败: ' + (data.error || '未知错误'));
+                        showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
                     }
-                }).catch(e => showToast('上传失败: ' + e));
-            } else {
-                const formData = new FormData();
-                for (let f of files) formData.append('files', f);
-                showToast(`正在上传 ${files.length} 个文件...`);
-                fetch('/rag/batch_upload', {
-                    method: 'POST',
-                    body: formData
-                }).then(r => r.json()).then(data => {
+                } else {
+                    showToast(`正在上传 ${files.length} 个文件...`);
+                    const data = window.KaguyaUpload ? await window.KaguyaUpload.uploadFiles('/rag/batch_upload', files, {
+                        onProgress: function(info) { showToast(`正在上传第 ${info.batch}/${info.totalBatches} 批...`); },
+                        stopOnError: false,
+                    }) : await (async function(){
+                        const formData = new FormData();
+                        for (let f of files) formData.append('files', f);
+                        return fetch('/rag/batch_upload', { method: 'POST', body: formData }).then(r => r.json());
+                    })();
                     if (data.success) {
-                        const success = data.results.filter(r => r.success).length;
+                        const rawResults = data.results || [];
+                        const success = rawResults.reduce(function(total, item) {
+                            if (item && item.success === false) return total;
+                            if (item && Array.isArray(item.results)) return total + item.results.filter(r => r.success !== false).length;
+                            return total + 1;
+                        }, 0);
                         showToast(`上传完成: ${success}/${files.length} 成功`);
                         loadRagDocuments();
+                    } else {
+                        showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
                     }
-                });
+                }
+            } catch(e) {
+                showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(e) : (e.message || e)), 'error');
+            } finally {
+                event.target.value = '';
             }
-            event.target.value = '';
         }
         
         function showAddTextModal() {
