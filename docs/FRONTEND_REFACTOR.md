@@ -29,13 +29,14 @@ The client normalizes `apiKey/api_key` and `apiUrl/api_url`, handles JSON and st
 - API provider tests now use the shared client and backend `/agent/api-test`.
 - Provider config saving binds the device vault before persisting local state.
 - `localStorage` no longer receives the raw provider config object with a full API key; it stores only masked/saved-key metadata.
+- Agent mode now loads `/static/js/kaguya-agent.js`, stores the backend `run_id` from the `run_started` SSE frame, and the stop button calls backend `/agent/abort` in addition to aborting the browser reader.
 - The smoke script checks that `/static/js/kaguya-api-client.js` is served.
 - `desktop/resources/go-backend/static/tests/check-static-frontend.js` guards the API-client contract and localStorage sanitization.
 
 ## Next Frontend Cuts
 
-1. Extract Agent run/abort/SSE logic into `agent.js`.
-2. Extract upload batching/progress into `file-upload.js`.
-3. Extract chat stream handling into `chat.js`.
-4. Move provider config UI rendering into `providers.js`.
+1. Extract upload batching/progress into `file-upload.js`.
+2. Extract chat stream handling into `chat.js`.
+3. Move provider config UI rendering into `providers.js`.
+4. Move the remaining Agent frame rendering into `agent.js`.
 5. Split CSS into base/layout/components once JS state is less tangled.

@@ -4,6 +4,7 @@ const path = require('path');
 const staticRoot = path.resolve(__dirname, '..');
 const index = fs.readFileSync(path.join(staticRoot, 'index.html'), 'utf8');
 const apiClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-api-client.js'), 'utf8');
+const agentClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-agent.js'), 'utf8');
 
 function assert(condition, message) {
   if (!condition) {
@@ -12,11 +13,20 @@ function assert(condition, message) {
 }
 
 assert(index.includes('/static/js/kaguya-api-client.js'), 'index must load the shared API client');
+assert(index.includes('/static/js/kaguya-agent.js'), 'index must load the shared agent client');
 assert(apiClient.includes('window.KaguyaAPI'), 'API client must expose window.KaguyaAPI');
 assert(apiClient.includes('normalizeProviderPayload'), 'API client must normalize provider payloads');
 assert(apiClient.includes('/api/account/saved-config'), 'API client must support saved-config reload');
 assert(apiClient.includes('/api/device/bind'), 'API client must bind device vault config');
 assert(apiClient.includes('/agent/abort'), 'API client must expose backend agent abort');
+assert(agentClient.includes('window.KaguyaAgent'), 'Agent client must expose window.KaguyaAgent');
+assert(agentClient.includes('currentAgentRunId'), 'Agent client must track backend run id');
+assert(agentClient.includes('currentAgentAbortController'), 'Agent client must track browser abort controller');
+assert(agentClient.includes('abortAgent'), 'Agent client must call backend abort');
+assert(index.includes('KaguyaAgent.begin'), 'Agent run must register browser abort controller');
+assert(index.includes('KaguyaAgent.observeFrame'), 'Agent SSE frames must be observed for run_id');
+assert(index.includes("data.type === 'run_started'"), 'Agent SSE run_started frame must be handled');
+assert(index.includes("data.type === 'aborted'"), 'Agent SSE aborted frame must be handled');
 assert(index.includes('sanitizeApiProvidersForStorage'), 'index must sanitize provider localStorage writes');
 assert(!index.includes("localStorage.setItem('api_providers',JSON.stringify(cfg))"), 'index must not store full provider config directly');
 assert(!index.includes('localStorage.setItem("api_providers",JSON.stringify(cfg))'), 'index must not store full provider config directly');
