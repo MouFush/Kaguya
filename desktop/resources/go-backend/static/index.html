@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+    <script src="/static/js/kaguya-api-client.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -13929,6 +13930,18 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         let _currentApiProvider=localStorage.getItem('active_api_provider')||'deepseek';
 
         function getApiProviders(){try{return JSON.parse(localStorage.getItem('api_providers')||'{}');}catch(e){return{};}}
+        function sanitizeApiProvidersForStorage(cfg){
+          var clean={};
+          Object.keys(cfg||{}).forEach(function(k){
+            var c=cfg[k]||{};
+            clean[k]=Object.assign({},c,{
+              apiKey:(c.apiKey&&String(c.apiKey).includes('****'))?c.apiKey:'',
+              hasSavedKey:!!(c.hasSavedKey||c.masked_api_key||c.maskedApiKey),
+              masked_api_key:c.masked_api_key||c.maskedApiKey||((c.apiKey&&String(c.apiKey).includes('****'))?c.apiKey:'')
+            });
+          });
+          return clean;
+        }
         function chooseActiveApiProvider(cfg){
           var selected=localStorage.getItem('active_api_provider')||_currentApiProvider||'deepseek';
           if(API_PROVIDERS[selected]&&cfg[selected]&&cfg[selected].enabled&&(cfg[selected].apiKey||cfg[selected].hasSavedKey))return selected;
@@ -13938,8 +13951,8 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
           }
           return API_PROVIDERS[selected]?selected:'deepseek';
         }
-        function saveApiProviders(cfg){
-          localStorage.setItem('api_providers',JSON.stringify(cfg));
+        async function saveApiProviders(cfg){
+          localStorage.setItem('api_providers',JSON.stringify(sanitizeApiProvidersForStorage(cfg)));
           var activeProvider=chooseActiveApiProvider(cfg);
           _currentApiProvider=activeProvider;
           localStorage.setItem('active_api_provider',activeProvider);
@@ -13948,11 +13961,21 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             var c=cfg[k];
             backendCfg.providers[k]={api_url:c.apiUrl||'',api_key:c.apiKey||'',model:c.model||''};
           });
-          fetch('/external/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(backendCfg)}).catch(function(){});
+          if(window.KaguyaAPI){ window.KaguyaAPI.json('/external/config', backendCfg).catch(function(){}); }
+          else { fetch('/external/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(backendCfg)}).catch(function(){}); }
           var activeCfg=cfg[activeProvider]||{};
           if(activeCfg.apiKey){
             var bindPayload={device_id:generateDeviceId(),provider:activeProvider,apiKey:activeCfg.apiKey,apiUrl:activeCfg.apiUrl||API_PROVIDERS[activeProvider].url,model:activeCfg.model||API_PROVIDERS[activeProvider].models[0].id};
-            fetch('/api/device/bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bindPayload)}).catch(function(){});
+            var bindData = window.KaguyaAPI ? await window.KaguyaAPI.bindDeviceConfig(bindPayload) : await fetch('/api/device/bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bindPayload)}).then(function(r){return r.json();}).catch(function(e){return {success:false,error:e.message};});
+            if(bindData&&bindData.success){
+              activeCfg.hasSavedKey=true;
+              activeCfg.masked_api_key=bindData.masked_api_key||bindData.api_key||bindData.apiKey||'';
+              activeCfg.apiKey='';
+              cfg[activeProvider]=activeCfg;
+              localStorage.setItem('api_providers',JSON.stringify(sanitizeApiProvidersForStorage(cfg)));
+            } else if(bindData&&bindData.error) {
+              throw new Error(bindData.message||bindData.error);
+            }
             if(window.kaguyaDesktop&&window.kaguyaDesktop.device&&window.kaguyaDesktop.device.bind){
               window.kaguyaDesktop.device.bind(bindPayload).catch(function(){});
             }
@@ -13987,7 +14010,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             content.innerHTML=`<div style="background:linear-gradient(135deg,${p.color}15,${p.color}05);border-radius:12px;padding:16px;margin-bottom:18px;"><div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">${p.icon} ${p.name}</div><div style="font-size:11px;color:var(--text-secondary);line-height:1.6;">访问 <a href="${p.docUrl}" target="_blank" style="color:${p.color};">官方平台</a> 获取 API Key</div></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">API Key</label><input type="password" id="ap_apiKey" value="${cfg.apiKey||''}" placeholder="sk-/api-xxxxxxxx" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);outline:none;transition:var(--transition);" onfocus="this.style.borderColor='${p.color}'" onblur="this.style.borderColor=''"></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">API 地址</label><input type="text" id="ap_apiUrl" value="${cfg.apiUrl||p.url}" placeholder="${p.url}" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);outline:none;"></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">模型选择</label><select id="ap_model" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">${modelOpts}</select></div><div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-secondary);border-radius:10px;margin-bottom:16px;"><span style="font-size:12px;font-weight:600;color:var(--text-primary);">启用 ${p.name}</span><label class="toggle"><input type="checkbox" id="ap_enabled" ${cfg.enabled?'checked':''}><span class="toggle-slider"></span></label></div><div style="display:flex;gap:8px;"><button onclick="testApiConnection('${pv}')" style="flex:1;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;font-size:12px;cursor:pointer;color:var(--text-secondary);font-weight:600;transition:var(--transition);" onmouseover="this.style.borderColor='${p.color}'" onmouseout="this.style.borderColor=''">❓ 测试连接</button><button onclick="saveApiProvider('${pv}')" style="flex:1;padding:10px;background:linear-gradient(135deg,${p.color},${p.color}cc);border:none;border-radius:10px;font-size:12px;cursor:pointer;color:#fff;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.2);">✔ 保存</button></div>`;
         }
 
-        function saveApiProvider(pv){
+        async function saveApiProvider(pv){
             const providers=getApiProviders();
             providers[pv]={
                 apiKey:(document.getElementById('ap_apiKey').value||'').trim(),
@@ -13999,9 +14022,13 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 _currentApiProvider=pv;
                 localStorage.setItem('active_api_provider',pv);
             }
-            saveApiProviders(providers);
-            updateApiIndicator();
-            showToast(API_PROVIDERS[pv].name+' 配置已保存');
+            try{
+              await saveApiProviders(providers);
+              updateApiIndicator();
+              showToast(API_PROVIDERS[pv].name+' 配置已保存');
+            }catch(e){
+              showToast('保存失败: '+(e.message||e), 'error');
+            }
         }
 
         async function testApiConnection(pv){
@@ -14016,11 +14043,10 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             for(var attempt=1;attempt<=2;attempt++){
               try{
                 if(attempt>1)statusEl.innerHTML='<span style="color:#f59e0b;">&#x23F3; 重试 ('+attempt+'/2)...</span>';
-                const r=await fetch('/agent/api-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:pv,apiKey:apiKey,apiUrl:apiUrl,model:model})});
-                const d=await r.json();
+                const d=window.KaguyaAPI ? await window.KaguyaAPI.testProvider({provider:pv,apiKey:apiKey,apiUrl:apiUrl,model:model}) : await fetch('/agent/api-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:pv,apiKey:apiKey,apiUrl:apiUrl,model:model})}).then(function(r){return r.json();});
                 if(d.success){statusEl.innerHTML='<span style="color:#10b981;">&#x2705; 连接成功! 模型: '+(d.model||'OK')+'</span>';return;}
-                lastError=d.error||'连接失败';
-                if(d.error&&d.error.includes('401')&&attempt===1){
+                lastError=d.message||d.error||'连接失败';
+                if((d.error&&d.error.includes('401')||d.status_code===401)&&attempt===1){
                   await new Promise(function(r2){setTimeout(r2,2000);});
                   continue;
                 }
