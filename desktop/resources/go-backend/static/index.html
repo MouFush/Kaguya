@@ -6242,6 +6242,12 @@
             });
         }
         function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+        function safeHighlight(root){
+            if(typeof hljs==='undefined'||!root)return;
+            root.querySelectorAll('pre code').forEach(function(block){
+                try{hljs.highlightElement(block);}catch(e){console.warn('highlight failed:',e);}
+            });
+        }
         function toggleCodeFold(btn) {
             var block = btn.closest('.code-block');
             if (!block) return;
@@ -6482,6 +6488,7 @@
                 localStorage.setItem('api_providers', JSON.stringify(migrated));
                 localStorage.setItem('api_providers_migrated', '1');
             }
+            localStorage.removeItem('deepseek_config');
         } catch(e) {}
         
         
@@ -6794,28 +6801,25 @@
             const files = event.target.files;
             if (!files || !files.length) return;
             try {
+                if (!window.KaguyaUpload) throw new Error('upload_helper_unavailable');
                 if (files.length === 1) {
                     const file = files[0];
                     const formData = new FormData();
                     formData.append('file', file, file.name);
                     showToast('正在上传: ' + file.name);
-                    const data = window.KaguyaUpload ? await window.KaguyaUpload.uploadForm('/rag/upload', formData) : await fetch('/rag/upload', { method: 'POST', body: formData }).then(r => r.json());
+                    const data = await window.KaguyaUpload.uploadForm('/rag/upload', formData);
                     if (data.success) {
                         showToast('上传成功: ' + ((data.document && data.document.filename) || file.name));
                         loadRagDocuments();
                     } else {
-                        showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
+                        showToast('上传失败: ' + window.KaguyaUpload.summarizeError(data), 'error');
                     }
                 } else {
                     showToast(`正在上传 ${files.length} 个文件...`);
-                    const data = window.KaguyaUpload ? await window.KaguyaUpload.uploadFiles('/rag/batch_upload', files, {
+                    const data = await window.KaguyaUpload.uploadFiles('/rag/batch_upload', files, {
                         onProgress: function(info) { showToast(`正在上传第 ${info.batch}/${info.totalBatches} 批...`); },
                         stopOnError: false,
-                    }) : await (async function(){
-                        const formData = new FormData();
-                        for (let f of files) formData.append('files', f);
-                        return fetch('/rag/batch_upload', { method: 'POST', body: formData }).then(r => r.json());
-                    })();
+                    });
                     if (data.success) {
                         const rawResults = data.results || [];
                         const success = rawResults.reduce(function(total, item) {
@@ -6826,7 +6830,7 @@
                         showToast(`上传完成: ${success}/${files.length} 成功`);
                         loadRagDocuments();
                     } else {
-                        showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
+                        showToast('上传失败: ' + window.KaguyaUpload.summarizeError(data), 'error');
                     }
                 }
             } catch(e) {
@@ -8034,14 +8038,13 @@
                 formData.append('format', file.name.split('.').pop());
                 
                 try {
-                    const data = window.KaguyaUpload
-                        ? await window.KaguyaUpload.uploadForm('/finetune/dataset/upload', formData)
-                        : await fetch('/finetune/dataset/upload', { method: 'POST', body: formData }).then(r => r.json());
+                    if (!window.KaguyaUpload) throw new Error('upload_helper_unavailable');
+                    const data = await window.KaguyaUpload.uploadForm('/finetune/dataset/upload', formData);
                     if (data.success) {
                         showToast(`数据集上传成功，包含 ${data.sample_count} 个样本`);
                         loadFinetuneDatasets();
                     } else {
-                        showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
+                        showToast('上传失败: ' + window.KaguyaUpload.summarizeError(data), 'error');
                     }
                 } catch (err) {
                     showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(err) : (err.message || err)), 'error');
@@ -8163,14 +8166,13 @@
             formData.append('task', 'understand');
             
             try {
-                const data = window.KaguyaUpload
-                    ? await window.KaguyaUpload.uploadForm('/multimodal/upload', formData)
-                    : await fetch('/multimodal/upload', { method: 'POST', body: formData }).then(r => r.json());
+                if (!window.KaguyaUpload) throw new Error('upload_helper_unavailable');
+                const data = await window.KaguyaUpload.uploadForm('/multimodal/upload', formData);
                 if (data.success) {
                     currentImageId = data.result.image_id;
                     showToast('图片上传成功');
                 } else {
-                    showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
+                    showToast('上传失败: ' + window.KaguyaUpload.summarizeError(data), 'error');
                 }
             } catch (err) {
                 showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(err) : (err.message || err)), 'error');
@@ -13101,7 +13103,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             `;
             container.appendChild(msg);
             requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-            msg.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+            safeHighlight(msg);
         }
         
         function handleInput(e) {
@@ -13370,9 +13372,8 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 const contentEl = document.getElementById('streamContent');
                 let fullContent = '';
                 
-                const res = await fetch('/stream', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
+                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
+                await window.KaguyaStream.postSSE('/stream', {
                         message: msg, history: history.slice(0, histIdx), role: currentRole,
                         lora: currentLora !== 'none' ? currentLora : null,
                         structured_template: currentStructuredTemplate,
@@ -13393,11 +13394,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                         rag_iterative: ragSettings.useIterative,
                         device_id: generateDeviceId(),
                         external_api: extApi
-                    })
-                });
-                
-                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
-                await window.KaguyaStream.readSSE(res, {
+                    }, {
                     onReader: function(reader) { currentReader = reader; },
                     shouldStop: function() { return !currentReader; },
                     onFrame: function(data) {
@@ -13425,7 +13422,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 });
                 currentReader = null;
                 contentEl.id = '';
-                contentEl.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+                safeHighlight(contentEl);
                 currentStructuredTemplate = null;
                 
                 isGenerating = false;
@@ -13499,9 +13496,8 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 let fullReasoning = '';
                 let hasReasoning = false;
                 
-                const res = await fetch('/stream', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
+                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
+                await window.KaguyaStream.postSSE('/stream', {
                         message: msg, history: history.slice(0,-1), role: currentRole,
                         lora: currentLora !== 'none' ? currentLora : null,
                         structured_template: currentStructuredTemplate,
@@ -13522,11 +13518,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                         rag_iterative: ragSettings.useIterative,
                         device_id: generateDeviceId(),
                         external_api: extApi
-                    })
-                });
-                
-                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
-                await window.KaguyaStream.readSSE(res, {
+                    }, {
                     onReader: function(reader) { currentReader = reader; },
                     shouldStop: function() { return !currentReader; },
                     onFrame: function(data) {
@@ -13574,7 +13566,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 contentEl.id = '';
                 if (reasoningSection) reasoningSection.id = '';
                 if (reasoningContentEl) reasoningContentEl.id = '';
-                contentEl.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+                safeHighlight(contentEl);
             } catch (e) {
                 if (e.name !== 'AbortError') {
                     console.error('Stream error:', e);
@@ -13971,12 +13963,12 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             var c=cfg[k];
             backendCfg.providers[k]={api_url:c.apiUrl||'',api_key:c.apiKey||'',model:c.model||''};
           });
-          if(window.KaguyaAPI){ window.KaguyaAPI.json('/external/config', backendCfg).catch(function(){}); }
-          else { fetch('/external/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(backendCfg)}).catch(function(){}); }
+          if(!window.KaguyaAPI) throw new Error('api_client_unavailable');
+          window.KaguyaAPI.json('/external/config', backendCfg).catch(function(){});
           var activeCfg=cfg[activeProvider]||{};
           if(activeCfg.apiKey){
             var bindPayload={device_id:generateDeviceId(),provider:activeProvider,apiKey:activeCfg.apiKey,apiUrl:activeCfg.apiUrl||API_PROVIDERS[activeProvider].url,model:activeCfg.model||API_PROVIDERS[activeProvider].models[0].id};
-            var bindData = window.KaguyaAPI ? await window.KaguyaAPI.bindDeviceConfig(bindPayload) : await fetch('/api/device/bind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bindPayload)}).then(function(r){return r.json();}).catch(function(e){return {success:false,error:e.message};});
+            var bindData = await window.KaguyaAPI.bindDeviceConfig(bindPayload);
             if(bindData&&bindData.success){
               activeCfg.hasSavedKey=true;
               activeCfg.masked_api_key=bindData.masked_api_key||bindData.api_key||bindData.apiKey||'';
@@ -14040,16 +14032,21 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             const cfg=getApiProviders()[pv]||{};
             const content=document.getElementById('apiHubContent');
             const modelOpts=p.models.map(m=>`<option value="${m.id}"${cfg.model===m.id?' selected':''}>${m.label}</option>`).join('');
-            content.innerHTML=`<div style="background:linear-gradient(135deg,${p.color}15,${p.color}05);border-radius:12px;padding:16px;margin-bottom:18px;"><div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">${p.icon} ${p.name}</div><div style="font-size:11px;color:var(--text-secondary);line-height:1.6;">访问 <a href="${p.docUrl}" target="_blank" style="color:${p.color};">官方平台</a> 获取 API Key</div></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">API Key</label><input type="password" id="ap_apiKey" value="${cfg.apiKey||''}" placeholder="sk-/api-xxxxxxxx" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);outline:none;transition:var(--transition);" onfocus="this.style.borderColor='${p.color}'" onblur="this.style.borderColor=''"></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">API 地址</label><input type="text" id="ap_apiUrl" value="${cfg.apiUrl||p.url}" placeholder="${p.url}" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);outline:none;"></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">模型选择</label><select id="ap_model" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">${modelOpts}</select></div><div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-secondary);border-radius:10px;margin-bottom:16px;"><span style="font-size:12px;font-weight:600;color:var(--text-primary);">启用 ${p.name}</span><label class="toggle"><input type="checkbox" id="ap_enabled" ${cfg.enabled?'checked':''}><span class="toggle-slider"></span></label></div><div style="display:flex;gap:8px;"><button onclick="testApiConnection('${pv}')" style="flex:1;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;font-size:12px;cursor:pointer;color:var(--text-secondary);font-weight:600;transition:var(--transition);" onmouseover="this.style.borderColor='${p.color}'" onmouseout="this.style.borderColor=''">❓ 测试连接</button><button onclick="saveApiProvider('${pv}')" style="flex:1;padding:10px;background:linear-gradient(135deg,${p.color},${p.color}cc);border:none;border-radius:10px;font-size:12px;cursor:pointer;color:#fff;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.2);">✔ 保存</button></div>`;
+            const keyPlaceholder=cfg.hasSavedKey&&cfg.masked_api_key?('已保存: '+cfg.masked_api_key):'sk-/api-xxxxxxxx';
+            content.innerHTML=`<div style="background:linear-gradient(135deg,${p.color}15,${p.color}05);border-radius:12px;padding:16px;margin-bottom:18px;"><div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">${p.icon} ${p.name}</div><div style="font-size:11px;color:var(--text-secondary);line-height:1.6;">访问 <a href="${p.docUrl}" target="_blank" style="color:${p.color};">官方平台</a> 获取 API Key</div></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">API Key</label><input type="password" id="ap_apiKey" value="${cfg.apiKey||''}" placeholder="${keyPlaceholder}" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);outline:none;transition:var(--transition);" onfocus="this.style.borderColor='${p.color}'" onblur="this.style.borderColor=''"></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">API 地址</label><input type="text" id="ap_apiUrl" value="${cfg.apiUrl||p.url}" placeholder="${p.url}" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);outline:none;"></div><div style="margin-bottom:14px;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:600;">模型选择</label><select id="ap_model" style="width:100%;padding:11px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">${modelOpts}</select></div><div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-secondary);border-radius:10px;margin-bottom:16px;"><span style="font-size:12px;font-weight:600;color:var(--text-primary);">启用 ${p.name}</span><label class="toggle"><input type="checkbox" id="ap_enabled" ${cfg.enabled?'checked':''}><span class="toggle-slider"></span></label></div><div style="display:flex;gap:8px;"><button onclick="testApiConnection('${pv}')" style="flex:1;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;font-size:12px;cursor:pointer;color:var(--text-secondary);font-weight:600;transition:var(--transition);" onmouseover="this.style.borderColor='${p.color}'" onmouseout="this.style.borderColor=''">❓ 测试连接</button><button onclick="saveApiProvider('${pv}')" style="flex:1;padding:10px;background:linear-gradient(135deg,${p.color},${p.color}cc);border:none;border-radius:10px;font-size:12px;cursor:pointer;color:#fff;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,0.2);">✔ 保存</button></div>`;
         }
 
         async function saveApiProvider(pv){
             const providers=getApiProviders();
+            const existing=providers[pv]||{};
+            const nextKey=(document.getElementById('ap_apiKey').value||'').trim();
             providers[pv]={
-                apiKey:(document.getElementById('ap_apiKey').value||'').trim(),
+                apiKey:nextKey,
                 apiUrl:(document.getElementById('ap_apiUrl').value||API_PROVIDERS[pv].url||'').trim(),
                 model:(document.getElementById('ap_model').value||'').trim(),
-                enabled:document.getElementById('ap_enabled').checked
+                enabled:document.getElementById('ap_enabled').checked,
+                hasSavedKey:nextKey?false:!!existing.hasSavedKey,
+                masked_api_key:nextKey?'':(existing.masked_api_key||existing.maskedApiKey||'')
             };
             if(providers[pv].enabled&&providers[pv].apiKey){
                 _currentApiProvider=pv;
@@ -14076,7 +14073,8 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             for(var attempt=1;attempt<=2;attempt++){
               try{
                 if(attempt>1)statusEl.innerHTML='<span style="color:#f59e0b;">&#x23F3; 重试 ('+attempt+'/2)...</span>';
-                const d=window.KaguyaAPI ? await window.KaguyaAPI.testProvider({provider:pv,apiKey:apiKey,apiUrl:apiUrl,model:model}) : await fetch('/agent/api-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:pv,apiKey:apiKey,apiUrl:apiUrl,model:model})}).then(function(r){return r.json();});
+                if(!window.KaguyaAPI) throw new Error('api_client_unavailable');
+                const d=await window.KaguyaAPI.testProvider({provider:pv,apiKey:apiKey,apiUrl:apiUrl,model:model});
                 if(d.success){statusEl.innerHTML='<span style="color:#10b981;">&#x2705; 连接成功! 模型: '+(d.model||'OK')+'</span>';return;}
                 lastError=d.message||d.error||'连接失败';
                 if((d.error&&d.error.includes('401')||d.status_code===401)&&attempt===1){
@@ -14250,7 +14248,15 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             showToast('主题已重置');
         }
         
-        let modelsConfig = JSON.parse(localStorage.getItem('models_config') || '{}');
+        let modelsConfig = {};
+        try {
+            const legacyModelsConfig = JSON.parse(localStorage.getItem('models_config') || '{}');
+            Object.keys(legacyModelsConfig || {}).forEach(function(k){
+                const c=legacyModelsConfig[k]||{};
+                modelsConfig[k]={model:c.model||'',enabled:!!c.enabled,baseUrl:c.baseUrl||'',hasSavedKey:!!c.apiKey,masked_api_key:c.apiKey?'legacy-key-not-migrated':''};
+            });
+            localStorage.removeItem('models_config');
+        } catch(e) { modelsConfig = {}; }
         
         function openModelsConfig() {
             const models = ['openai', 'claude', 'gemini', 'qwen', 'moonshot', 'zhipu', 'mistral', 'groq', 'xai'];
@@ -14261,7 +14267,10 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 const enabledEl = document.getElementById(`${m}Enabled`);
                 const baseUrlEl = document.getElementById(`${m}BaseUrl`);
                 
-                if (apiKeyEl) apiKeyEl.value = config.apiKey || '';
+                if (apiKeyEl) {
+                    apiKeyEl.value = '';
+                    apiKeyEl.placeholder = config.hasSavedKey && config.masked_api_key ? ('已保存: ' + config.masked_api_key) : 'sk-...';
+                }
                 if (modelEl) modelEl.value = config.model || modelEl.options[0].value;
                 if (enabledEl) enabledEl.checked = config.enabled || false;
                 if (baseUrlEl) baseUrlEl.value = config.baseUrl || '';
@@ -14284,14 +14293,24 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 const enabledEl = document.getElementById(`${m}Enabled`);
                 const baseUrlEl = document.getElementById(`${m}BaseUrl`);
                 
+                const existing=modelsConfig[m]||{};
+                const key=apiKeyEl ? (apiKeyEl.value||'').trim() : '';
                 modelsConfig[m] = {
-                    apiKey: apiKeyEl ? apiKeyEl.value : '',
                     model: modelEl ? modelEl.value : '',
                     enabled: enabledEl ? enabledEl.checked : false,
-                    baseUrl: baseUrlEl ? baseUrlEl.value : ''
+                    baseUrl: baseUrlEl ? baseUrlEl.value : '',
+                    hasSavedKey: key ? false : !!existing.hasSavedKey,
+                    masked_api_key: key ? '' : (existing.masked_api_key || '')
                 };
+                if (key && window.KaguyaAPI) {
+                    window.KaguyaAPI.bindDeviceConfig({provider:m,apiKey:key,apiUrl:modelsConfig[m].baseUrl,model:modelsConfig[m].model}).then(function(data){
+                        if(data&&data.success){
+                            modelsConfig[m].hasSavedKey=true;
+                            modelsConfig[m].masked_api_key=data.masked_api_key||'';
+                        }
+                    }).catch(function(){});
+                }
             });
-            localStorage.setItem('models_config', JSON.stringify(modelsConfig));
             closeModal('modelsModal');
             showToast('多模型配置已保存');
         }
@@ -14301,7 +14320,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             statusEl.innerHTML = '<span style="color:var(--primary);">🔄 测试连接中...</span>';
             
             setTimeout(() => {
-                const enabledModels = Object.entries(modelsConfig).filter(([k, v]) => v.enabled && v.apiKey);
+                const enabledModels = Object.entries(modelsConfig).filter(([k, v]) => v.enabled && v.hasSavedKey);
                 if (enabledModels.length > 0) {
                     statusEl.innerHTML = `<span style="color:#10b981;">✅ 已配置 ${enabledModels.length} 个模型</span>`;
                 } else {
@@ -14364,19 +14383,13 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             ]).flat().filter(Boolean);
             
             try {
-                const res = await fetch('/deepseek/chat', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
+                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
+                await window.KaguyaStream.postSSE('/deepseek/chat', {
                         apiKey: deepseekConfig.apiKey,
                         apiUrl: deepseekConfig.apiUrl,
                         model: deepseekConfig.model,
                         messages: messages
-                    })
-                });
-                
-                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
-                await window.KaguyaStream.readSSE(res, {
+                    }, {
                     onReader: function(reader) { currentReader = reader; },
                     shouldStop: function() { return !currentReader; },
                     onFrame: function(data) {
@@ -15377,20 +15390,15 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         async function checkAdvancedApi(){
             try{
                 const extApi=getActiveApiConfig();
-                if(!extApi||!extApi.enabled||!extApi.apiKey){
+                if(!extApi||!extApi.enabled||(!extApi.apiKey&&!extApi.hasSavedKey)){
                     showApiWarningModal('External AI API not configured. Local models do not support advanced IDE features. Please configure an external model (e.g. DeepSeek, Qwen, Claude) in API Center.');
                     return false;
                 }
                 const ctrl=new AbortController();
                 const tid=setTimeout(()=>ctrl.abort(),5000);
-                const r=await fetch('/agent/api-status',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({external_api:extApi}),
-                    signal:ctrl.signal
-                });
+                if(!window.KaguyaAPI) throw new Error('api_client_unavailable');
+                const d=await window.KaguyaAPI.json('/agent/api-status',{external_api:extApi},{signal:ctrl.signal,timeoutMs:0});
                 clearTimeout(tid);
-                const d=await r.json();
                 if(!d.available||d.provider==='ollama'){
                     showApiWarningModal(d.provider==='ollama'?'Local Ollama model does not support IDE features. Please configure an external API (e.g. DeepSeek, Qwen, Claude).':d.message||'Please configure an external AI model');
                     return false;
@@ -15414,8 +15422,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         }
 
         async function openAgentIDE(){
-            const ok=await checkAdvancedApi();
-            if(ok)window.open('/static/agent_ide.html','_blank');
+            window.open('/static/agent_ide.html','_blank');
         }
 
         let _sidebarIdeLoaded=false;
@@ -15619,14 +15626,8 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             if (window.KaguyaAgent) window.KaguyaAgent.begin(agentAbortController);
             try {
                 const extApiRun=getActiveApiConfig();
-                const response = await fetch('/agent/run', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({message: message, history: agentHistory.slice(-10), working_dir: document.querySelector('.main-input')?.getAttribute('data-cwd') || undefined, external_api: extApiRun, device_id: generateDeviceId()}),
-                    signal: agentAbortController.signal
-                });
                 if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
-                await window.KaguyaStream.readSSE(response, {
+                await window.KaguyaStream.postSSE('/agent/run', {message: message, history: agentHistory.slice(-10), working_dir: document.querySelector('.main-input')?.getAttribute('data-cwd') || undefined, external_api: extApiRun, device_id: generateDeviceId()}, {
                     onReader: function(reader) { currentReader = reader; },
                     shouldStop: function() { return !currentReader; },
                     onFrame: function(data) {
@@ -15688,7 +15689,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                             if (bar) bar.style.display = 'none';
                         }
                     }
-                });
+                }, { signal: agentAbortController.signal });
             } catch(e) {
                 if (e && e.name === 'AbortError') {
                     contentEl.innerHTML += '<div class="agent-error-block">Agent run aborted by user</div>';

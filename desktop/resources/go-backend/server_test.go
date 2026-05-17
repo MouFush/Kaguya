@@ -153,6 +153,41 @@ func TestMaskedRoundTripPreservesSavedKey(t *testing.T) {
 	}
 }
 
+func TestExternalConfigAcceptsActiveProviderMap(t *testing.T) {
+	_, h := newTestServer(t)
+	key := "sk-external-map-abcdef"
+	rec := requestJSON(t, h, http.MethodPost, "/external/config", map[string]any{
+		"active_provider": "minimax",
+		"providers": map[string]any{
+			"kimi": map[string]any{
+				"api_key": "sk-wrong-provider",
+				"api_url": "https://api.moonshot.ai/v1",
+				"model":   "kimi-k2.6",
+			},
+			"minimax": map[string]any{
+				"apiKey": key,
+				"apiUrl": "https://api.minimaxi.com/v1",
+				"model":  "MiniMax-M2.7",
+			},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("external config status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got := decodeBody(t, rec)
+	if got["provider"] != "minimax" || got["model"] != "MiniMax-M2.7" {
+		t.Fatalf("active provider map was not flattened: %#v", got)
+	}
+	if strings.Contains(rec.Body.String(), key) {
+		t.Fatalf("external config leaked cleartext key: %s", rec.Body.String())
+	}
+	rec = requestJSON(t, h, http.MethodGet, "/api/account/saved-config", nil)
+	saved := decodeBody(t, rec)
+	if saved["provider"] != "minimax" || saved["has_config"] != true {
+		t.Fatalf("saved config did not use active provider: %#v", saved)
+	}
+}
+
 func TestSafeJoinRejectsWorkspaceEscape(t *testing.T) {
 	root := t.TempDir()
 	if _, err := safeJoin(root, ".."); err == nil {
@@ -666,6 +701,9 @@ func TestAssetAliasesUseAppDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(electronAssetDir, "kaguya.ico"), []byte("ico"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(electronAssetDir, "kaguya.png"), []byte("icon"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir(), AppDir: appDir})
 	if err != nil {
 		t.Fatal(err)
@@ -675,7 +713,7 @@ func TestAssetAliasesUseAppDir(t *testing.T) {
 		body string
 	}{
 		{path: "/header-img", body: "png"},
-		{path: "/sidebar-icon", body: "welcome"},
+		{path: "/sidebar-icon", body: "icon"},
 		{path: "/deepseek-icon", body: "welcome"},
 		{path: "/favicon.ico", body: "ico"},
 	} {

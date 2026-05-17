@@ -86,6 +86,39 @@ func TestProviderChatUsesOpenAICompatibleUpstreamAndDoesNotLeakKey(t *testing.T)
 	}
 }
 
+func TestProviderChatKimiK26PayloadDisablesThinking(t *testing.T) {
+	key := "sk-kimi-secret-abcdef"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["max_tokens"] != nil {
+			t.Fatalf("kimi k2 payload must not use max_tokens: %#v", payload)
+		}
+		if payload["max_completion_tokens"] != float64(1234) {
+			t.Fatalf("kimi k2 max_completion_tokens missing: %#v", payload)
+		}
+		thinking, _ := payload["thinking"].(map[string]any)
+		if thinking == nil || thinking["type"] != "disabled" {
+			t.Fatalf("kimi k2 thinking must be disabled: %#v", payload)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"kimi ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	service := newProviderChatService(upstream.Client())
+	cfg := deviceConfig{Provider: "kimi", APIURL: upstream.URL, APIKey: key, Model: "kimi-k2.6"}
+	result, err := service.complete(context.Background(), cfg, map[string]any{"message": "hello", "max_tokens": 1234, "thinking": map[string]any{"type": "enabled"}}, providerChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StatusCode != http.StatusOK || result.JSON["response"] != "kimi ok" {
+		t.Fatalf("unexpected kimi response: status=%d json=%#v", result.StatusCode, result.JSON)
+	}
+}
+
 func TestProviderChatOpenAICompatibleResponse(t *testing.T) {
 	key := "sk-openai-secret"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

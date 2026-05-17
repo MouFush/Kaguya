@@ -379,7 +379,14 @@ func (s *Server) imageAssetCandidates(name string) []imageAssetCandidate {
 	candidates := []imageAssetCandidate{{root: appAssets, name: name}}
 
 	switch name {
-	case "sidebar-icon.png", "deepseek-icon.png":
+	case "sidebar-icon.png":
+		candidates = append(candidates,
+			imageAssetCandidate{root: appAssets, name: "kaguya.png"},
+			imageAssetCandidate{root: electronAssets, name: "kaguya.png"},
+			imageAssetCandidate{root: appAssets, name: "kaguya.ico"},
+			imageAssetCandidate{root: electronAssets, name: "kaguya.ico"},
+		)
+	case "deepseek-icon.png":
 		candidates = append(candidates,
 			imageAssetCandidate{root: appAssets, name: "kaguya-welcome.png"},
 			imageAssetCandidate{root: appAssets, name: "kaguya-header.png"},
@@ -560,6 +567,7 @@ func (s *Server) deviceBind(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
+	payload = flattenProviderPayload(payload)
 	existing, _ := s.loadDeviceConfig()
 	next := deviceConfig{
 		DeviceID: firstString(payload, "device_id", "deviceId"),
@@ -2207,6 +2215,14 @@ func normalizeProviderDefaults(cfg *deviceConfig) {
 			cfg.Model = "deepseek-chat"
 		}
 	}
+	if provider == "minimax" {
+		if cfg.APIURL == "" {
+			cfg.APIURL = "https://api.minimaxi.com/v1"
+		}
+		if cfg.Model == "" {
+			cfg.Model = "MiniMax-M2.7"
+		}
+	}
 }
 
 func chatCompletionsURL(base string) string {
@@ -2248,6 +2264,7 @@ func (s *Server) normalizedConfig(payload map[string]any) deviceConfig {
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	payload = flattenProviderPayload(payload)
 	existing, _ := s.loadDeviceConfig()
 	cfg := deviceConfig{
 		DeviceID: firstString(payload, "device_id", "deviceId"),
@@ -2292,6 +2309,41 @@ func (s *Server) normalizedConfig(payload map[string]any) deviceConfig {
 	}
 	normalizeProviderDefaults(&cfg)
 	return cfg
+}
+
+func flattenProviderPayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	providers, ok := payload["providers"].(map[string]any)
+	if !ok || len(providers) == 0 {
+		return payload
+	}
+	active := firstString(payload, "active_provider", "activeProvider", "provider")
+	if active == "" {
+		for key := range providers {
+			active = key
+			break
+		}
+	}
+	selected, ok := providers[active].(map[string]any)
+	if !ok {
+		return payload
+	}
+	flat := map[string]any{}
+	for k, v := range payload {
+		if k == "providers" {
+			continue
+		}
+		flat[k] = v
+	}
+	for k, v := range selected {
+		flat[k] = v
+	}
+	if firstString(flat, "provider") == "" {
+		flat["provider"] = active
+	}
+	return flat
 }
 
 func (s *Server) deviceID() string {

@@ -137,6 +137,8 @@ func pcsProviderDefault(provider string) (providerChatDefault, bool) {
 		return providerChatDefault{Canonical: "deepseek", APIURL: "https://api.deepseek.com/v1", Model: "deepseek-chat"}, true
 	case p == "openai" || strings.Contains(p, "openai"):
 		return providerChatDefault{Canonical: "openai", APIURL: "https://api.openai.com/v1", Model: "gpt-4o-mini"}, true
+	case p == "minimax" || strings.Contains(p, "minimax"):
+		return providerChatDefault{Canonical: "minimax", APIURL: "https://api.minimaxi.com/v1", Model: "MiniMax-M2.7"}, true
 	default:
 		return providerChatDefault{}, false
 	}
@@ -345,7 +347,30 @@ func pcsOpenAICompatiblePayload(payload map[string]any, cfg deviceConfig, stream
 	if stream {
 		out["stream"] = true
 	}
+	pcsApplyProviderPayloadQuirks(out, cfg)
 	return out, nil
+}
+
+func pcsApplyProviderPayloadQuirks(out map[string]any, cfg deviceConfig) {
+	if !pcsIsKimiK2Model(cfg.Provider, firstString(out, "model")) {
+		return
+	}
+	out["thinking"] = map[string]any{"type": "disabled"}
+	maxTokens := out["max_completion_tokens"]
+	if maxTokens == nil || maxTokens == "" {
+		maxTokens = out["max_tokens"]
+	}
+	if maxTokens == nil || maxTokens == "" {
+		maxTokens = float64(4096)
+	}
+	out["max_completion_tokens"] = maxTokens
+	delete(out, "max_tokens")
+}
+
+func pcsIsKimiK2Model(provider, model string) bool {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	m := strings.ToLower(strings.TrimSpace(model))
+	return (p == "kimi" || p == "moonshot" || strings.Contains(p, "kimi") || strings.Contains(p, "moonshot")) && strings.HasPrefix(m, "kimi-k2")
 }
 
 func pcsStreamEventFromChunk(chunk map[string]any, cfg deviceConfig) map[string]any {

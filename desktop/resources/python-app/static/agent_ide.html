@@ -26,6 +26,13 @@
     .empty { color: #8c94a8; padding: 24px; }
     .danger { color: #ff8b8b; }
     .ok { color: #7ee2a8; }
+    @media (max-width: 720px) {
+      body { min-height: 100dvh; }
+      header { padding: 0 12px; }
+      main { grid-template-columns: 1fr; grid-template-rows: minmax(180px, 42vh) minmax(240px, 1fr); }
+      aside { border-right: 0; border-bottom: 1px solid #262b36; }
+      .content { min-height: 0; }
+    }
   </style>
 </head>
 <body>
@@ -106,7 +113,10 @@
         tree.appendChild(up);
       }
       if (!entries.length) {
-        tree.innerHTML += '<div class="empty">No files in this folder.</div>';
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'No files in this folder.';
+        tree.appendChild(empty);
       }
       entries.forEach(function(entry) {
         const node = document.createElement('div');
