@@ -3,6 +3,7 @@ const path = require('path');
 
 const staticRoot = path.resolve(__dirname, '..');
 const index = fs.readFileSync(path.join(staticRoot, 'index.html'), 'utf8');
+const agentIde = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'agent_ide.html'), 'utf8');
 const apiClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-api-client.js'), 'utf8');
 const agentClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-agent.js'), 'utf8');
 const uploadClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-file-upload.js'), 'utf8');
@@ -18,6 +19,7 @@ assert(index.includes('/static/js/kaguya-api-client.js'), 'index must load the s
 assert(index.includes('/static/js/kaguya-agent.js'), 'index must load the shared agent client');
 assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the shared upload client');
 assert(index.includes('/static/js/kaguya-stream.js'), 'index must load the shared stream client');
+assert(index.includes('/static/agent_ide.html'), 'index IDE entry must open the static IDE page');
 assert(apiClient.includes('window.KaguyaAPI'), 'API client must expose window.KaguyaAPI');
 assert(apiClient.includes('normalizeProviderPayload'), 'API client must normalize provider payloads');
 assert(apiClient.includes('/api/account/saved-config'), 'API client must support saved-config reload');
@@ -31,6 +33,7 @@ assert(uploadClient.includes('window.KaguyaUpload'), 'Upload client must expose 
 assert(uploadClient.includes('makeBatches'), 'Upload client must support batching');
 assert(uploadClient.includes('batch_index'), 'Upload client must submit batch metadata');
 assert(uploadClient.includes('batch_total'), 'Upload client must submit batch metadata');
+assert(uploadClient.includes('Array.isArray'), 'Upload client must support repeated multipart fields');
 assert(streamClient.includes('window.KaguyaStream'), 'Stream client must expose window.KaguyaStream');
 assert(streamClient.includes('readSSE'), 'Stream client must expose readSSE');
 assert(streamClient.includes('TextDecoder'), 'Stream client must decode SSE chunks');
@@ -38,6 +41,9 @@ assert(index.includes('KaguyaUpload.uploadForm'), 'RAG single upload must use sh
 assert(index.includes('KaguyaUpload.uploadFiles'), 'RAG batch upload must use shared upload client');
 assert(index.includes("KaguyaUpload.uploadForm('/finetune/dataset/upload'"), 'Finetune dataset upload must use shared upload client');
 assert(index.includes("KaguyaUpload.uploadForm('/multimodal/upload'"), 'Multimodal upload must use shared upload client');
+assert(agentIde.includes('/agent/upload-device-files'), 'Static IDE page must upload through the backend device upload API');
+assert(agentIde.includes('webkitdirectory'), 'Static IDE page must support folder upload');
+assert(agentIde.includes('KaguyaUpload.uploadFiles'), 'Static IDE page must use shared upload client');
 assert(index.includes('KaguyaStream.readSSE'), 'Chat streams must use shared stream reader');
 assert(!index.includes('body.getReader'), 'index must not keep private stream readers');
 assert(!index.includes('new TextDecoder'), 'index must not keep private stream decoders');

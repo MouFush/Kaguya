@@ -2833,7 +2833,7 @@
             <div class="sidebar-header">
                 <h2><img src="/sidebar-icon" class="sidebar-logo"> 辉夜助手 <span style="font-size:9px;color:var(--lora-color);">v3.3</span></h2>
                 <button class="new-chat-btn" onclick="newChat()"><span>✨</span> <span>新对话</span></button>
-                <a href="/agent-ide" style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:linear-gradient(135deg,rgba(124,106,255,0.15),rgba(6,182,212,0.1));border:1px solid rgba(124,106,255,0.3);border-radius:8px;color:var(--accent);font-size:11px;font-weight:600;text-decoration:none;cursor:pointer;transition:all 0.2s;margin-left:6px;" onmouseover="this.style.background='linear-gradient(135deg,rgba(124,106,255,0.25),rgba(6,182,212,0.15))';this.style.borderColor='var(--accent)'" onmouseout="this.style.background='linear-gradient(135deg,rgba(124,106,255,0.15),rgba(6,182,212,0.1))';this.style.borderColor='rgba(124,106,255,0.3)'">🖥 IDE</a>
+                <a href="/static/agent_ide.html" style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:linear-gradient(135deg,rgba(124,106,255,0.15),rgba(6,182,212,0.1));border:1px solid rgba(124,106,255,0.3);border-radius:8px;color:var(--accent);font-size:11px;font-weight:600;text-decoration:none;cursor:pointer;transition:all 0.2s;margin-left:6px;" onmouseover="this.style.background='linear-gradient(135deg,rgba(124,106,255,0.25),rgba(6,182,212,0.15))';this.style.borderColor='var(--accent)'" onmouseout="this.style.background='linear-gradient(135deg,rgba(124,106,255,0.15),rgba(6,182,212,0.1))';this.style.borderColor='rgba(124,106,255,0.3)'">🖥 IDE</a>
             </div>
             <div class="sidebar-tabs">
                 <button class="sidebar-tab active" onclick="switchTab('chats', this)">对话</button>
@@ -15373,7 +15373,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
 
         async function openAgentIDE(){
             const ok=await checkAdvancedApi();
-            if(ok)window.open('/agent-ide','_blank');
+            if(ok)window.open('/static/agent_ide.html','_blank');
         }
 
         let _sidebarIdeLoaded=false;
@@ -15450,7 +15450,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         async function sidebarIdeOpenFile(path,name){
             const ok=await checkAdvancedApi();
             if(!ok)return;
-            window.open('/agent-ide','_blank');
+            window.open('/static/agent_ide.html','_blank');
         }
 
         function sidebarIdeRefresh(){
@@ -15491,7 +15491,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         async function sidebarIdeCompile(){
             const ok=await checkAdvancedApi();
             if(!ok)return;
-            window.open('/agent-ide','_blank');
+            window.open('/static/agent_ide.html','_blank');
         }
 
         async function toggleAgentMode() {

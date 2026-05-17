@@ -66,7 +66,12 @@
       });
       if (opts.extraFields) {
         Object.keys(opts.extraFields).forEach(function (key) {
-          formData.append(key, opts.extraFields[key]);
+          const value = opts.extraFields[key];
+          if (Array.isArray(value)) {
+            value.forEach(function (item) { formData.append(key, item); });
+          } else {
+            formData.append(key, value);
+          }
         });
       }
       formData.append('batch_index', String(index + 1));

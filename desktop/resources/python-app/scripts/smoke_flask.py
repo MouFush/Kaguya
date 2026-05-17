@@ -93,6 +93,7 @@ def main() -> int:
 
         checks = [
             ("GET", "/", None, False),
+            ("GET", "/static/agent_ide.html", None, False),
             ("GET", "/static/js/kaguya-api-client.js", None, False),
             ("GET", "/static/js/kaguya-agent.js", None, False),
             ("GET", "/static/js/kaguya-file-upload.js", None, False),
