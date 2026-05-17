@@ -1,0 +1,116 @@
+(function () {
+  'use strict';
+
+  window.API_PROVIDERS = {
+    deepseek: {
+      name: 'DeepSeek',
+      color: '#4f46e5',
+      icon: '&#x1F916;',
+      url: 'https://api.deepseek.com',
+      models: [
+        { id: 'deepseek-chat', label: 'DeepSeek V3.2 (通用对话)' },
+        { id: 'deepseek-reasoner', label: 'DeepSeek R1 (深度推理)' },
+        { id: 'deepseek-coder', label: 'DeepSeek Coder (代码专用)' },
+        { id: 'deepseek-v3.2-lite', label: 'DeepSeek V3.2 Lite (轻量)' },
+      ],
+      docUrl: 'https://platform.deepseek.com',
+    },
+    glm: {
+      name: 'GLM (智谱)',
+      color: '#10b981',
+      icon: '&#x1F4A1;',
+      url: 'https://open.bigmodel.cn/api/paas/v4',
+      models: [
+        { id: 'glm-5', label: 'GLM-5 (最新旗舰)' },
+        { id: 'glm-5-plus', label: 'GLM-5 Plus (增强版)' },
+        { id: 'glm-4-flash', label: 'GLM-4 Flash (快速)' },
+        { id: 'glm-4-long', label: 'GLM-4 Long (长文本)' },
+      ],
+      docUrl: 'https://open.bigmodel.cn',
+    },
+    claude: {
+      name: 'Claude (Anthropic)',
+      color: '#d97706',
+      icon: '&#x1F9D0;',
+      url: 'https://api.anthropic.com/v1/messages',
+      models: [
+        { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 (最强)' },
+        { id: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+        { id: 'claude-sonnet-4', label: 'Claude Sonnet 4 (均衡)' },
+        { id: 'claude-haiku-3-5', label: 'Claude Haiku 3.5 (快速)' },
+      ],
+      docUrl: 'https://console.anthropic.com',
+    },
+    openai: {
+      name: 'OpenAI',
+      color: '#10a37f',
+      icon: '&#x1F9E0;',
+      url: 'https://api.openai.com/v1/chat/completions',
+      models: [
+        { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex (代码)' },
+        { id: 'gpt-5.4', label: 'GPT-5.4 (最新旗舰)' },
+        { id: 'gpt-4o', label: 'GPT-4o (多模态)' },
+        { id: 'o4-mini', label: 'O4 Mini (快速)' },
+      ],
+      docUrl: 'https://platform.openai.com',
+    },
+    kimi: {
+      name: 'Kimi (月之暗面)',
+      color: '#7c3aed',
+      icon: '&#x1F31C;',
+      url: 'https://api.moonshot.ai/v1',
+      models: [
+        { id: 'kimi-k2.6', label: 'Kimi K2.6 (最新)' },
+        { id: 'kimi-k2.5', label: 'Kimi K2.5' },
+        { id: 'moonshot-v1-auto', label: 'Moonshot V1 Auto' },
+        { id: 'moonshot-v1-128k', label: 'Moonshot V1 128K' },
+        { id: 'moonshot-v1-32k', label: 'Moonshot V1 32K' },
+      ],
+      docUrl: 'https://platform.kimi.ai',
+    },
+    minimax: {
+      name: 'MiniMax',
+      color: '#ec4899',
+      icon: '&#x26A1;',
+      url: 'https://api.minimaxi.com/v1',
+      models: [
+        { id: 'MiniMax-M2.7', label: 'MiniMax M2.7 (最新)' },
+        { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax M2.7 Highspeed' },
+        { id: 'MiniMax-M2.5', label: 'MiniMax M2.5' },
+        { id: 'abab6.5s-chat', label: 'abab 6.5s Chat' },
+        { id: 'abab6.5t-chat', label: 'abab 6.5t Chat' },
+        { id: 'abab5.5s-chat', label: 'abab 5.5s Chat' },
+      ],
+      docUrl: 'https://platform.minimaxi.com',
+    },
+    gemini: {
+      name: 'Gemini (Google)',
+      color: '#4285f4',
+      icon: '&#x1F52E;',
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+      models: [
+        { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro (最新)' },
+        { id: 'gemini-3.1-ultra', label: 'Gemini 3.1 Ultra (最强)' },
+        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (快速)' },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (均衡)' },
+      ],
+      docUrl: 'https://ai.google.dev',
+    },
+    qwen: {
+      name: 'Qwen (通义千问)',
+      color: '#ff6a00',
+      icon: '&#x1F525;',
+      url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      models: [
+        { id: 'qwen-max', label: 'Qwen-Max' },
+        { id: 'qwen-plus', label: 'Qwen-Plus' },
+        { id: 'qwen-turbo', label: 'Qwen-Turbo' },
+        { id: 'qwen-long', label: 'Qwen-Long' },
+        { id: 'qwen-coder-plus', label: 'Qwen-Coder-Plus' },
+        { id: 'qwen-vl-max', label: 'Qwen-VL-Max' },
+        { id: 'qwen-math-plus', label: 'Qwen-Math-Plus' },
+      ],
+      docUrl: 'https://dashscope.console.aliyun.com',
+    },
+  };
+})();

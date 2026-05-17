@@ -8,6 +8,9 @@ const apiClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-a
 const agentClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-agent.js'), 'utf8');
 const uploadClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-file-upload.js'), 'utf8');
 const streamClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-stream.js'), 'utf8');
+const uiUtils = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-ui-utils.js'), 'utf8');
+const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-provider-config.js'), 'utf8');
+const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 
 function assert(condition, message) {
   if (!condition) {
@@ -19,6 +22,9 @@ assert(index.includes('/static/js/kaguya-api-client.js'), 'index must load the s
 assert(index.includes('/static/js/kaguya-agent.js'), 'index must load the shared agent client');
 assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the shared upload client');
 assert(index.includes('/static/js/kaguya-stream.js'), 'index must load the shared stream client');
+assert(index.includes('/static/js/kaguya-ui-utils.js'), 'index must load shared UI utilities');
+assert(index.includes('/static/js/kaguya-provider-config.js'), 'index must load shared provider config');
+assert(index.includes('/static/js/kaguya-scene-config.js'), 'index must load shared scene config');
 assert(index.includes('/static/agent_ide.html'), 'index IDE entry must open the static IDE page');
 assert(index.includes('hydrateSavedApiConfig'), 'index must hydrate saved device API config on startup');
 assert(index.includes('KaguyaAPI.loadSavedConfig'), 'saved API config hydration must use shared API client');
@@ -44,6 +50,22 @@ assert(streamClient.includes('readSSE'), 'Stream client must expose readSSE');
 assert(streamClient.includes('postSSE'), 'Stream client must expose checked POST SSE helper');
 assert(streamClient.includes('parseErrorResponse'), 'Stream client must parse non-OK stream errors');
 assert(streamClient.includes('TextDecoder'), 'Stream client must decode SSE chunks');
+assert(uiUtils.includes('window.KaguyaUIUtils'), 'UI utilities must expose window.KaguyaUIUtils');
+assert(uiUtils.includes('safeHighlight'), 'UI utilities must own safeHighlight');
+assert(uiUtils.includes('toggleCodeFold'), 'UI utilities must own code fold handlers');
+assert(uiUtils.includes('crudUpdate'), 'UI utilities must own CRUD update helper');
+assert(uiUtils.includes('debouncedSaveLS'), 'UI utilities must own debounced localStorage helper');
+assert(!index.includes('function safeHighlight'), 'index must not re-own safeHighlight');
+assert(!index.includes('function crudUpdate'), 'index must not re-own CRUD helpers');
+assert(!index.includes('function debouncedSaveLS'), 'index must not re-own localStorage debounce helper');
+assert(providerConfig.includes('window.API_PROVIDERS'), 'provider config must expose window.API_PROVIDERS');
+assert(providerConfig.includes('kimi-k2.6'), 'provider config must include Kimi K2.6');
+assert(providerConfig.includes('MiniMax-M2.7'), 'provider config must include MiniMax M2.7');
+assert(!index.includes('const API_PROVIDERS={'), 'index must not own provider schema');
+assert(sceneConfig.includes('window.SCENE_CATEGORIES'), 'scene config must expose SCENE_CATEGORIES');
+assert(sceneConfig.includes('window.SCENE_UI_CONFIG'), 'scene config must expose SCENE_UI_CONFIG');
+assert(sceneConfig.includes('ecommerce'), 'scene config must include ecommerce scene');
+assert(!index.includes('const SCENE_UI_CONFIG ='), 'index must not own scene schema');
 assert(index.includes('KaguyaUpload.uploadForm'), 'RAG single upload must use shared upload client');
 assert(index.includes('KaguyaUpload.uploadFiles'), 'RAG batch upload must use shared upload client');
 assert(index.includes("KaguyaUpload.uploadForm('/finetune/dataset/upload'"), 'Finetune dataset upload must use shared upload client');
