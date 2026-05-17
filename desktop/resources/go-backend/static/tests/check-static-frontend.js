@@ -37,6 +37,7 @@ assert(streamClient.includes('TextDecoder'), 'Stream client must decode SSE chun
 assert(index.includes('KaguyaUpload.uploadForm'), 'RAG single upload must use shared upload client');
 assert(index.includes('KaguyaUpload.uploadFiles'), 'RAG batch upload must use shared upload client');
 assert(index.includes('KaguyaStream.readSSE'), 'Chat streams must use shared stream reader');
+assert(!index.includes("const decoder = new TextDecoder();\n                let buffer = '';"), 'Agent run must not keep a private SSE parser');
 assert(index.includes('KaguyaAgent.begin'), 'Agent run must register browser abort controller');
 assert(index.includes('KaguyaAgent.observeFrame'), 'Agent SSE frames must be observed for run_id');
 assert(index.includes("data.type === 'run_started'"), 'Agent SSE run_started frame must be handled');
