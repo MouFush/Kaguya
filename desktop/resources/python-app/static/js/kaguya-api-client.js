@@ -107,6 +107,18 @@
     return request(path, Object.assign({ method: 'GET' }, options || {}));
   }
 
+  function del(path, options) {
+    return request(path, Object.assign({ method: 'DELETE' }, options || {}));
+  }
+
+  function put(path, payload, options) {
+    return request(path, Object.assign({
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    }, options || {}));
+  }
+
   async function loadSavedConfig() {
     const data = await get('/api/account/saved-config');
     if (data && data.success && data.has_config) {
@@ -153,6 +165,8 @@
   window.KaguyaAPI = {
     request,
     get,
+    del,
+    put,
     json,
     normalizeProviderPayload,
     maskApiKey,

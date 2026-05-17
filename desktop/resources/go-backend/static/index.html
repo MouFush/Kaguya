@@ -3400,7 +3400,9 @@
                                     <option value="mistral">Mistral</option>
                                     <option value="groq">Groq</option>
                                     <option value="xai">xAI (Grok)</option>
+                                    <option value="kimi">Kimi K2.6</option>
                                     <option value="moonshot">Moonshot</option>
+                                    <option value="minimax">MiniMax</option>
                                     <option value="qwen">Qwen API</option>
                                     <option value="zhipu">Zhipu</option>
                                 </select>
@@ -6534,13 +6536,15 @@
             return overlay;
         }
         function crudUpdate(endpoint, id, payload, cb) {
-            fetch(`${endpoint}/${id}/status`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) })
-            .then(r => r.json()).then(d => { if (!d.success) return showToast(d.error || '更新失败'); if (cb) cb(d); else loadProjectCenter(); }).catch(() => showToast('网络错误'));
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.json(`${endpoint}/${id}/status`, payload)
+            .then(d => { if (!d.success) return showToast(d.error || d.message || '更新失败'); if (cb) cb(d); else loadProjectCenter(); }).catch(() => showToast('网络错误'));
         }
         function crudDelete(endpoint, id, cb) {
             if (!confirm('确定删除?')) return;
-            fetch(`${endpoint}/${id}`, { method: 'DELETE' })
-            .then(r => r.json()).then(d => { if (!d.success) return showToast(d.error || '删除失败'); if (cb) cb(d); else loadProjectCenter(); }).catch(() => showToast('网络错误'));
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.del(`${endpoint}/${id}`)
+            .then(d => { if (!d.success) return showToast(d.error || d.message || '删除失败'); if (cb) cb(d); else loadProjectCenter(); }).catch(() => showToast('网络错误'));
         }
         function renderKpiCards(container, cards) {
             const el = typeof container === 'string' ? $(container) : container;
@@ -6721,18 +6725,22 @@
         }
         
         function loadRagDocuments() {
-            fetch('/rag/documents').then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return;
+            window.KaguyaAPI.get('/rag/documents').then(data => {
                 if (data.success) {
                     ragDocuments = data.documents;
                     renderRagDocList();
                     updateRagStats();
                     renderFeatureCenterMeta();
+                } else if (data.error) {
+                    console.warn('RAG documents unavailable:', data);
                 }
             });
         }
         
         function updateRagStats() {
-            fetch('/rag/stats').then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return;
+            window.KaguyaAPI.get('/rag/stats').then(data => {
                 if (data.success) {
                     const stats = data.stats;
                     const docsEl = $('ragStatDocs');
@@ -6744,6 +6752,8 @@
                     const ragStatsEl = document.getElementById('ragStats');
                     const cacheInfo = stats.cache_size > 0 ? ` | 💾 缓存: ${stats.cache_size}` : '';
                     if (ragStatsEl) ragStatsEl.title = `唯一文档: ${stats.unique_hashes || 0}${cacheInfo}`;
+                } else if (data.error) {
+                    console.warn('RAG stats unavailable:', data);
                 }
             });
         }
@@ -6878,17 +6888,14 @@
                 return;
             }
             
-            fetch('/rag/add_text', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({text: content, title, tags})
-            }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.json('/rag/add_text', {text: content, title, tags}).then(data => {
                 if (data.success) {
                     showToast('文本已添加到知识库');
                     closeModal();
                     loadRagDocuments();
                 } else {
-                    showToast('添加失败: ' + (data.error || '未知错误'));
+                    showToast('添加失败: ' + (data.message || data.error || '未知错误'));
                 }
             });
         }
@@ -6921,12 +6928,14 @@
         
         function deleteRagDoc(docId) {
             if (!confirm('确定删除此文档？相关分块也将被删除。')) return;
-            fetch('/rag/delete/' + docId, { method: 'DELETE' })
-                .then(r => r.json())
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.del('/rag/delete/' + docId)
                 .then(data => {
                     if (data.success) {
                         showToast('文档已删除');
                         loadRagDocuments();
+                    } else {
+                        showToast('删除失败: ' + (data.message || data.error || '未知错误'), 'error');
                     }
                 });
         }
@@ -6939,10 +6948,8 @@
                 return;
             }
             const category = $('ragCategoryFilter').value;
-            fetch('/rag/search', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.json('/rag/search', {
                     query, 
                     top_k: ragSettings.topK, 
                     category: category || null,
@@ -6958,8 +6965,7 @@
                     use_metadata_filter: ragSettings.useMetadataFilter,
                     use_time_weight: ragSettings.useTimeWeight,
                     use_iterative: ragSettings.useIterative
-                })
-            }).then(r => r.json()).then(data => {
+                }).then(data => {
                 if (data.success && data.results.length) {
                     lastRagResults = data.results;
                     var qualityHtml = data.quality ? '<div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">类型: ' + data.query_type + ' | 质量: ' + data.quality.reason + ' (' + data.quality.score + ')</div>' : '';
@@ -6978,7 +6984,8 @@
                     }
                     resultsDiv.innerHTML = qualityHtml + resultsHtml;
                 } else {
-                    resultsDiv.innerHTML = '<div style="color:var(--text-muted);font-size:11px;text-align:center;padding:10px;">未找到相关内容</div>';
+                    const msg = data.error ? ('搜索失败: ' + (data.message || data.error)) : '未找到相关内容';
+                    resultsDiv.innerHTML = '<div style="color:var(--text-muted);font-size:11px;text-align:center;padding:10px;">' + escapeHtml(msg) + '</div>';
                 }
             });
         }
@@ -7127,7 +7134,8 @@
         }
         
         function previewRagDoc(docId) {
-            fetch('/rag/preview/' + docId).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.get('/rag/preview/' + docId).then(data => {
                 if (data.success) {
                     const doc = data.document;
                     const chunks = data.chunks;
@@ -7155,6 +7163,8 @@
                         </div>
                     `;
                     showModal(html);
+                } else {
+                    showToast('预览失败: ' + (data.message || data.error || '未知错误'), 'error');
                 }
             });
         }
@@ -7415,18 +7425,16 @@
             const btn = document.getElementById('sceneGenerateBtn');
             if (btn) btn.disabled = true;
             if (outputEl) outputEl.innerHTML = '<div class="scene-loading">⏳ 外界API正在生成中，请稍候...</div>';
-            fetch('/external/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({active_provider: provider, providers: externalApiConfig.providers || {}, device_id: generateDeviceId()})
-            }).then(() => {
-                fetch('/scenes/generate', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({scene_id: sceneId, provider, fields, device_id: generateDeviceId()})
-                }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) {
+                if (outputEl) outputEl.textContent = '生成失败：API client unavailable';
+                if (btn) btn.disabled = false;
+                return;
+            }
+            window.KaguyaAPI.json('/external/config', {active_provider: provider, providers: externalApiConfig.providers || {}, device_id: generateDeviceId()}).then((configData) => {
+                if (configData && configData.success === false) throw new Error(configData.message || configData.error || '配置保存失败');
+                window.KaguyaAPI.json('/scenes/generate', {scene_id: sceneId, provider, fields, device_id: generateDeviceId()}).then(data => {
                     if (!data.success) {
-                        if (outputEl) outputEl.textContent = `生成失败：${data.error || '未知错误'}`;
+                        if (outputEl) outputEl.textContent = `生成失败：${data.message || data.error || '未知错误'}`;
                         if (btn) btn.disabled = false;
                         return;
                     }
@@ -7437,6 +7445,9 @@
                     if (outputEl) outputEl.textContent = '生成失败：网络异常';
                     if (btn) btn.disabled = false;
                 });
+            }).catch((error) => {
+                if (outputEl) outputEl.textContent = '生成失败：' + (error.message || '配置保存失败');
+                if (btn) btn.disabled = false;
             });
         }
 
@@ -7480,7 +7491,8 @@
         }
 
         function loadSceneHistory() {
-            fetch('/scenes/history?scene_id=' + currentSceneId).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return;
+            window.KaguyaAPI.get('/scenes/history?scene_id=' + encodeURIComponent(currentSceneId)).then(data => {
                 if (data.success) {
                     sceneHistoryList = data.history || [];
                     renderSceneHistoryPanel();
@@ -7533,15 +7545,14 @@
         }
 
         function clearSceneHistory() {
-            fetch('/scenes/history', {
-                method: 'DELETE',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({})
-            }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.del('/scenes/history').then(data => {
                 if (data.success) {
                     sceneHistoryList = [];
                     renderSceneHistoryPanel();
                     showToast('历史记录已清空');
+                } else {
+                    showToast('清空失败: ' + (data.message || data.error || '未知错误'), 'error');
                 }
             });
         }
@@ -7570,7 +7581,8 @@
         }
 
         function loadExternalApiConfig() {
-            fetch('/external/config?device_id='+generateDeviceId()).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return;
+            window.KaguyaAPI.get('/external/config?device_id='+encodeURIComponent(generateDeviceId())).then(data => {
                 if (!data.success) return;
                 externalApiConfig = {active_provider: data.active_provider || 'deepseek', providers: data.providers || {}};
                 const selectEl = $('sceneProviderSelect');
@@ -7584,13 +7596,13 @@
         function saveExternalApiConfig() {
             const provider = syncSceneConfigFromInputs();
             const statusEl = document.getElementById('sceneApiStatus');
-            fetch('/external/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({active_provider: provider, providers: externalApiConfig.providers || {}, device_id: generateDeviceId()})
-            }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) {
+                if (statusEl) statusEl.textContent = '保存失败: API client unavailable';
+                return;
+            }
+            window.KaguyaAPI.json('/external/config', {active_provider: provider, providers: externalApiConfig.providers || {}, device_id: generateDeviceId()}).then(data => {
                 if (!data.success) {
-                    if (statusEl) statusEl.textContent = `保存失败: ${data.error || '未知错误'}`;
+                    if (statusEl) statusEl.textContent = `保存失败: ${data.message || data.error || '未知错误'}`;
                     return;
                 }
                 if (statusEl) statusEl.textContent = `保存成功，当前Provider: ${provider}`;
@@ -7604,23 +7616,22 @@
             const provider = syncSceneConfigFromInputs();
             const statusEl = document.getElementById('sceneApiStatus');
             const did = generateDeviceId();
-            fetch('/external/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({active_provider: provider, providers: externalApiConfig.providers || {}, device_id: did})
-            }).then(() => {
-                fetch('/external/test', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({provider, device_id: did})
-                }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) {
+                if (statusEl) statusEl.textContent = '连通失败: API client unavailable';
+                return;
+            }
+            window.KaguyaAPI.json('/external/config', {active_provider: provider, providers: externalApiConfig.providers || {}, device_id: did}).then((configData) => {
+                if (configData && configData.success === false) throw new Error(configData.message || configData.error || '配置保存失败');
+                window.KaguyaAPI.json('/external/test', {provider, device_id: did}).then(data => {
                     if (!data.success) {
-                        if (statusEl) statusEl.textContent = `连通失败: ${data.error || '未知错误'}`;
+                        if (statusEl) statusEl.textContent = `连通失败: ${data.message || data.error || '未知错误'}`;
                         return;
                     }
                     if (statusEl) statusEl.textContent = `连通成功: ${data.provider} / ${data.message || ''}`;
                     showToast('外界API连通成功');
                 });
+            }).catch((error) => {
+                if (statusEl) statusEl.textContent = '连通失败: ' + (error.message || '网络异常');
             });
         }
 
@@ -7780,8 +7791,9 @@
         }
         
         function loadLoraList() {
-            fetch('/lora/list').then(r => r.json()).then(data => {
-                document.getElementById('loraList').innerHTML = data.loras.map(l => {
+            if (!window.KaguyaAPI) return;
+            window.KaguyaAPI.get('/lora/list').then(data => {
+                document.getElementById('loraList').innerHTML = (data.loras || []).map(l => {
                     const icon = l.icon || '🤖', color = l.color || '#10b981';
                     return `<div class="lora-item ${l.id === currentLora ? 'active' : ''}" onclick="selectLora('${l.id}')">
                         <div class="item-icon" style="background:linear-gradient(135deg,${color},${color}dd);">${icon}</div>
@@ -7835,11 +7847,13 @@
             previewDiv.innerHTML = '';
             resultsDiv.innerHTML = '<div class="web-search-status">🔍 正在搜索: ' + escapeHtml(query) + '...</div>';
             
-            fetch('/web/search', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({query: query, max_results: 10})
-            }).then(function(r) { return r.json(); }).then(function(data) {
+            if (!window.KaguyaAPI) {
+                btn.disabled = false;
+                btn.textContent = '🔍 搜索';
+                resultsDiv.innerHTML = '<div class="web-search-status">API client unavailable</div>';
+                return;
+            }
+            window.KaguyaAPI.json('/web/search', {query: query, max_results: 10}).then(function(data) {
                 btn.disabled = false;
                 btn.textContent = '🔍 搜索';
                 
@@ -7876,11 +7890,11 @@
             var previewDiv = document.getElementById('webPreviewPanel');
             previewDiv.innerHTML = '<div class="web-preview-panel"><div class="web-search-status">📖 正在加载页面内容...</div></div>';
             
-            fetch('/web/fetch', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({url: url})
-            }).then(function(r) { return r.json(); }).then(function(data) {
+            if (!window.KaguyaAPI) {
+                previewDiv.innerHTML = '<div class="web-preview-panel"><div class="web-search-status">API client unavailable</div></div>';
+                return;
+            }
+            window.KaguyaAPI.json('/web/fetch', {url: url}).then(function(data) {
                 if (data.success && data.data && data.data.content) {
                     previewDiv.innerHTML = '<div class="web-preview-panel">' +
                         '<div class="web-preview-title">' + escapeHtml(data.data.title || title) + '</div>' +
@@ -7928,10 +7942,8 @@
         }
         
         function selectLora(id) {
-            fetch('/lora/load', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({lora_id: id})
-            }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) return showToast('API client unavailable');
+            window.KaguyaAPI.json('/lora/load', {lora_id: id}).then(data => {
                 if (data.success) {
                     currentLora = id;
                     loadLoraList();
@@ -15451,13 +15463,9 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         async function sidebarIdeLoadTree(path){
             const deviceId=localStorage.getItem('kaguya_device_id')||'';
             try{
-                const r=await fetch('/agent/file-tree',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({path:path||undefined,device_id:deviceId})
-                });
-                const d=await r.json();
-                if(d.error){console.error('IDE tree error:',d.error);return;}
+                if(!window.KaguyaAPI)throw new Error('api_client_unavailable');
+                const d=await window.KaguyaAPI.json('/agent/file-tree',{path:path||undefined,device_id:deviceId});
+                if(d.error){console.error('IDE tree error:',d);return;}
                 _sidebarIdeCurrentPath=d.path;
                 if(d.user_name){
                     const avatar=document.getElementById('sidebarIdeAvatar');
@@ -15512,12 +15520,11 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             if(!name||!name.trim())return;
             const deviceId=localStorage.getItem('kaguya_device_id')||'';
             try{
-                const idR=await fetch('/agent/identify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:deviceId})});
-                const idD=await idR.json();
+                if(!window.KaguyaAPI)throw new Error('api_client_unavailable');
+                const idD=await window.KaguyaAPI.json('/agent/identify',{device_id:deviceId});
                 const filePath=idD.workspace+'/'+name.trim();
-                const r=await fetch('/agent/file-write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:filePath,content:'',device_id:deviceId})});
-                const d=await r.json();
-                if(d.error)showToast('创建失败: '+d.error,'error');
+                const d=await window.KaguyaAPI.json('/agent/file-write',{path:filePath,content:'',device_id:deviceId});
+                if(d.error)showToast('创建失败: '+(d.message||d.error),'error');
                 else{showToast('文件已创建: '+name.trim(),'success');sidebarIdeLoadTree(_sidebarIdeCurrentPath);}
             }catch(e){showToast('创建失败: '+e.message,'error');}
         }
@@ -15527,12 +15534,11 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             if(!name||!name.trim())return;
             const deviceId=localStorage.getItem('kaguya_device_id')||'';
             try{
-                const idR=await fetch('/agent/identify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:deviceId})});
-                const idD=await idR.json();
+                if(!window.KaguyaAPI)throw new Error('api_client_unavailable');
+                const idD=await window.KaguyaAPI.json('/agent/identify',{device_id:deviceId});
                 const dirPath=idD.workspace+'/'+name.trim();
-                const r=await fetch('/agent/file-write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:dirPath,content:'',is_dir:true,device_id:deviceId})});
-                const d=await r.json();
-                if(d.error)showToast('创建失败: '+d.error,'error');
+                const d=await window.KaguyaAPI.json('/agent/file-write',{path:dirPath,content:'',is_dir:true,device_id:deviceId});
+                if(d.error)showToast('创建失败: '+(d.message||d.error),'error');
                 else{showToast('文件夹已创建: '+name.trim(),'success');sidebarIdeLoadTree(_sidebarIdeCurrentPath);}
             }catch(e){showToast('创建失败: '+e.message,'error');}
         }
@@ -15593,12 +15599,8 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         async function sendAgentMessage(message) {
             try {
                 const extApi=getActiveApiConfig();
-                const sr = await fetch('/agent/api-status',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({external_api:extApi})
-                });
-                const sd = await sr.json();
+                if(!window.KaguyaAPI)throw new Error('api_client_unavailable');
+                const sd = await window.KaguyaAPI.json('/agent/api-status',{external_api:extApi});
                 if (!sd.available) {
                     showToast('API not connected: ' + (sd.message || 'Please configure a model first'), 'error');
                     isGenerating = false;
