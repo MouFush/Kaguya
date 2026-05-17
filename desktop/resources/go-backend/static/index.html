@@ -6577,12 +6577,11 @@
 
         
         function handleStreamResponse(response, contentEl, thinkingEl, onDone) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
             let fullContent = '';
             let fullThinking = '';
             let rafId = null;
             let needsScroll = false;
+            let finalized = false;
 
             function scheduleScroll() {
                 if (!rafId) {
@@ -6594,41 +6593,33 @@
                 }
             }
 
-            return reader.read().then(function processChunk({done, value}) {
-                if (done) {
-                    if (onDone) onDone(fullContent, fullThinking);
-                    return {content: fullContent, thinking: fullThinking};
-                }
-                const chunk = decoder.decode(value, {stream: true});
-                const lines = chunk.split('\n');
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            if (data.content) {
-                                fullContent += data.content;
-                                if (contentEl) {
-                                    contentEl.innerHTML = settings.markdown ? safeMarkedParse(fullContent) : fullContent.replace(/\n/g, '<br>');
-                                    needsScroll = true;
-                                }
-                            }
-                            if (data.thinking) {
-                                fullThinking += data.thinking;
-                                if (thinkingEl) {
-                                    thinkingEl.textContent = fullThinking;
-                                    thinkingEl.style.display = 'block';
-                                    needsScroll = true;
-                                }
-                            }
-                            if (data.done) {
-                                if (onDone) onDone(fullContent, fullThinking);
-                                return {content: fullContent, thinking: fullThinking};
-                            }
-                        } catch(e) {}
+            if (!window.KaguyaStream) return Promise.reject(new Error('stream_helper_unavailable'));
+            return window.KaguyaStream.readSSE(response, {
+                onFrame: function(data) {
+                    if (data.content) {
+                        fullContent += data.content;
+                        if (contentEl) {
+                            contentEl.innerHTML = settings.markdown ? safeMarkedParse(fullContent) : fullContent.replace(/\n/g, '<br>');
+                            needsScroll = true;
+                        }
+                    }
+                    if (data.thinking) {
+                        fullThinking += data.thinking;
+                        if (thinkingEl) {
+                            thinkingEl.textContent = fullThinking;
+                            thinkingEl.style.display = 'block';
+                            needsScroll = true;
+                        }
+                    }
+                    if (needsScroll) { scheduleScroll(); needsScroll = false; }
+                    if (data.done && !finalized) {
+                        finalized = true;
+                        if (onDone) onDone(fullContent, fullThinking);
                     }
                 }
-                if (needsScroll) { scheduleScroll(); needsScroll = false; }
-                return reader.read().then(processChunk);
+            }).then(function() {
+                if (!finalized && onDone) onDone(fullContent, fullThinking);
+                return {content: fullContent, thinking: fullThinking};
             });
         }
 
@@ -13382,45 +13373,33 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                     })
                 });
                 
-                currentReader = res.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    if (!currentReader) break;
-                    const { done, value } = await currentReader.read();
-                    if (done) break;
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split("\n");
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                if (data.content) {
-                                    fullContent += data.content;
-                                    // 生成过程中显示原始文本，避免 markdown 解析错误
-                                    contentEl.innerHTML = fullContent.replace(/\n/g, '<br>');
-                                    requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-                                }
-                                // 忽略 thinking 类型的数据，不显示思考过程
-                                if (data.done) {
-                                    // 生成完成后渲染 markdown
-                                    if (settings.markdown) {
-                                        contentEl.innerHTML = safeMarkedParse(fullContent);
-                                    }
-                                    if (chat.messages[editingMsgIdx + 1]) {
-                                        chat.messages[editingMsgIdx + 1].content = fullContent;
-                                    } else {
-                                        chat.messages.push({ role: 'assistant', content: fullContent, time: replyTime });
-                                    }
-                                    if (history[histIdx]) history[histIdx][1] = fullContent;
-                                    saveChats();
-                                }
-                            } catch (e) {
-                                console.error('Parse error:', e, 'Line:', line);
-                            }
+                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
+                await window.KaguyaStream.readSSE(res, {
+                    onReader: function(reader) { currentReader = reader; },
+                    shouldStop: function() { return !currentReader; },
+                    onFrame: function(data) {
+                        if (data.content) {
+                            fullContent += data.content;
+                            contentEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+                            requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
                         }
+                        if (data.done) {
+                            if (settings.markdown) {
+                                contentEl.innerHTML = safeMarkedParse(fullContent);
+                            }
+                            if (chat.messages[editingMsgIdx + 1]) {
+                                chat.messages[editingMsgIdx + 1].content = fullContent;
+                            } else {
+                                chat.messages.push({ role: 'assistant', content: fullContent, time: replyTime });
+                            }
+                            if (history[histIdx]) history[histIdx][1] = fullContent;
+                            saveChats();
+                        }
+                    },
+                    onParseError: function(error, line) {
+                        console.error('Parse error:', error, 'Line:', line);
                     }
-                }
+                });
                 currentReader = null;
                 contentEl.id = '';
                 contentEl.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));

@@ -32,6 +32,7 @@ The client normalizes `apiKey/api_key` and `apiUrl/api_url`, handles JSON and st
 - Agent mode now loads `/static/js/kaguya-agent.js`, stores the backend `run_id` from the `run_started` SSE frame, and the stop button calls backend `/agent/abort` in addition to aborting the browser reader.
 - RAG file upload now loads `/static/js/kaguya-file-upload.js`, uses shared upload helpers, sends batch metadata, and reports structured upload errors instead of only surfacing browser-level `Failed to fetch`.
 - Chat streaming now loads `/static/js/kaguya-stream.js` and routes the main `/stream`, `/deepseek/chat`, and `/agent/run` readers through one SSE parser, so chunk buffering and stop handling are not copied into each chat path.
+- The legacy `handleStreamResponse` helper and edited-message regeneration path also use the shared stream reader; `index.html` no longer carries private `body.getReader()` / `TextDecoder` SSE loops.
 - The smoke script checks that the shared API, Agent, upload, and stream helpers are served.
 - `desktop/resources/go-backend/static/tests/check-static-frontend.js` guards the API-client contract and localStorage sanitization.
 
