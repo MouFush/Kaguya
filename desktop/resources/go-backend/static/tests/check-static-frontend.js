@@ -10,11 +10,12 @@ const uploadClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'pytho
 const streamClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-stream.js'), 'utf8');
 const appData = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-app-data.js'), 'utf8');
 const mainClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-main.js'), 'utf8');
+const themeEffects = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-theme-effects.js'), 'utf8');
 const uiUtils = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-ui-utils.js'), 'utf8');
 const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-provider-config.js'), 'utf8');
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
-const appSource = index + '\n' + mainClient;
+const appSource = index + '\n' + mainClient + '\n' + themeEffects;
 
 function assert(condition, message) {
   if (!condition) {
@@ -28,6 +29,7 @@ assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the 
 assert(index.includes('/static/js/kaguya-stream.js'), 'index must load the shared stream client');
 assert(index.includes('/static/js/kaguya-app-data.js'), 'index must load extracted app data');
 assert(index.includes('/static/js/kaguya-main.js'), 'index must load extracted main app script');
+assert(index.includes('/static/js/kaguya-theme-effects.js'), 'index must load extracted theme effects');
 assert(index.includes('/static/js/kaguya-ui-utils.js'), 'index must load shared UI utilities');
 assert(index.includes('/static/js/kaguya-provider-config.js'), 'index must load shared provider config');
 assert(index.includes('/static/js/kaguya-scene-config.js'), 'index must load shared scene config');
@@ -68,6 +70,9 @@ assert(!index.includes('const INTEGRATION_TEMPLATES = ['), 'index must not own i
 assert(!index.includes('const WORKBENCH_TEMPLATES = ['), 'index must not own workbench template data');
 assert(mainClient.includes('function init()'), 'main client must own app initialization');
 assert(mainClient.includes('const isElectron'), 'main client must keep desktop mode detection');
+assert(themeEffects.includes('function toggleStarfieldMode()'), 'theme effects must own starfield controls');
+assert(themeEffects.includes('function toggleWallpaperMode()'), 'theme effects must own wallpaper controls');
+assert(!mainClient.includes('let starfieldEnabled = false'), 'main client must not own theme effect runtime state');
 assert(!index.includes('function init()'), 'index must not keep the large inline main script');
 assert(index.length < 350000, 'index should remain a document shell, not a bundled script blob');
 assert(uiUtils.includes('window.KaguyaUIUtils'), 'UI utilities must expose window.KaguyaUIUtils');
