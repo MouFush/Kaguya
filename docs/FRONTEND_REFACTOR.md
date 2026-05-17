@@ -33,13 +33,13 @@ The client normalizes `apiKey/api_key` and `apiUrl/api_url`, handles JSON and st
 - RAG file upload now loads `/static/js/kaguya-file-upload.js`, uses shared upload helpers, sends batch metadata, and reports structured upload errors instead of only surfacing browser-level `Failed to fetch`.
 - Chat streaming now loads `/static/js/kaguya-stream.js` and routes the main `/stream`, `/deepseek/chat`, and `/agent/run` readers through one SSE parser, so chunk buffering and stop handling are not copied into each chat path.
 - The legacy `handleStreamResponse` helper and edited-message regeneration path also use the shared stream reader; `index.html` no longer carries private `body.getReader()` / `TextDecoder` SSE loops.
+- The IDE entry now opens `/static/agent_ide.html`, a static page served by the existing packaged Go backend without rebuilding the executable. It uses `/agent/file-tree`, `/agent/read-file`, and `/agent/upload-device-files` plus the shared upload helper for file and folder uploads.
 - The smoke script checks that the shared API, Agent, upload, and stream helpers are served.
 - `desktop/resources/go-backend/static/tests/check-static-frontend.js` guards the API-client contract and localStorage sanitization.
 
 ## Next Frontend Cuts
 
-1. Connect IDE/device folder upload to `kaguya-file-upload.js`.
-2. Move chat message rendering into `chat.js`; the raw SSE reader is already shared.
-3. Move provider config UI rendering into `providers.js`.
-4. Move the remaining Agent frame rendering into `agent.js`; the raw Agent SSE reader is already shared.
-5. Split CSS into base/layout/components once JS state is less tangled.
+1. Move chat message rendering into `chat.js`; the raw SSE reader is already shared.
+2. Move provider config UI rendering into `providers.js`.
+3. Move the remaining Agent frame rendering into `agent.js`; the raw Agent SSE reader is already shared.
+4. Split CSS into base/layout/components once JS state is less tangled.
