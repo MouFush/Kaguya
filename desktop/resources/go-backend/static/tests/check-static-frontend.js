@@ -19,6 +19,7 @@ const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'pyt
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
 const appSource = index + '\n' + mainClient + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
+const initBlock = (mainClient.match(/function init\(\) \{[\s\S]*?\n        \}\n\nfunction showWelcome/) || [''])[0];
 
 function assert(condition, message) {
   if (!condition) {
@@ -27,6 +28,8 @@ function assert(condition, message) {
 }
 
 assert(index.includes('/static/js/kaguya-api-client.js'), 'index must load the shared API client');
+assert(index.includes('<script defer src="/static/js/kaguya-api-client.js"'), 'shared API client must not block HTML parsing');
+assert(index.includes('<script defer src="/static/js/kaguya-main.js"'), 'main frontend script must be deferred');
 assert(index.includes('/static/js/kaguya-agent.js'), 'index must load the shared agent client');
 assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the shared upload client');
 assert(index.includes('/static/js/kaguya-stream.js'), 'index must load the shared stream client');
@@ -76,6 +79,17 @@ assert(!index.includes('const INTEGRATION_TEMPLATES = ['), 'index must not own i
 assert(!index.includes('const WORKBENCH_TEMPLATES = ['), 'index must not own workbench template data');
 assert(mainClient.includes('function init()'), 'main client must own app initialization');
 assert(mainClient.includes('const isElectron'), 'main client must keep desktop mode detection');
+assert(initBlock.includes('renderChatList();'), 'static test must locate the init block before checking startup work');
+assert(mainClient.includes('function ensureTabLoaded'), 'main client must lazy-load non-chat tabs');
+assert(index.includes('/static/js/kaguya-rag-panel.js'), 'RAG panel module must remain explicitly loaded');
+assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'workflow/MCP module must remain explicitly loaded');
+assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'enhanced panel module must remain explicitly loaded');
+assert(!mainClient.includes('loadFrontendModule'), 'module wiring must stay explicit instead of hidden behind dynamic script loading');
+assert(!initBlock.includes('loadRagDocuments();'), 'startup must not fetch RAG documents before the user opens that tab');
+assert(!initBlock.includes('loadProjectCenter();'), 'startup must not fetch project center data before the user opens that tab');
+assert(!initBlock.includes('initScenesCenter();'), 'startup must not initialize scenes before the user opens that tab');
+assert(!initBlock.includes('loadLoraList();'), 'startup must not fetch LoRA data before the user opens that tab');
+assert(!initBlock.includes('initSpeechRecognition();'), 'startup must not allocate speech recognition until voice input is used');
 assert(ragPanel.includes('function loadRagDocuments()'), 'RAG panel script must own RAG document loading');
 assert(ragPanel.includes('function searchRagDocs()'), 'RAG panel script must own RAG search');
 assert(ragPanel.includes('function uploadRagFile'), 'RAG panel script must own RAG upload UI');

@@ -180,7 +180,7 @@
             if (_loadedTabs.has(tabId)) return;
             _loadedTabs.add(tabId);
             const loaders = {
-                'rag': () => loadRagDocuments(),
+                'knowledge': () => loadRagDocuments(),
                 'loras': () => loadLoraList(),
                 'tools': () => { renderToolList(); },
                 'roles': () => renderRoleList(),
@@ -189,6 +189,8 @@
                 'finetune': () => { loadFinetuneDatasets(); loadFinetuneJobs(); },
                 'mcp': () => loadMcpPlugins(),
                 'workflow': () => loadWorkflows(),
+                'console': () => loadProjectCenter(),
+                'ecosystem': () => loadProjectCenter(),
                 'project': () => loadProjectCenter(),
                 'multimodal': () => {},
                 'prompts': () => {},
@@ -223,12 +225,6 @@
                 const kbSearchEl = $('kbSearch');
                 if (kbSearchEl) kbSearchEl.addEventListener('input', searchKB);
                 renderChatList();
-                renderRoleList();
-                renderToolList();
-                loadLoraList();
-                loadRagDocuments();
-                loadProjectCenter();
-                initScenesCenter();
                 updateStats();
                 updateApiIndicator();
                 hydrateSavedApiConfig()
@@ -236,7 +232,6 @@
                     .finally(function() { checkExternalApiWarning(); });
                 if (chats.length > 0) loadChat(chats[0].id);
                 else showWelcome();
-                initSpeechRecognition();
                 document.querySelector('.sidebar-tabs')?.addEventListener('click', e => {
                     const tab = e.target.closest('.sidebar-tab');
                     if (tab && tab.dataset.tab) switchTab(tab.dataset.tab, tab);
@@ -742,6 +737,7 @@ function showWelcome() {
         }
         
         function toggleVoiceInput() {
+            if (!recognition) initSpeechRecognition();
             if (!recognition) { showToast('浏览器不支持语音输入'); return; }
             if (isRecording) { recognition.stop(); return; }
             isRecording = true;
@@ -791,7 +787,7 @@ function showWelcome() {
             document.querySelectorAll('[data-role-cat]').forEach(b => b.classList.remove('active'));
             const activeBtn = document.querySelector(`[data-role-cat="${cat}"]`);
             if (activeBtn) activeBtn.classList.add('active');
-            renderRoleList();
+            if (document.getElementById('rolesTab')?.classList.contains('active')) renderRoleList();
         }
 
         function renderRoleList() {
@@ -6259,17 +6255,8 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
             const targetTab = document.getElementById(tab + 'Tab');
             if (!targetTab) return;
             targetTab.classList.add('active');
-            if (tab === 'roles') renderRoleList();
-            if (tab === 'tools') renderToolList();
+            ensureTabLoaded(tab);
             if (tab === 'prompts') renderPromptList();
-            if (tab === 'console') loadProjectCenter();
-            if (tab === 'ecosystem') loadProjectCenter();
-            if (tab === 'scenes') initScenesCenter();
-            if (tab === 'project') loadProjectCenter();
-            if (tab === 'mcp') loadMcpPlugins();
-            if (tab === 'workflow') loadWorkflows();
-            if (tab === 'memory') { refreshMemoryStats(); searchMemories(); }
-            if (tab === 'knowledge') { loadRagDocuments(); }
             if (tab === 'permissions') { loadPermMode(); }
 
         }
