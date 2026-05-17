@@ -10,6 +10,7 @@ const uploadClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'pytho
 const streamClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-stream.js'), 'utf8');
 const appData = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-app-data.js'), 'utf8');
 const mainClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-main.js'), 'utf8');
+const ragPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-rag-panel.js'), 'utf8');
 const workflowMcp = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-workflow-mcp.js'), 'utf8');
 const enhancedPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-enhanced-panels.js'), 'utf8');
 const themeEffects = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-theme-effects.js'), 'utf8');
@@ -17,7 +18,7 @@ const uiUtils = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app
 const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-provider-config.js'), 'utf8');
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
-const appSource = index + '\n' + mainClient + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
+const appSource = index + '\n' + mainClient + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
 
 function assert(condition, message) {
   if (!condition) {
@@ -31,6 +32,7 @@ assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the 
 assert(index.includes('/static/js/kaguya-stream.js'), 'index must load the shared stream client');
 assert(index.includes('/static/js/kaguya-app-data.js'), 'index must load extracted app data');
 assert(index.includes('/static/js/kaguya-main.js'), 'index must load extracted main app script');
+assert(index.includes('/static/js/kaguya-rag-panel.js'), 'index must load extracted RAG panel handlers');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'index must load extracted workflow/MCP handlers');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'index must load extracted enhanced panel handlers');
 assert(index.includes('/static/js/kaguya-theme-effects.js'), 'index must load extracted theme effects');
@@ -74,6 +76,10 @@ assert(!index.includes('const INTEGRATION_TEMPLATES = ['), 'index must not own i
 assert(!index.includes('const WORKBENCH_TEMPLATES = ['), 'index must not own workbench template data');
 assert(mainClient.includes('function init()'), 'main client must own app initialization');
 assert(mainClient.includes('const isElectron'), 'main client must keep desktop mode detection');
+assert(ragPanel.includes('function loadRagDocuments()'), 'RAG panel script must own RAG document loading');
+assert(ragPanel.includes('function searchRagDocs()'), 'RAG panel script must own RAG search');
+assert(ragPanel.includes('function uploadRagFile'), 'RAG panel script must own RAG upload UI');
+assert(!mainClient.includes('function loadRagDocuments()'), 'main client must not own RAG panel internals');
 assert(workflowMcp.includes('function loadWorkflows()'), 'workflow/MCP script must own workflow loading');
 assert(workflowMcp.includes('function loadMcpPlugins()'), 'workflow/MCP script must own MCP plugin loading');
 assert(workflowMcp.includes('detectAndExecuteMcpTool'), 'workflow/MCP script must expose MCP execution detection');
