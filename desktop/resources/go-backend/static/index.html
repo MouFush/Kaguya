@@ -8005,7 +8005,7 @@
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.jsonl,.json,.csv';
-            input.onchange = function(e) {
+            input.onchange = async function(e) {
                 const file = e.target.files[0];
                 if (!file) return;
                 
@@ -8014,17 +8014,19 @@
                 formData.append('name', name);
                 formData.append('format', file.name.split('.').pop());
                 
-                fetch('/finetune/dataset/upload', {
-                    method: 'POST',
-                    body: formData
-                }).then(r => r.json()).then(data => {
+                try {
+                    const data = window.KaguyaUpload
+                        ? await window.KaguyaUpload.uploadForm('/finetune/dataset/upload', formData)
+                        : await fetch('/finetune/dataset/upload', { method: 'POST', body: formData }).then(r => r.json());
                     if (data.success) {
                         showToast(`数据集上传成功，包含 ${data.sample_count} 个样本`);
                         loadFinetuneDatasets();
                     } else {
-                        showToast('上传失败: ' + (data.error || '未知错误'));
+                        showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
                     }
-                });
+                } catch (err) {
+                    showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(err) : (err.message || err)), 'error');
+                }
             };
             input.click();
         }
@@ -8123,7 +8125,7 @@
         let currentMultimodalImage = null;
         let currentImageId = null;
         
-        function uploadMultimodalImage(event) {
+        async function uploadMultimodalImage(event) {
             const file = event.target.files[0];
             if (!file) return;
             
@@ -8141,17 +8143,19 @@
             formData.append('image', file);
             formData.append('task', 'understand');
             
-            fetch('/multimodal/upload', {
-                method: 'POST',
-                body: formData
-            }).then(r => r.json()).then(data => {
+            try {
+                const data = window.KaguyaUpload
+                    ? await window.KaguyaUpload.uploadForm('/multimodal/upload', formData)
+                    : await fetch('/multimodal/upload', { method: 'POST', body: formData }).then(r => r.json());
                 if (data.success) {
                     currentImageId = data.result.image_id;
                     showToast('图片上传成功');
                 } else {
-                    showToast('上传失败: ' + (data.error || '未知错误'));
+                    showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(data) : (data.error || '未知错误')), 'error');
                 }
-            });
+            } catch (err) {
+                showToast('上传失败: ' + (window.KaguyaUpload ? window.KaguyaUpload.summarizeError(err) : (err.message || err)), 'error');
+            }
         }
         
         function analyzeImage(task) {
