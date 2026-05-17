@@ -1235,18 +1235,40 @@ function startMiniServer(port) {
             return;
         }
 
-        if (pathname === '/header-img' || pathname === '/hero-img' || pathname === '/welcome-img') {
-            const imgName = pathname.replace('/', '') + '.png';
-            const mapping = { '/header-img': 'kaguya-header.png', '/hero-img': 'kaguya-hero.png', '/welcome-img': 'kaguya-welcome.png' };
-            const imgPath = path.join(getResourcePath(), 'assets', mapping[pathname]);
-            if (fs.existsSync(imgPath)) {
-                const imgData = fs.readFileSync(imgPath);
-                res.writeHead(200, { 'Content-Type': 'image/png' });
-                res.end(imgData);
-            } else {
-                res.writeHead(404);
-                res.end();
+        const appAssets = path.join(getResourcePath(), 'assets');
+        const electronAssets = path.join(getResourcePath(), '..', 'app.asar.src', 'assets');
+        const miniAssetAliases = {
+            '/header-img': [{ root: appAssets, name: 'kaguya-header.png', type: 'image/png' }],
+            '/hero-img': [{ root: appAssets, name: 'kaguya-hero.png', type: 'image/png' }],
+            '/welcome-img': [{ root: appAssets, name: 'kaguya-welcome.png', type: 'image/png' }],
+            '/sidebar-icon': [
+                { root: appAssets, name: 'sidebar-icon.png', type: 'image/png' },
+                { root: appAssets, name: 'kaguya-welcome.png', type: 'image/png' },
+                { root: appAssets, name: 'kaguya-header.png', type: 'image/png' },
+                { root: electronAssets, name: 'kaguya.png', type: 'image/png' },
+            ],
+            '/deepseek-icon': [
+                { root: appAssets, name: 'deepseek-icon.png', type: 'image/png' },
+                { root: appAssets, name: 'kaguya-welcome.png', type: 'image/png' },
+                { root: electronAssets, name: 'kaguya.png', type: 'image/png' },
+            ],
+            '/favicon.ico': [
+                { root: appAssets, name: 'favicon.ico', type: 'image/x-icon' },
+                { root: electronAssets, name: 'kaguya.ico', type: 'image/x-icon' },
+            ],
+        };
+        if (miniAssetAliases[pathname]) {
+            for (const candidate of miniAssetAliases[pathname]) {
+                const imgPath = path.join(candidate.root, candidate.name);
+                if (fs.existsSync(imgPath)) {
+                    const imgData = fs.readFileSync(imgPath);
+                    res.writeHead(200, { 'Content-Type': candidate.type });
+                    res.end(imgData);
+                    return;
+                }
             }
+            res.writeHead(404);
+            res.end();
             return;
         }
 

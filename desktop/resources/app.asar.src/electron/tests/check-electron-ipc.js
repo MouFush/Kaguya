@@ -23,5 +23,8 @@ assert(/native_terminal_ipc_disabled/.test(main), 'native terminal IPC must be d
 assert(/generic_fs_ipc_disabled/.test(main), 'generic fs IPC must be disabled');
 assert(/shell_execute_ipc_disabled/.test(main), 'shell-execute IPC must be disabled');
 assert(/isAllowedExternalUrl/.test(main), 'external URL protocol allowlist must exist');
+assert(/miniAssetAliases/.test(main), 'mini fallback must serve bounded asset aliases');
+assert(/'\/sidebar-icon'/.test(main), 'mini fallback must serve sidebar icon alias');
+assert(/'\/favicon.ico'/.test(main), 'mini fallback must serve favicon alias');
 
 console.log('electron ipc contract ok');
