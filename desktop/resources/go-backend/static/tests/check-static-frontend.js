@@ -20,6 +20,8 @@ assert(index.includes('/static/js/kaguya-agent.js'), 'index must load the shared
 assert(index.includes('/static/js/kaguya-file-upload.js'), 'index must load the shared upload client');
 assert(index.includes('/static/js/kaguya-stream.js'), 'index must load the shared stream client');
 assert(index.includes('/static/agent_ide.html'), 'index IDE entry must open the static IDE page');
+assert(index.includes('hydrateSavedApiConfig'), 'index must hydrate saved device API config on startup');
+assert(index.includes('KaguyaAPI.loadSavedConfig'), 'saved API config hydration must use shared API client');
 assert(apiClient.includes('window.KaguyaAPI'), 'API client must expose window.KaguyaAPI');
 assert(apiClient.includes('normalizeProviderPayload'), 'API client must normalize provider payloads');
 assert(apiClient.includes('/api/account/saved-config'), 'API client must support saved-config reload');
@@ -34,6 +36,7 @@ assert(uploadClient.includes('makeBatches'), 'Upload client must support batchin
 assert(uploadClient.includes('batch_index'), 'Upload client must submit batch metadata');
 assert(uploadClient.includes('batch_total'), 'Upload client must submit batch metadata');
 assert(uploadClient.includes('Array.isArray'), 'Upload client must support repeated multipart fields');
+assert(uploadClient.includes('Unknown error'), 'Upload client error fallback must be readable');
 assert(streamClient.includes('window.KaguyaStream'), 'Stream client must expose window.KaguyaStream');
 assert(streamClient.includes('readSSE'), 'Stream client must expose readSSE');
 assert(streamClient.includes('TextDecoder'), 'Stream client must decode SSE chunks');
@@ -53,6 +56,8 @@ assert(index.includes('KaguyaAgent.observeFrame'), 'Agent SSE frames must be obs
 assert(index.includes("data.type === 'run_started'"), 'Agent SSE run_started frame must be handled');
 assert(index.includes("data.type === 'aborted'"), 'Agent SSE aborted frame must be handled');
 assert(index.includes('sanitizeApiProvidersForStorage'), 'index must sanitize provider localStorage writes');
+assert(index.includes('legacy-key-not-migrated'), 'legacy DeepSeek migration must not copy plaintext API keys');
+assert(!index.includes('m.deepseek=deepseekConfig'), 'legacy DeepSeek migration must not store raw config');
 assert(!index.includes("localStorage.setItem('api_providers',JSON.stringify(cfg))"), 'index must not store full provider config directly');
 assert(!index.includes('localStorage.setItem("api_providers",JSON.stringify(cfg))'), 'index must not store full provider config directly');
 

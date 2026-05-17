@@ -89,9 +89,9 @@
   }
 
   function summarizeError(error) {
-    if (!error) return '未知错误';
+    if (!error) return 'Unknown error';
     if (typeof error === 'string') return error;
-    return error.message || error.detail || error.error || '上传失败';
+    return error.message || error.detail || error.error || 'Upload failed';
   }
 
   window.KaguyaUpload = {

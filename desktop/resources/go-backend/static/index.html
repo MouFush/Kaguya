@@ -6466,7 +6466,23 @@
         let ragSettings = {topK: 5, alpha: 0.5, useRerank: true, showScores: true, useCache: true, useExpansion: true, useHyde: false, useMultiQuery: false, useDecomposition: false, useAdaptive: true, useRrf: false, useMetadataFilter: true, useTimeWeight: false, useIterative: false};
         let lastRagResults = [];
         let deepseekConfig = JSON.parse(localStorage.getItem('deepseek_config') || '{}');
-        try { if(!localStorage.getItem('api_providers_migrated')&&Object.keys(deepseekConfig).length>0){const m={};if(deepseekConfig.apiKey)m.deepseek=deepseekConfig;localStorage.setItem('api_providers',JSON.stringify(m));localStorage.setItem('api_providers_migrated','1');} }catch(e){}
+        try {
+            if (!localStorage.getItem('api_providers_migrated') && Object.keys(deepseekConfig).length > 0) {
+                const migrated = {};
+                if (deepseekConfig.apiKey || deepseekConfig.apiUrl || deepseekConfig.model) {
+                    migrated.deepseek = {
+                        enabled: Boolean(deepseekConfig.apiKey),
+                        apiKey: '',
+                        apiUrl: deepseekConfig.apiUrl || 'https://api.deepseek.com',
+                        model: deepseekConfig.model || 'deepseek-chat',
+                        hasSavedKey: false,
+                        masked_api_key: deepseekConfig.apiKey ? 'legacy-key-not-migrated' : ''
+                    };
+                }
+                localStorage.setItem('api_providers', JSON.stringify(migrated));
+                localStorage.setItem('api_providers_migrated', '1');
+            }
+        } catch(e) {}
         
         
         const _domCache = new Map();
@@ -6679,7 +6695,10 @@
                 loadProjectCenter();
                 initScenesCenter();
                 updateStats();
-                checkExternalApiWarning();
+                updateApiIndicator();
+                hydrateSavedApiConfig()
+                    .catch(function(e) { console.warn('Saved API config hydration failed:', e); })
+                    .finally(function() { checkExternalApiWarning(); });
                 if (chats.length > 0) loadChat(chats[0].id);
                 else showWelcome();
                 initSpeechRecognition();
@@ -13981,6 +14000,29 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
                 return{provider:pv,enabled:true,apiKey:cfg.apiKey||'',hasSavedKey:!!cfg.hasSavedKey,apiUrl:cfg.apiUrl||API_PROVIDERS[pv].url,model:cfg.model||API_PROVIDERS[pv].models[0].id};
             }
             return null;
+        }
+
+        async function hydrateSavedApiConfig(){
+            if(!window.KaguyaAPI||!window.KaguyaAPI.loadSavedConfig)return null;
+            const data=await window.KaguyaAPI.loadSavedConfig();
+            if(!data||!data.success||!data.has_config||!data.provider)return data;
+            const pv=API_PROVIDERS[data.provider]?data.provider:'custom';
+            if(!API_PROVIDERS[pv])return data;
+            const providers=getApiProviders();
+            const existing=providers[pv]||{};
+            providers[pv]=Object.assign({},existing,{
+                enabled:true,
+                apiKey:'',
+                hasSavedKey:true,
+                apiUrl:data.api_url||data.apiUrl||existing.apiUrl||API_PROVIDERS[pv].url,
+                model:data.model||existing.model||API_PROVIDERS[pv].models[0].id,
+                masked_api_key:data.masked_api_key||existing.masked_api_key||existing.maskedApiKey||''
+            });
+            localStorage.setItem('api_providers',JSON.stringify(sanitizeApiProvidersForStorage(providers)));
+            _currentApiProvider=pv;
+            localStorage.setItem('active_api_provider',pv);
+            updateApiIndicator();
+            return data;
         }
 
         function switchApiProvider(pv){
