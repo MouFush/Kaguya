@@ -133,6 +133,9 @@ assert(projectCenter.includes('function renderProjectTasks()'), 'project center 
 assert(projectCenter.includes('function renderOpsOverview()'), 'project center script must own ops dashboard rendering');
 assert(projectCenter.includes('function projectGet'), 'project center script must centralize GET requests');
 assert(projectCenter.includes('KaguyaAPI.raw'), 'project center script must use shared raw API for downloads');
+assert(projectCenter.includes("timeEl.textContent = '[' + time + ']'"), 'project center logs must render timestamps with textContent');
+assert(projectCenter.includes("document.createTextNode(' ' + String(message || ''))"), 'project center logs must not inject raw log messages with innerHTML');
+assert(!projectCenter.includes("entry.innerHTML = '<span class=\"log-time\">[' + time + ']</span> ' + message"), 'project center logs must not use raw innerHTML for messages');
 assert((projectCenter.match(/\bfetch\s*\(/g) || []).length === 0, 'project center script must not keep naked fetch calls');
 assert(!mainClient.includes('function loadProjectCenter()'), 'main client must not own project center internals');
 assert(!mainClient.includes('function renderProjectTasks()'), 'main client must not own project kanban internals');

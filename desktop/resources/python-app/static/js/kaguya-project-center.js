@@ -222,10 +222,15 @@
 
         function addLogEntry(level, message) {
             const viewer = $('logViewer');
+            if (!viewer) return;
             const entry = document.createElement('div');
             entry.className = 'log-entry log-' + level;
             const time = new Date().toLocaleTimeString('zh-CN');
-            entry.innerHTML = '<span class="log-time">[' + time + ']</span> ' + message;
+            const timeEl = document.createElement('span');
+            timeEl.className = 'log-time';
+            timeEl.textContent = '[' + time + ']';
+            entry.appendChild(timeEl);
+            entry.appendChild(document.createTextNode(' ' + String(message || '')));
             viewer.appendChild(entry);
             if (logAutoScroll) {
                 viewer.scrollTop = viewer.scrollHeight;

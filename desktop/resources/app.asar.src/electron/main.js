@@ -1,6 +1,6 @@
 const { app, BrowserWindow, Menu, Tray, shell, dialog, ipcMain, nativeTheme, safeStorage } = require('electron');
 const path = require('path');
-const { spawn, exec, execFile } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
@@ -517,9 +517,11 @@ function findGoBackendExecutable() {
 
 function commandExists(command) {
     try {
-        const { execSync } = require('child_process');
-        const lookup = process.platform === 'win32' ? `where ${command}` : `command -v ${command}`;
-        execSync(lookup, { stdio: 'ignore', windowsHide: true });
+        if (process.platform === 'win32') {
+            execFileSync('where', [command], { stdio: 'ignore', windowsHide: true });
+        } else {
+            execFileSync('which', [command], { stdio: 'ignore', windowsHide: true });
+        }
         return true;
     } catch (err) {
         return false;
@@ -709,8 +711,7 @@ runpy.run_path(script, run_name='__main__')
     let verifiedPythonPath = pythonPath;
     if (pythonPath === 'python') {
         try {
-            const { execSync } = require('child_process');
-            const result = execSync('where python', { encoding: 'utf8', windowsHide: true });
+            const result = execFileSync('where', ['python'], { encoding: 'utf8', windowsHide: true });
             const paths = result.trim().split('\n').map(p => p.trim()).filter(p => p);
             if (paths.length > 0) {
                 verifiedPythonPath = paths[0];
@@ -836,10 +837,34 @@ function startMiniServer(port) {
     };
 
     let savedApiConfig = loadDeviceVault();
+    const miniServerToken = crypto.randomBytes(24).toString('hex');
 
     function sendJson(res, status, payload) {
         res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(payload));
+    }
+
+    function isLocalMiniOrigin(origin) {
+        if (!origin) return true;
+        if (origin === 'null') return true;
+        try {
+            const parsed = new URL(origin);
+            return parsed.protocol === 'http:' &&
+                ['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname) &&
+                String(parsed.port || '80') === String(port);
+        } catch (err) {
+            return false;
+        }
+    }
+
+    function isMiniProtectedPath(pathname) {
+        return pathname.startsWith('/api/') || pathname === '/chat/completions';
+    }
+
+    function isAllowedMiniRequest(req, pathname) {
+        if (!isMiniProtectedPath(pathname)) return true;
+        if (isLocalMiniOrigin(req.headers.origin || '')) return true;
+        return req.headers['x-kaguya-mini-token'] === miniServerToken;
     }
 
     function readJsonBody(req, callback) {
@@ -913,11 +938,24 @@ function startMiniServer(port) {
         const parsedUrl = url.parse(req.url, true);
         const pathname = parsedUrl.pathname;
 
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        const origin = req.headers.origin || '';
+        if (isLocalMiniOrigin(origin)) {
+            res.setHeader('Access-Control-Allow-Origin', origin || 'http://127.0.0.1:' + port);
+            res.setHeader('Vary', 'Origin');
+        }
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Kaguya-Mini-Token');
 
         if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+        if (!isAllowedMiniRequest(req, pathname)) {
+            sendJson(res, 403, {
+                success: false,
+                mode: 'mini',
+                error: 'mini_origin_denied',
+                message: 'Mini fallback API requires same-origin access or the desktop setup token.',
+            });
+            return;
+        }
 
         if ((pathname === '/docs' || pathname === '/readme') && req.method === 'GET') {
             res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -1108,133 +1146,6 @@ function startMiniServer(port) {
             return;
         }
 
-        if (pathname === '/api/model-status' && req.method === 'POST') {
-            let body = '';
-            req.on('data', c => body += c);
-            req.on('end', () => {
-                try {
-                    const data = JSON.parse(body);
-                    const extApi = data.external_api || {};
-                    if (extApi.apiKey && extApi.provider) {
-                        savedApiConfig = extApi;
-                        const pInfo = providerUrls[extApi.provider] || {};
-                        const testUrl = (extApi.apiUrl || pInfo.url) + (pInfo.type === 'openai' ? '/models' : '/v1/models');
-                        const testOpts = {
-                            hostname: new URL(testUrl).hostname,
-                            path: new URL(testUrl).pathname,
-                            method: 'GET',
-                            headers: pInfo.type === 'openai' ? { 'Authorization': 'Bearer ' + extApi.apiKey } : { 'x-api-key': extApi.apiKey, 'anthropic-version': '2023-06-01' },
-                            timeout: 10000,
-                        };
-                        const testReq = https.request(testOpts, (testRes) => {
-                            if (testRes.statusCode >= 200 && testRes.statusCode < 500) {
-                                res.writeHead(200, { 'Content-Type': 'application/json' });
-                                res.end(JSON.stringify({ available: true, provider: extApi.provider, model: extApi.model || pInfo.model }));
-                            } else {
-                                res.writeHead(200, { 'Content-Type': 'application/json' });
-                                res.end(JSON.stringify({ available: false, message: 'API returned status ' + testRes.statusCode }));
-                            }
-                        });
-                        testReq.on('error', (e) => {
-                            res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ available: false, message: e.message }));
-                        });
-                        testReq.end();
-                    } else {
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ available: false, message: 'No API key provided' }));
-                    }
-                } catch (e) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: e.message }));
-                }
-            });
-            return;
-        }
-
-        if (pathname === '/api/chat' && req.method === 'POST') {
-            let body = '';
-            req.on('data', c => body += c);
-            req.on('end', () => {
-                if (!savedApiConfig) {
-                    res.writeHead(503, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'No API configured' }));
-                    return;
-                }
-                try {
-                    const chatData = JSON.parse(body);
-                    const pInfo = providerUrls[savedApiConfig.provider] || {};
-                    const apiBase = savedApiConfig.apiUrl || pInfo.url;
-                    const targetUrl = apiBase + (pInfo.type === 'openai' ? '/chat/completions' : '/v1/messages');
-                    const targetParsed = new URL(targetUrl);
-
-                    const legacyModel = savedApiConfig.model || pInfo.model;
-                    const legacyMessages = chatData.messages || [];
-                    const msgBody = pInfo.type === 'openai' ? JSON.stringify(buildOpenAiMiniPayload(savedApiConfig.provider, legacyModel, legacyMessages, chatData, chatData.stream !== false)) : JSON.stringify({
-                        model: savedApiConfig.model || pInfo.model,
-                        messages: legacyMessages,
-                        stream: chatData.stream !== false,
-                        max_tokens: chatData.max_tokens || 4096,
-                    });
-
-                    const headers = pInfo.type === 'openai' ? {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + savedApiConfig.apiKey,
-                    } : {
-                        'Content-Type': 'application/json',
-                        'x-api-key': savedApiConfig.apiKey,
-                        'anthropic-version': '2023-06-01',
-                    };
-
-                    if (chatData.stream !== false) {
-                        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-                    } else {
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                    }
-
-                    const proxyReq = https.request({
-                        hostname: targetParsed.hostname,
-                        path: targetParsed.pathname,
-                        method: 'POST',
-                        headers: headers,
-                    }, (proxyRes) => {
-                        proxyRes.pipe(res);
-                    });
-                    proxyReq.on('error', (e) => {
-                        res.end(JSON.stringify({ error: e.message }));
-                    });
-                    proxyReq.write(msgBody);
-                    proxyReq.end();
-                } catch (e) {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: e.message }));
-                }
-            });
-            return;
-        }
-
-        if (pathname === '/api/config' && req.method === 'GET') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ mode: 'mini', hasApi: !!savedApiConfig, provider: savedApiConfig?.provider || null }));
-            return;
-        }
-
-        if (pathname === '/api/config' && req.method === 'POST') {
-            let body = '';
-            req.on('data', c => body += c);
-            req.on('end', () => {
-                try {
-                    savedApiConfig = JSON.parse(body);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: true }));
-                } catch (e) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: e.message }));
-                }
-            });
-            return;
-        }
-
         const appAssets = path.join(getResourcePath(), 'assets');
         const electronAssets = path.join(getResourcePath(), '..', 'app.asar.src', 'assets');
         const miniAssetAliases = {
@@ -1323,7 +1234,6 @@ function createSetupWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js'),
             sandbox: true,
             webSecurity: true,
         },
@@ -1440,6 +1350,22 @@ setTimeout(()=>{window.location.reload();},1500);
 </script></body></html>`;
 
     mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(setupHtml)}`);
+
+    mainWindow.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+        if (isAllowedExternalUrl(openUrl)) {
+            shell.openExternal(openUrl);
+        }
+        return { action: 'deny' };
+    });
+
+    mainWindow.webContents.on('will-navigate', (event, navUrl) => {
+        if (!navUrl.startsWith('data:text/html')) {
+            event.preventDefault();
+            if (isAllowedExternalUrl(navUrl)) {
+                shell.openExternal(navUrl);
+            }
+        }
+    });
 
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
@@ -1639,46 +1565,9 @@ function isTerminalCommandDangerous(cmd) {
 }
 
 function createTerminalSession(cwd) {
-    const sessionId = `term_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const shellPath = getShellPath();
-    const workDir = cwd || getResourcePath();
-
-    const shellArgs = process.platform === 'win32' ? [] : ['-l'];
-
-    const proc = spawn(shellPath, shellArgs, {
-        cwd: workDir,
-        env: Object.assign({}, process.env, {
-            'TERM': 'xterm-256color',
-            'COLORTERM': 'truecolor',
-            'KAGUYA_TERMINAL': sessionId,
-        }),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: false,
-    });
-
-    const session = { id: sessionId, process: proc, cwd: workDir };
-
-    proc.stdout.on('data', (data) => {
-        mainWindow?.webContents.send('terminal-data', { sessionId, data: data.toString('utf8'), stream: 'stdout' });
-    });
-
-    proc.stderr.on('data', (data) => {
-        mainWindow?.webContents.send('terminal-data', { sessionId, data: data.toString('utf8'), stream: 'stderr' });
-    });
-
-    proc.on('close', (code) => {
-        mainWindow?.webContents.send('terminal-exit', { sessionId, code });
-        terminalSessions.delete(sessionId);
-    });
-
-    proc.on('error', (err) => {
-        mainWindow?.webContents.send('terminal-error', { sessionId, error: err.message });
-        terminalSessions.delete(sessionId);
-    });
-
-    terminalSessions.set(sessionId, session);
-    mainWindow?.webContents.send('terminal-created', { sessionId, shell: shellPath, cwd: workDir });
-    return sessionId;
+    const sessionId = `disabled_${Date.now()}`;
+    mainWindow?.webContents.send('terminal-error', { sessionId, error: 'native_terminal_ipc_disabled' });
+    return null;
 }
 
 ipcMain.handle('terminal-create', () => ({ success: false, error: 'native_terminal_ipc_disabled' }));
@@ -1688,151 +1577,55 @@ ipcMain.on('terminal-write', (event, { sessionId, data }) => {
 });
 
 ipcMain.on('terminal-resize', (event, { sessionId, cols, rows }) => {
-    // Basic shell doesn't support resize; PTY would be needed for full support
+    mainWindow?.webContents.send('terminal-error', { sessionId, error: 'native_terminal_ipc_disabled' });
 });
 
 ipcMain.on('terminal-kill', (event, { sessionId }) => {
-    const session = terminalSessions.get(sessionId);
-    if (session) {
-        session.process.kill();
-        terminalSessions.delete(sessionId);
-    }
+    mainWindow?.webContents.send('terminal-error', { sessionId, error: 'native_terminal_ipc_disabled' });
 });
 
 // ========== IPC: File System ==========
 
 ipcMain.handle('fs-readFile', async (event, filePath, options) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        const encoding = options?.encoding || 'utf-8';
-        const content = await fs.promises.readFile(filePath, encoding);
-        return { success: true, content };
-    } catch (err) {
-        return { success: false, error: err.message, code: err.code };
-    }
 });
 
 ipcMain.handle('fs-writeFile', async (event, filePath, content, options) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        const dir = path.dirname(filePath);
-        await fs.promises.mkdir(dir, { recursive: true });
-        await fs.promises.writeFile(filePath, content, options?.encoding || 'utf-8');
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: err.message, code: err.code };
-    }
 });
 
 ipcMain.handle('fs-readDir', async (event, dirPath, options) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-        const result = entries.map(entry => ({
-            name: entry.name,
-            isFile: entry.isFile(),
-            isDirectory: entry.isDirectory(),
-            isSymbolicLink: entry.isSymbolicLink(),
-            path: path.join(dirPath, entry.name),
-        }));
-        return { success: true, entries: result };
-    } catch (err) {
-        return { success: false, error: err.message, code: err.code };
-    }
 });
 
 ipcMain.handle('fs-stat', async (event, filePath) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        const stat = await fs.promises.stat(filePath);
-        return {
-            success: true,
-            isFile: stat.isFile(),
-            isDirectory: stat.isDirectory(),
-            size: stat.size,
-            mtime: stat.mtimeMs,
-            ctime: stat.ctimeMs,
-            mode: stat.mode,
-        };
-    } catch (err) {
-        return { success: false, error: err.message, code: err.code };
-    }
 });
 
 ipcMain.handle('fs-mkdir', async (event, dirPath, options) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        await fs.promises.mkdir(dirPath, { recursive: options?.recursive ?? true });
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
 });
 
 ipcMain.handle('fs-remove', async (event, filePath) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        const stat = await fs.promises.stat(filePath);
-        if (stat.isDirectory()) {
-            await fs.promises.rm(filePath, { recursive: true, force: true });
-        } else {
-            await fs.promises.unlink(filePath);
-        }
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
 });
 
 ipcMain.handle('fs-rename', async (event, oldPath, newPath) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        await fs.promises.rename(oldPath, newPath);
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
 });
 
 ipcMain.handle('fs-copy', async (event, src, dest) => {
     return { success: false, error: 'generic_fs_ipc_disabled' };
-    try {
-        await fs.promises.copyFile(src, dest);
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
 });
 
 ipcMain.handle('fs-exists', async (event, filePath) => {
     return false;
-    try {
-        await fs.promises.access(filePath);
-        return true;
-    } catch {
-        return false;
-    }
 });
 
 // ========== IPC: Shell Execution ==========
 
 ipcMain.handle('shell-execute', async (event, command, options) => {
     return { success: false, error: 'shell_execute_ipc_disabled' };
-    return new Promise((resolve) => {
-        const cwd = options?.cwd || getResourcePath();
-        const timeout = options?.timeout || 30000;
-        const env = Object.assign({}, process.env, options?.env || {});
-
-        const proc = exec(command, { cwd, env, timeout, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-            resolve({
-                success: !error,
-                stdout: stdout || '',
-                stderr: stderr || '',
-                code: error ? error.code || 1 : 0,
-                signal: error?.signal || null,
-            });
-        });
-    });
 });
 
 ipcMain.handle('shell-openExternal', async (event, url) => {
@@ -1849,8 +1642,6 @@ ipcMain.handle('shell-showItemInFolder', async (event, filePath) => {
 
 ipcMain.handle('shell-openPath', async (event, filePath) => {
     return { success: false, error: 'generic_shell_ipc_disabled' };
-    const result = await shell.openPath(filePath);
-    return { success: !result, error: result || null };
 });
 
 // ========== IPC: Dialog ==========
@@ -1924,7 +1715,7 @@ function stopPythonServer() {
         console.log('[Main] Stopping Go backend...');
         try {
             if (process.platform === 'win32') {
-                exec(`taskkill /pid ${goProcess.pid} /T /F`, (err) => {
+                execFile('taskkill', ['/pid', String(goProcess.pid), '/T', '/F'], { windowsHide: true }, (err) => {
                     if (err && goProcess) goProcess.kill();
                 });
             } else {
@@ -1942,7 +1733,7 @@ function stopPythonServer() {
         console.log('[Main] Stopping Python server...');
         try {
             if (process.platform === 'win32') {
-                exec(`taskkill /pid ${pythonProcess.pid} /T /F`, (err) => {
+                execFile('taskkill', ['/pid', String(pythonProcess.pid), '/T', '/F'], { windowsHide: true }, (err) => {
                     if (err) pythonProcess.kill();
                 });
             } else {

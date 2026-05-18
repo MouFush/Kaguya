@@ -37,6 +37,24 @@ func requestJSON(t *testing.T, h http.Handler, method, path string, payload any)
 	return rec
 }
 
+func requestJSONWithHeaders(t *testing.T, h http.Handler, method, path string, payload any, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	if payload != nil {
+		if err := json.NewEncoder(&body).Encode(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(method, path, &body)
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
 func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
 	var got map[string]any
@@ -595,8 +613,12 @@ func TestProjectCommandUsesGoTerminalPermission(t *testing.T) {
 		t.Fatalf("project command still reports worker fallback: %s", body)
 	}
 	rec = requestJSON(t, h, http.MethodPost, "/permissions/mode", map[string]any{"mode": "allow"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("permission mode without token should be forbidden, got status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = requestJSONWithHeaders(t, h, http.MethodPost, "/permissions/mode", map[string]any{"mode": "allow"}, map[string]string{"X-Kaguya-Permission": "test-confirmed"})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("permission mode status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("permission mode with token status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	rec = requestJSON(t, h, http.MethodPost, "/agent/compile", map[string]any{
 		"workspace": s.workspace.WorkspaceRoot(),

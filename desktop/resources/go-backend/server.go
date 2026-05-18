@@ -1292,6 +1292,16 @@ func (s *Server) permissionsMode(w http.ResponseWriter, r *http.Request) {
 	mode := firstString(payload, "mode")
 	switch mode {
 	case "ask", "allow", "deny":
+		if mode == "allow" && !hasPermissionHeader(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"success":               false,
+				"error":                 SecurityErrorPermissionTokenNeed,
+				"reason":                "switching permission mode to allow requires explicit permission confirmation",
+				"requires_confirmation": true,
+				"mode":                  s.permissions.Mode,
+			})
+			return
+		}
 		s.permissions.Mode = mode
 		s.terminal.Mode = mode
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode})
