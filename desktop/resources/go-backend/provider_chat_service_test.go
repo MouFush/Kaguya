@@ -224,6 +224,28 @@ func TestProviderChatMissingConfigAndMessageAreStructured(t *testing.T) {
 	}
 }
 
+func TestProviderAPIURLValidationBlocksLocalAndPrivateTargets(t *testing.T) {
+	for _, rawURL := range []string{
+		"http://127.0.0.1:11434/v1",
+		"http://localhost:11434/v1",
+		"http://10.0.0.2/v1",
+		"http://172.16.0.2/v1",
+		"http://192.168.1.2/v1",
+		"http://169.254.169.254/latest/meta-data",
+		"file:///tmp/key",
+	} {
+		if err := pcsValidateProviderAPIURL(rawURL, false); err == nil {
+			t.Fatalf("expected provider api url to be blocked: %s", rawURL)
+		}
+	}
+	if err := pcsValidateProviderAPIURL("https://api.moonshot.ai/v1", false); err != nil {
+		t.Fatalf("public provider api url was blocked: %v", err)
+	}
+	if err := pcsValidateProviderAPIURL("http://127.0.0.1:11434/v1", true); err != nil {
+		t.Fatalf("local provider opt-in should allow loopback: %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 	b, err := json.Marshal(value)

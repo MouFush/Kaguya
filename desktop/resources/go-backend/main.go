@@ -77,6 +77,7 @@ func main() {
 		PythonURL:  opt.pythonURL,
 		AppDir:     opt.appDir,
 		StaticDir:  opt.staticDir,
+		BindHost:   opt.host,
 	})
 	if err != nil {
 		log.Fatal(err)

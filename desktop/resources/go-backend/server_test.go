@@ -13,6 +13,11 @@ import (
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	_ = os.Setenv("KAGUYA_ALLOW_LOCAL_PROVIDER_API", "1")
+	os.Exit(m.Run())
+}
+
 func newTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir()})
@@ -31,6 +36,7 @@ func requestJSON(t *testing.T, h http.Handler, method, path string, payload any)
 		}
 	}
 	req := httptest.NewRequest(method, path, &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -46,6 +52,7 @@ func requestJSONWithHeaders(t *testing.T, h http.Handler, method, path string, p
 		}
 	}
 	req := httptest.NewRequest(method, path, &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -189,6 +196,20 @@ func TestDeviceBindKimiDefaultsSurviveRestart(t *testing.T) {
 	}
 }
 
+func TestDeviceBindRejectsPrivateProviderAPIURLWithoutOptIn(t *testing.T) {
+	t.Setenv("KAGUYA_ALLOW_LOCAL_PROVIDER_API", "")
+	_, h := newTestServer(t)
+	rec := requestJSON(t, h, http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "custom",
+		"apiKey":   "sk-local-secret",
+		"apiUrl":   "http://127.0.0.1:11434/v1",
+		"model":    "local-model",
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "blocked_api_url") {
+		t.Fatalf("private provider api url was not blocked: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestMaskedRoundTripPreservesSavedKey(t *testing.T) {
 	_, h := newTestServer(t)
 	key := "sk-preserve-123456"
@@ -296,6 +317,7 @@ func TestUnknownRouteProxiesToPythonWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusTeapot || !strings.Contains(rec.Body.String(), "proxied") {
@@ -325,6 +347,7 @@ func TestUploadDeviceFilesStaysInWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/agent/upload-device-files", &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -649,6 +672,42 @@ func TestServerSecurityAndPrivacyUseSecurityPrivacyService(t *testing.T) {
 	}
 }
 
+func TestServerSecurityMiddlewareDeniesRemoteHighRisk(t *testing.T) {
+	s, h := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/agent/compile", strings.NewReader(`{"command":["go","version"]}`))
+	req.RemoteAddr = "203.0.113.10:55000"
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), SecurityErrorRemoteHighRiskDeny) {
+		t.Fatalf("remote high-risk request was not denied: status=%d body=%s workspace=%s", rec.Code, rec.Body.String(), s.workspace.WorkspaceRoot())
+	}
+}
+
+func TestServerSecurityMiddlewareRequiresRemoteCSRFForMutations(t *testing.T) {
+	_, h := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/device/bind", strings.NewReader(`{"provider":"kimi","apiKey":"sk-test"}`))
+	req.RemoteAddr = "203.0.113.10:55000"
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), SecurityErrorCSRFMissing) {
+		t.Fatalf("remote mutation without csrf was not denied: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecurityStatusReflectsBindHost(t *testing.T) {
+	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir(), BindHost: "0.0.0.0", AuthEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := requestJSON(t, s.Handler(), http.MethodGet, "/security/status", nil)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `"bind_host":"0.0.0.0"`) || !strings.Contains(body, `"auth_enabled":true`) {
+		t.Fatalf("security status did not reflect runtime host/auth: status=%d body=%s", rec.Code, body)
+	}
+}
+
 func TestStreamSSEFallbackIsStructuredUnavailable(t *testing.T) {
 	_, h := newTestServer(t)
 	rec := requestJSON(t, h, http.MethodPost, "/stream", map[string]any{"message": "hi"})
@@ -730,6 +789,7 @@ func TestServesExtractedIndexWithoutPythonWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "kaguya-go-index") {
@@ -774,6 +834,7 @@ func TestAssetAliasesUseAppDir(t *testing.T) {
 		{path: "/favicon.ico", body: "ico"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK || rec.Body.String() != tc.body {
@@ -797,6 +858,7 @@ func TestSidebarIconFallsBackToPythonAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/sidebar-icon", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != "welcome-fallback" {

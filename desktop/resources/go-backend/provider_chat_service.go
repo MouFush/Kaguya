@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -165,6 +168,9 @@ func (p providerChatService) complete(ctx context.Context, cfg deviceConfig, pay
 	if cfg.APIURL == "" {
 		return providerChatResult{StatusCode: http.StatusBadRequest, JSON: pcsErrorJSON(http.StatusBadRequest, cfg, "missing_api_url", "External provider API URL is not configured.", "")}, nil
 	}
+	if err := pcsValidateProviderAPIURL(cfg.APIURL, pcsAllowLocalProviderAPI()); err != nil {
+		return providerChatResult{StatusCode: http.StatusBadRequest, JSON: pcsErrorJSON(http.StatusBadRequest, cfg, "blocked_api_url", err.Error(), "")}, nil
+	}
 	upstreamPayload, err := pcsOpenAICompatiblePayload(payload, cfg, opts.Stream)
 	if err != nil {
 		return providerChatResult{StatusCode: http.StatusBadRequest, JSON: pcsErrorJSON(http.StatusBadRequest, cfg, "invalid_payload", err.Error(), "")}, nil
@@ -199,6 +205,9 @@ func (p providerChatService) testConfig(ctx context.Context, cfg deviceConfig) p
 	}
 	if cfg.APIURL == "" {
 		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, "missing_api_url", "External provider API URL is not configured.", 0, "")}
+	}
+	if err := pcsValidateProviderAPIURL(cfg.APIURL, pcsAllowLocalProviderAPI()); err != nil {
+		return providerChatResult{StatusCode: http.StatusOK, JSON: pcsProviderTestJSON(cfg, false, "blocked_api_url", err.Error(), 0, "")}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -414,6 +423,46 @@ func pcsAcceptHeader(stream bool) string {
 		return "text/event-stream"
 	}
 	return "application/json"
+}
+
+func pcsAllowLocalProviderAPI() bool {
+	return strings.EqualFold(os.Getenv("KAGUYA_ALLOW_LOCAL_PROVIDER_API"), "1")
+}
+
+func pcsValidateProviderAPIURL(rawURL string, allowLocal bool) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return errors.New("provider api url must use http or https")
+	}
+	host := strings.Trim(strings.ToLower(parsed.Hostname()), "[]")
+	if host == "" {
+		return errors.New("provider api url host is required")
+	}
+	if allowLocal {
+		return nil
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return errors.New("local provider api urls require explicit local-provider opt-in")
+	}
+	if ip := net.ParseIP(host); ip != nil && pcsIsPrivateProviderIP(ip) {
+		return errors.New("private, loopback, link-local, multicast, and unspecified provider api urls are blocked")
+	}
+	return nil
+}
+
+func pcsIsPrivateProviderIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified()
 }
 
 func pcsErrorJSON(status int, cfg deviceConfig, code, message, detail string) map[string]any {

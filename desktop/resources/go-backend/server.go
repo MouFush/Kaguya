@@ -26,10 +26,12 @@ import (
 )
 
 type ServerConfig struct {
-	RuntimeDir string
-	PythonURL  string
-	AppDir     string
-	StaticDir  string
+	RuntimeDir  string
+	PythonURL   string
+	AppDir      string
+	StaticDir   string
+	BindHost    string
+	AuthEnabled bool
 }
 
 type Server struct {
@@ -275,12 +277,38 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/agent/upload-device-files", s.uploadDeviceFiles)
 	mux.HandleFunc("/agent/terminal/exec", s.terminalExec)
 	mux.HandleFunc("/", s.proxyFallback)
-	return withJSON(mux)
+	return s.withSecurity(withJSON(mux))
 }
 
 func withJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) withSecurity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		risk := ClassifySecurityRequest(r.Method, r.URL.Path, "")
+		ctx := RequestContextFromHTTP(r, risk)
+		ctx.AuthEnabled = s.cfg.AuthEnabled
+		ctx.CSRFEnabled = true
+		ctx.IPWhitelistMode = IPWhitelistModeDisabled
+		ctx.IPWhitelist = DefaultIPWhitelistState().Entries
+		decision := s.securityPrivacy.AssessRequest(ctx)
+		if !decision.Allowed && (decision.Remote || decision.Error == SecurityErrorIPNotAllowed) {
+			writeJSON(w, decision.StatusCode, map[string]any{
+				"success":               false,
+				"error":                 decision.Error,
+				"reason":                decision.Reason,
+				"risk_level":            decision.RiskLevel,
+				"remote":                decision.Remote,
+				"requires_auth":         decision.RequiresAuth,
+				"requires_csrf":         decision.RequiresCSRF,
+				"requires_confirmation": decision.RequiresConfirmation,
+			})
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -589,6 +617,10 @@ func (s *Server) deviceBind(w http.ResponseWriter, r *http.Request) {
 	if next.Provider == "" {
 		next.Provider = existing.Provider
 	}
+	if next.Provider == "" {
+		next.Provider = "deepseek"
+	}
+	normalizeProviderDefaults(&next)
 	if next.APIURL == "" {
 		next.APIURL = existing.APIURL
 	}
@@ -600,6 +632,10 @@ func (s *Server) deviceBind(w http.ResponseWriter, r *http.Request) {
 	}
 	if next.APIKey == "" {
 		writeError(w, http.StatusBadRequest, "missing_api_key", "api_key/apiKey is required")
+		return
+	}
+	if err := pcsValidateProviderAPIURL(next.APIURL, pcsAllowLocalProviderAPI()); err != nil {
+		writeError(w, http.StatusBadRequest, "blocked_api_url", err.Error())
 		return
 	}
 	if err := s.saveDeviceConfig(next); err != nil {
@@ -859,10 +895,14 @@ func (s *Server) featureFlags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) securityStatus(w http.ResponseWriter, r *http.Request) {
+	bindHost := s.cfg.BindHost
+	if strings.TrimSpace(bindHost) == "" {
+		bindHost = "127.0.0.1"
+	}
 	status := s.securityPrivacy.SecurityStatus(SecurityRuntimeConfig{
-		BindHost:              "127.0.0.1",
+		BindHost:              bindHost,
 		DesktopMode:           true,
-		AuthEnabled:           false,
+		AuthEnabled:           s.cfg.AuthEnabled,
 		CSRFEnabled:           true,
 		PermissionService:     "go",
 		PermissionMode:        s.permissions.Mode,
