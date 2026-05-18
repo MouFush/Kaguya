@@ -97,11 +97,17 @@ assert(!mainClient.includes('function loadRagDocuments()'), 'main client must no
 assert(workflowMcp.includes('function loadWorkflows()'), 'workflow/MCP script must own workflow loading');
 assert(workflowMcp.includes('function loadMcpPlugins()'), 'workflow/MCP script must own MCP plugin loading');
 assert(workflowMcp.includes('detectAndExecuteMcpTool'), 'workflow/MCP script must expose MCP execution detection');
+assert(workflowMcp.includes('function workflowGet'), 'workflow/MCP script must centralize GET requests');
+assert(workflowMcp.includes('window.KaguyaAPI.json'), 'workflow/MCP script must use the shared API client for mutations');
+assert((workflowMcp.match(/\bfetch\s*\(/g) || []).length === 0, 'workflow/MCP script must not keep naked fetch calls');
 assert(!mainClient.includes('function loadWorkflows()'), 'main client must not own workflow editor internals');
 assert(!mainClient.includes('function loadMcpPlugins()'), 'main client must not own MCP plugin internals');
 assert(enhancedPanels.includes('renderOpsCalendar'), 'enhanced panel script must own ops calendar rendering');
 assert(enhancedPanels.includes('renderIntegrationMarket'), 'enhanced panel script must own integration market rendering');
 assert(enhancedPanels.includes('renderMultimodalChat'), 'enhanced panel script must own multimodal helper rendering');
+assert(enhancedPanels.includes("KaguyaAPI.json('/multimodal/chat'"), 'enhanced panel multimodal chat must use shared API client');
+assert(enhancedPanels.includes("KaguyaAPI.get('/multimodal/history'"), 'enhanced panel multimodal history must use shared API client');
+assert((enhancedPanels.match(/\bfetch\s*\(/g) || []).length === 0, 'enhanced panel script must not keep naked fetch calls');
 assert(!mainClient.includes('// ========== OPS ENHANCEMENT =========='), 'main client must not own enhanced panel tail sections');
 assert(themeEffects.includes('function toggleStarfieldMode()'), 'theme effects must own starfield controls');
 assert(themeEffects.includes('function toggleWallpaperMode()'), 'theme effects must own wallpaper controls');

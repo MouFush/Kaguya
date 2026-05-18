@@ -688,11 +688,12 @@
             input.value = '';
             multimodalChatMessages.push({ role: 'user', content: msg });
             renderMultimodalChat();
-            fetch('/multimodal/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: msg, image_url: currentMultimodalImageUrl || '' })
-            }).then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) {
+                multimodalChatMessages.push({ role: 'assistant', content: 'api_client_unavailable' });
+                renderMultimodalChat();
+                return;
+            }
+            window.KaguyaAPI.json('/multimodal/chat', { message: msg, image_url: currentMultimodalImageUrl || '' }).then(data => {
                 multimodalChatMessages.push({ role: 'assistant', content: data.response || data.content || '无法分析' });
                 renderMultimodalChat();
             }).catch(() => {
@@ -716,7 +717,11 @@
         function loadMultimodalHistory() {
             const el = document.getElementById('multimodalHistoryList');
             if (!el) return;
-            fetch('/multimodal/history').then(r => r.json()).then(data => {
+            if (!window.KaguyaAPI) {
+                el.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:12px;">api_client_unavailable</div>';
+                return;
+            }
+            window.KaguyaAPI.get('/multimodal/history').then(data => {
                 multimodalAnalysisHistory = data.history || [];
                 renderMultimodalHistoryList();
             }).catch(() => {
@@ -739,4 +744,3 @@
                 '</div>';
             }).join('');
         }
-

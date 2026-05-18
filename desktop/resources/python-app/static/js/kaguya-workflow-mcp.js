@@ -1,4 +1,19 @@
 // ==================== MCP 插件管理 ====================
+        function workflowGet(path) {
+            if (!window.KaguyaAPI) return Promise.reject(new Error('api_client_unavailable'));
+            return window.KaguyaAPI.get(path);
+        }
+
+        function workflowPost(path, payload) {
+            if (!window.KaguyaAPI) return Promise.reject(new Error('api_client_unavailable'));
+            return window.KaguyaAPI.json(path, payload || {});
+        }
+
+        function workflowDelete(path) {
+            if (!window.KaguyaAPI) return Promise.reject(new Error('api_client_unavailable'));
+            return window.KaguyaAPI.del(path);
+        }
+
         let mcpPlugins = [];
         let enabledMcpTools = [];
         
@@ -16,7 +31,7 @@
         let connectionStart = null;
         
         function loadWorkflows() {
-            fetch('/workflows').then(r => r.json()).then(data => {
+            workflowGet('/workflows').then(data => {
                 if (data.success) {
                     workflows = data.workflows;
                     renderWorkflowList();
@@ -251,7 +266,7 @@
         }
         
         function loadWorkflowNodeTypes() {
-            fetch('/workflow/node-types').then(r => r.json()).then(data => {
+            workflowGet('/workflow/node-types').then(data => {
                 if (data.success) {
                     workflowNodeTypes = data.node_types;
                     renderWorkflowNodePalette();
@@ -295,7 +310,7 @@
         }
         
         function editWorkflow(workflowId) {
-            fetch(`/workflow/${workflowId}`).then(r => r.json()).then(data => {
+            workflowGet(`/workflow/${workflowId}`).then(data => {
                 if (data.success) {
                     currentWorkflow = data.workflow;
                     workflowNodes = data.workflow.nodes || [];
@@ -731,11 +746,7 @@
                 connections: workflowConnections
             };
             
-            fetch('/workflow', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(workflowData)
-            }).then(r => r.json()).then(data => {
+            workflowPost('/workflow', workflowData).then(data => {
                 if (data.success) {
                     showToast('工作流已保存');
                     loadWorkflows();
@@ -769,11 +780,7 @@
             
             const startTime = Date.now();
             
-            fetch('/workflow/execute', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({workflow: workflowData, inputs: {}})
-            }).then(r => r.json()).then(data => {
+            workflowPost('/workflow/execute', {workflow: workflowData, inputs: {}}).then(data => {
                 const elapsed = Date.now() - startTime;
                 
                 if (data.success) {
@@ -931,11 +938,7 @@
         }
         
         function runWorkflow(workflowId) {
-            fetch(`/workflow/${workflowId}/execute`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({inputs: {}})
-            }).then(r => r.json()).then(data => {
+            workflowPost(`/workflow/${workflowId}/execute`, {inputs: {}}).then(data => {
                 if (data.success) {
                     showToast('工作流执行完成');
                 } else {
@@ -947,7 +950,7 @@
         function deleteWorkflow(workflowId) {
             if (!confirm('确定要删除这个工作流吗？')) return;
             
-            fetch(`/workflow/${workflowId}`, {method: 'DELETE'}).then(r => r.json()).then(data => {
+            workflowDelete(`/workflow/${workflowId}`).then(data => {
                 if (data.success) {
                     showToast('工作流已删除');
                     loadWorkflows();
@@ -1012,7 +1015,7 @@
         });
         
         function loadMcpPlugins() {
-            fetch('/mcp/plugins').then(r => r.json()).then(data => {
+            workflowGet('/mcp/plugins').then(data => {
                 if (data.success) {
                     mcpPlugins = data.plugins;
                     renderMcpList();
@@ -1051,12 +1054,7 @@
         }
 
         async function executeMcpTool(pluginId, toolName, parameters) {
-            const res = await fetch('/mcp/execute', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({plugin_id: pluginId, tool_name: toolName, parameters})
-            });
-            const data = await res.json();
+            const data = await workflowPost('/mcp/execute', {plugin_id: pluginId, tool_name: toolName, parameters});
             return data.result || {error: '执行失败'};
         }
         
@@ -1148,11 +1146,7 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
         }
         
         function toggleMcpPlugin(pluginId, enabled) {
-            fetch(`/mcp/plugin/${pluginId}/enable`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({enabled})
-            }).then(r => r.json()).then(data => {
+            workflowPost(`/mcp/plugin/${pluginId}/enable`, {enabled}).then(data => {
                 if (data.success) {
                     showToast(data.message);
                     loadMcpPlugins();
@@ -1174,21 +1168,13 @@ ${enabledMcpTools.map(t => `- ${t}`).join(String.fromCharCode(10))}
             // 简单的配置提示框
             if (plugin.id === 'filesystem') {
                 const readOnly = confirm('是否设置为只读模式？' + String.fromCharCode(10) + String.fromCharCode(10) + '确定 = 只读' + String.fromCharCode(10) + '取消 = 可读写');
-                fetch(`/mcp/plugin/${pluginId}/config`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({config: {read_only: readOnly, allowed_paths: [os.path.expanduser("~")]}})
-                }).then(r => r.json()).then(data => {
+                workflowPost(`/mcp/plugin/${pluginId}/config`, {config: {read_only: readOnly, allowed_paths: ['~']}}).then(data => {
                     if (data.success) showToast('配置已更新');
                 });
             } else if (plugin.id === 'web_search') {
                 const numResults = prompt('设置默认搜索结果数量 (1-10):', '5');
                 if (numResults && !isNaN(numResults)) {
-                    fetch(`/mcp/plugin/${pluginId}/config`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({config: {max_results: parseInt(numResults)}})
-                    }).then(r => r.json()).then(data => {
+                    workflowPost(`/mcp/plugin/${pluginId}/config`, {config: {max_results: parseInt(numResults)}}).then(data => {
                         if (data.success) showToast('配置已更新');
                     });
                 }
