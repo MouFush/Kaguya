@@ -13,6 +13,8 @@ const mainClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-
 const learningPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-learning-panels.js'), 'utf8');
 const adminPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-admin-panels.js'), 'utf8');
 const projectCenter = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-project-center.js'), 'utf8');
+const permissionsPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-permissions-panel.js'), 'utf8');
+const fileAnalyzerPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-file-analyzer-panel.js'), 'utf8');
 const ragPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-rag-panel.js'), 'utf8');
 const workflowMcp = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-workflow-mcp.js'), 'utf8');
 const enhancedPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-enhanced-panels.js'), 'utf8');
@@ -21,7 +23,7 @@ const uiUtils = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app
 const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-provider-config.js'), 'utf8');
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
-const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
+const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + permissionsPanel + '\n' + fileAnalyzerPanel + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
 const initBlock = (mainClient.match(/function init\(\) \{[\s\S]*?\n        \}\n\nfunction showWelcome/) || [''])[0];
 
 function assert(condition, message) {
@@ -41,6 +43,8 @@ assert(index.includes('/static/js/kaguya-main.js'), 'index must load extracted m
 assert(index.includes('/static/js/kaguya-learning-panels.js'), 'index must load extracted learning panel handlers');
 assert(index.includes('/static/js/kaguya-admin-panels.js'), 'index must load extracted admin panel handlers');
 assert(index.includes('/static/js/kaguya-project-center.js'), 'index must load extracted project center handlers');
+assert(index.includes('/static/js/kaguya-permissions-panel.js'), 'index must load extracted permissions panel handlers');
+assert(index.includes('/static/js/kaguya-file-analyzer-panel.js'), 'index must load extracted file analyzer handlers');
 assert(index.includes('/static/js/kaguya-rag-panel.js'), 'index must load extracted RAG panel handlers');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'index must load extracted workflow/MCP handlers');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'index must load extracted enhanced panel handlers');
@@ -93,6 +97,8 @@ assert(index.includes('/static/js/kaguya-rag-panel.js'), 'RAG panel module must 
 assert(index.includes('/static/js/kaguya-learning-panels.js'), 'learning panel module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-admin-panels.js'), 'admin panel module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-project-center.js'), 'project center module must remain explicitly loaded');
+assert(index.includes('/static/js/kaguya-permissions-panel.js'), 'permissions panel module must remain explicitly loaded');
+assert(index.includes('/static/js/kaguya-file-analyzer-panel.js'), 'file analyzer module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'workflow/MCP module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'enhanced panel module must remain explicitly loaded');
 assert(!mainClient.includes('loadFrontendModule'), 'module wiring must stay explicit instead of hidden behind dynamic script loading');
@@ -128,6 +134,16 @@ assert((projectCenter.match(/\bfetch\s*\(/g) || []).length === 0, 'project cente
 assert(!mainClient.includes('function loadProjectCenter()'), 'main client must not own project center internals');
 assert(!mainClient.includes('function renderProjectTasks()'), 'main client must not own project kanban internals');
 assert(!mainClient.includes('function renderOpsOverview()'), 'main client must not own ops dashboard internals');
+assert(permissionsPanel.includes('function loadPermMode()'), 'permissions panel script must own permission mode loading');
+assert(permissionsPanel.includes('function checkCmdSafety()'), 'permissions panel script must own command safety check');
+assert(permissionsPanel.includes('function permissionGet'), 'permissions panel script must centralize GET requests');
+assert((permissionsPanel.match(/\bfetch\s*\(/g) || []).length === 0, 'permissions panel script must not keep naked fetch calls');
+assert(fileAnalyzerPanel.includes('function analyzeProjectStructure()'), 'file analyzer script must own project structure analysis');
+assert(fileAnalyzerPanel.includes('function renderTree'), 'file analyzer script must own file tree rendering');
+assert(fileAnalyzerPanel.includes('function fileAnalyzerGet'), 'file analyzer script must centralize GET requests');
+assert((fileAnalyzerPanel.match(/\bfetch\s*\(/g) || []).length === 0, 'file analyzer script must not keep naked fetch calls');
+assert(!mainClient.includes('function loadPermMode()'), 'main client must not own permissions panel internals');
+assert(!mainClient.includes('function analyzeProjectStructure()'), 'main client must not own file analyzer internals');
 assert(ragPanel.includes('function loadRagDocuments()'), 'RAG panel script must own RAG document loading');
 assert(ragPanel.includes('function searchRagDocs()'), 'RAG panel script must own RAG search');
 assert(ragPanel.includes('function uploadRagFile'), 'RAG panel script must own RAG upload UI');
