@@ -15,6 +15,7 @@ const adminPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python
 const projectCenter = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-project-center.js'), 'utf8');
 const permissionsPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-permissions-panel.js'), 'utf8');
 const fileAnalyzerPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-file-analyzer-panel.js'), 'utf8');
+const knowledgeWorkbench = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-knowledge-workbench.js'), 'utf8');
 const ragPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-rag-panel.js'), 'utf8');
 const workflowMcp = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-workflow-mcp.js'), 'utf8');
 const enhancedPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-enhanced-panels.js'), 'utf8');
@@ -23,7 +24,7 @@ const uiUtils = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app
 const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-provider-config.js'), 'utf8');
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
-const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + permissionsPanel + '\n' + fileAnalyzerPanel + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
+const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + permissionsPanel + '\n' + fileAnalyzerPanel + '\n' + knowledgeWorkbench + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
 const initBlock = (mainClient.match(/function init\(\) \{[\s\S]*?\n        \}\n\nfunction showWelcome/) || [''])[0];
 
 function assert(condition, message) {
@@ -45,6 +46,7 @@ assert(index.includes('/static/js/kaguya-admin-panels.js'), 'index must load ext
 assert(index.includes('/static/js/kaguya-project-center.js'), 'index must load extracted project center handlers');
 assert(index.includes('/static/js/kaguya-permissions-panel.js'), 'index must load extracted permissions panel handlers');
 assert(index.includes('/static/js/kaguya-file-analyzer-panel.js'), 'index must load extracted file analyzer handlers');
+assert(index.includes('/static/js/kaguya-knowledge-workbench.js'), 'index must load extracted knowledge workbench handlers');
 assert(index.includes('/static/js/kaguya-rag-panel.js'), 'index must load extracted RAG panel handlers');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'index must load extracted workflow/MCP handlers');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'index must load extracted enhanced panel handlers');
@@ -99,6 +101,7 @@ assert(index.includes('/static/js/kaguya-admin-panels.js'), 'admin panel module 
 assert(index.includes('/static/js/kaguya-project-center.js'), 'project center module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-permissions-panel.js'), 'permissions panel module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-file-analyzer-panel.js'), 'file analyzer module must remain explicitly loaded');
+assert(index.includes('/static/js/kaguya-knowledge-workbench.js'), 'knowledge workbench module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'workflow/MCP module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'enhanced panel module must remain explicitly loaded');
 assert(!mainClient.includes('loadFrontendModule'), 'module wiring must stay explicit instead of hidden behind dynamic script loading');
@@ -142,8 +145,14 @@ assert(fileAnalyzerPanel.includes('function analyzeProjectStructure()'), 'file a
 assert(fileAnalyzerPanel.includes('function renderTree'), 'file analyzer script must own file tree rendering');
 assert(fileAnalyzerPanel.includes('function fileAnalyzerGet'), 'file analyzer script must centralize GET requests');
 assert((fileAnalyzerPanel.match(/\bfetch\s*\(/g) || []).length === 0, 'file analyzer script must not keep naked fetch calls');
+assert(knowledgeWorkbench.includes('function loadTemplateAnalysis()'), 'knowledge workbench script must own template analytics');
+assert(knowledgeWorkbench.includes('function refreshRagStats()'), 'knowledge workbench script must own RAG summary stats');
+assert(knowledgeWorkbench.includes('function knowledgeGet'), 'knowledge workbench script must centralize GET requests');
+assert((knowledgeWorkbench.match(/\bfetch\s*\(/g) || []).length === 0, 'knowledge workbench script must not keep naked fetch calls');
 assert(!mainClient.includes('function loadPermMode()'), 'main client must not own permissions panel internals');
 assert(!mainClient.includes('function analyzeProjectStructure()'), 'main client must not own file analyzer internals');
+assert(!mainClient.includes('function loadTemplateAnalysis()'), 'main client must not own knowledge workbench analytics');
+assert((mainClient.match(/\bfetch\s*\(/g) || []).length === 0, 'main client must not keep naked fetch calls');
 assert(ragPanel.includes('function loadRagDocuments()'), 'RAG panel script must own RAG document loading');
 assert(ragPanel.includes('function searchRagDocs()'), 'RAG panel script must own RAG search');
 assert(ragPanel.includes('function uploadRagFile'), 'RAG panel script must own RAG upload UI');
