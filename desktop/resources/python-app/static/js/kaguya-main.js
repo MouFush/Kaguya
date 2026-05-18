@@ -8,12 +8,6 @@
             document.body.appendChild(pre);
             return false;
         };
-        window.debugPromptScroll = function() {
-            var el = document.getElementById('promptList');
-            var tab = document.getElementById('promptsTab');
-            var sidebar = document.getElementById('sidebar');
-            if (!el || !tab || !sidebar) return;
-        };
         let chats = JSON.parse(localStorage.getItem('kaguya_chats') || '[]');
         let currentChatId = null, history = [], attachments = [];
         let currentRole = 'kaguya', currentLora = 'none';
@@ -63,18 +57,18 @@
         let selectedTaskIds = new Set();
         let ragSettings = {topK: 5, alpha: 0.5, useRerank: true, showScores: true, useCache: true, useExpansion: true, useHyde: false, useMultiQuery: false, useDecomposition: false, useAdaptive: true, useRrf: false, useMetadataFilter: true, useTimeWeight: false, useIterative: false};
         let lastRagResults = [];
-        let deepseekConfig = JSON.parse(localStorage.getItem('deepseek_config') || '{}');
         try {
-            if (!localStorage.getItem('api_providers_migrated') && Object.keys(deepseekConfig).length > 0) {
+            const legacyDeepSeekConfig = JSON.parse(localStorage.getItem('deepseek_config') || '{}');
+            if (!localStorage.getItem('api_providers_migrated') && Object.keys(legacyDeepSeekConfig).length > 0) {
                 const migrated = {};
-                if (deepseekConfig.apiKey || deepseekConfig.apiUrl || deepseekConfig.model) {
+                if (legacyDeepSeekConfig.apiKey || legacyDeepSeekConfig.apiUrl || legacyDeepSeekConfig.model) {
                     migrated.deepseek = {
-                        enabled: Boolean(deepseekConfig.apiKey),
+                        enabled: Boolean(legacyDeepSeekConfig.apiKey),
                         apiKey: '',
-                        apiUrl: deepseekConfig.apiUrl || 'https://api.deepseek.com',
-                        model: deepseekConfig.model || 'deepseek-chat',
+                        apiUrl: legacyDeepSeekConfig.apiUrl || 'https://api.deepseek.com',
+                        model: legacyDeepSeekConfig.model || 'deepseek-chat',
                         hasSavedKey: false,
-                        masked_api_key: deepseekConfig.apiKey ? 'legacy-key-not-migrated' : ''
+                        masked_api_key: legacyDeepSeekConfig.apiKey ? 'legacy-key-not-migrated' : ''
                     };
                 }
                 localStorage.setItem('api_providers', JSON.stringify(migrated));
@@ -86,9 +80,7 @@
         
         const _domCache = new Map();
         function $(id) { if (!_domCache.has(id)) _domCache.set(id, document.getElementById(id)); return _domCache.get(id); }
-        function $clear(id) { _domCache.delete(id); }
         function debounce(fn, ms = 300) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-        function throttle(fn, ms = 100) { let last = 0; return (...a) => { const now = Date.now(); if (now - last >= ms) { last = now; fn(...a); } }; }
         function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
         function createModal(idOrOpts, title, bodyHtml, opts = {}) {
             let id, modalTitle, modalBody, modalOpts, footerHtml = '';
@@ -127,54 +119,6 @@
         }
         const WORKBENCH_TEMPLATES = KAGUYA_APP_DATA.workbenchTemplates || [];
 
-        function handleStreamResponse(response, contentEl, thinkingEl, onDone) {
-            let fullContent = '';
-            let fullThinking = '';
-            let rafId = null;
-            let needsScroll = false;
-            let finalized = false;
-
-            function scheduleScroll() {
-                if (!rafId) {
-                    rafId = requestAnimationFrame(() => {
-                        const container = $('messagesContainer');
-                        if (container) container.scrollTop = container.scrollHeight;
-                        rafId = null;
-                    });
-                }
-            }
-
-            if (!window.KaguyaStream) return Promise.reject(new Error('stream_helper_unavailable'));
-            return window.KaguyaStream.readSSE(response, {
-                onFrame: function(data) {
-                    if (data.content) {
-                        fullContent += data.content;
-                        if (contentEl) {
-                            contentEl.innerHTML = settings.markdown ? safeMarkedParse(fullContent) : fullContent.replace(/\n/g, '<br>');
-                            needsScroll = true;
-                        }
-                    }
-                    if (data.thinking) {
-                        fullThinking += data.thinking;
-                        if (thinkingEl) {
-                            thinkingEl.textContent = fullThinking;
-                            thinkingEl.style.display = 'block';
-                            needsScroll = true;
-                        }
-                    }
-                    if (needsScroll) { scheduleScroll(); needsScroll = false; }
-                    if (data.done && !finalized) {
-                        finalized = true;
-                        if (onDone) onDone(fullContent, fullThinking);
-                    }
-                }
-            }).then(function() {
-                if (!finalized && onDone) onDone(fullContent, fullThinking);
-                return {content: fullContent, thinking: fullThinking};
-            });
-        }
-
-        
         const _loadedTabs = new Set(['chats']);
         function ensureTabLoaded(tabId) {
             if (_loadedTabs.has(tabId)) return;
@@ -1801,14 +1745,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
             renderPromptList();
         }
 
-        function favoriteTemplate(templateId) {
-            if (!PROMPT_FAVORITES.includes(templateId)) {
-                PROMPT_FAVORITES.push(templateId);
-                savePromptFavorites();
-            }
-            showToast('已收藏模板');
-        }
-
         function createCustomTemplate() {
             const existing = document.getElementById('customTemplateModal');
             if (existing) existing.remove();
@@ -1881,36 +1817,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
             closeModal('customTemplateModal');
             renderPromptList();
             showToast('模板已保存');
-        }
-
-        function deleteCustomTemplate(templateId) {
-            const idx = CUSTOM_TEMPLATES.findIndex(c => c.id === templateId);
-            if (idx >= 0) {
-                CUSTOM_TEMPLATES.splice(idx, 1);
-                saveCustomTemplates();
-                const favIdx = PROMPT_FAVORITES.indexOf(templateId);
-                if (favIdx >= 0) { PROMPT_FAVORITES.splice(favIdx, 1); savePromptFavorites(); }
-                renderPromptList();
-                showToast('模板已删除');
-            }
-        }
-
-        function openQuickSceneModal() {
-            createCustomTemplate();
-        }
-
-        function saveQuickScene() {
-            saveCustomTemplate();
-        }
-
-        function applyQuickScene(sceneId) {
-            const item = getAllTemplates().find(t => t.id === sceneId);
-            if (item && item.prompt) {
-                $('mainInput').value = item.prompt;
-                PROMPT_USAGE[sceneId] = (PROMPT_USAGE[sceneId] || 0) + 1;
-                savePromptUsage();
-                showToast('已应用场景模板');
-            }
         }
 
         // Template analytics and knowledge workbench live in kaguya-knowledge-workbench.js.
@@ -2168,11 +2074,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
                 showWelcome(); 
                 showToast('对话已清空'); 
             }
-        }
-        
-        function openPromptWorkbenchModal() {
-            const tab = document.querySelector('.sidebar-tab[onclick*="prompts"]');
-            if (tab) switchTab('prompts', tab);
         }
         
         function saveFeatureActionHistory() {
@@ -2617,19 +2518,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
             }
         }
         
-        function showTyping() {
-            const container = $('messagesContainer');
-            const typing = document.createElement('div');
-            typing.className = 'message assistant';
-            typing.id = 'typingIndicator';
-            const roleData = roles.find(r => r.id === currentRole) || roles[0];
-            typing.innerHTML = `<div class="message-avatar">${roleData.icon || '🤖'}</div><div class="message-content-wrapper"><div class="message-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div></div>`;
-            container.appendChild(typing);
-            requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-        }
-        
-        function hideTyping() { const t = document.getElementById('typingIndicator'); if (t) t.remove(); }
-        
         function requestTTS(text) {
             if (!window.KaguyaAPI) return;
             window.KaguyaAPI.json('/tts', { text: text.slice(0, 300) })
@@ -3069,8 +2957,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
         }
 
         function openDeepSeek(){ openApiHub(); _currentApiProvider='deepseek';switchApiProvider('deepseek'); }
-        function saveDeepSeek(){ saveApiProvider('deepseek'); }
-        function testDeepSeek(){ testApiConnection('deepseek'); }
         
         function checkExternalApiWarning() {
             const hasActiveApi = getActiveApiConfig() !== null;
@@ -3081,18 +2967,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
             }
         }
 
-        function openExternalApiSettings() {
-            // 打开设置面板并切换到外部API配置
-            openSettings();
-            // 延迟切换到DeepSeek配置
-            setTimeout(() => {
-                const deepseekToggle = document.getElementById('deepseekEnabled');
-                if (deepseekToggle) {
-                    deepseekToggle.focus();
-                }
-            }, 100);
-        }
-        
         function openStats() {
             document.getElementById('statSessions').textContent = stats.sessions || 0;
             document.getElementById('statInput').textContent = stats.inputTokens || 0;
@@ -3290,107 +3164,6 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
             }, 1000);
         }
         
-        async function sendDeepSeekMessage(msg, input) {
-            const sendBtn = $('sendBtn');
-            const stopBtn = $('stopBtn');
-            sendBtn.disabled = true;
-            sendBtn.style.display = 'none';
-            stopBtn.style.display = 'flex';
-            isGenerating = true;
-            input.value = '';
-            autoResize(input);
-            document.getElementById('statusText').textContent = 'DeepSeek生成中...';
-            
-            if (!currentChatId) newChat();
-            const chat = chats.find(c => c.id === currentChatId);
-            const time = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
-            
-            addMessageToUI('user', msg, time);
-            chat.messages.push({role: 'user', content: msg, time});
-            history.push([msg, '']);
-            saveChats();
-            
-            const container = $('messagesContainer');
-            const msgEl = document.createElement('div');
-            msgEl.className = 'message assistant';
-            const replyTime = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
-            // 创建包含思考过程区域的消息结构（初始隐藏，有内容时显示）
-            msgEl.innerHTML = `
-                <div class="message-avatar">🤖</div>
-                <div class="message-content-wrapper">
-                    <div class="reasoning-section" style="display:none;">
-                        <div class="reasoning-toggle" onclick="toggleReasoning(this)">
-                            <span class="reasoning-toggle-icon">▶</span>
-                            <span>思考过程</span>
-                        </div>
-                        <div class="reasoning-content"></div>
-                    </div>
-                    <div class="message-content"></div>
-                    <div class="message-actions"><button class="msg-action-btn" onclick="regenerate()">🔄</button></div>
-                    <div class="message-time">${replyTime}</div>
-                </div>
-            `;
-            container.appendChild(msgEl);
-            const contentEl = msgEl.querySelector('.message-content');
-            const reasoningSection = msgEl.querySelector('.reasoning-section');
-            const reasoningContentEl = msgEl.querySelector('.reasoning-content');
-            let fullContent = '';
-            let fullReasoning = '';
-            let hasReasoning = false;
-            
-            const messages = history.slice(-10).map(h => [
-                {role: 'user', content: h[0]},
-                h[1] ? {role: 'assistant', content: h[1]} : null
-            ]).flat().filter(Boolean);
-            
-            try {
-                if (!window.KaguyaStream) throw new Error('stream_helper_unavailable');
-                await window.KaguyaStream.postSSE('/deepseek/chat', {
-                        apiKey: deepseekConfig.apiKey,
-                        apiUrl: deepseekConfig.apiUrl,
-                        model: deepseekConfig.model,
-                        messages: messages
-                    }, {
-                    onReader: function(reader) { currentReader = reader; },
-                    shouldStop: function() { return !currentReader; },
-                    onFrame: function(data) {
-                        if (data.content) {
-                            fullContent += data.content;
-                            contentEl.innerHTML = fullContent.replace(/\n/g, '<br>');
-                            requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-                        }
-                        if (data.reasoning) {
-                            fullReasoning += data.reasoning;
-                            hasReasoning = true;
-                            if (reasoningSection) reasoningSection.style.display = 'block';
-                            if (reasoningContentEl) reasoningContentEl.textContent = fullReasoning;
-                            requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-                        }
-                        if (data.done) {
-                            if (settings.markdown) {
-                                contentEl.innerHTML = safeMarkedParse(fullContent);
-                            }
-                            chat.messages.push({role: 'assistant', content: fullContent, reasoning: fullReasoning, time: replyTime});
-                            history[history.length - 1][1] = fullContent;
-                            saveChats();
-                        }
-                    }
-                });
-            } catch (e) {
-                contentEl.innerHTML = `<span style="color:#e74c3c;">DeepSeek API错误: ${e.message}</span>`;
-            }
-            
-            sendBtn.disabled = false;
-            sendBtn.style.display = 'flex';
-            stopBtn.style.display = 'none';
-            isGenerating = false;
-            document.getElementById('statusText').textContent = '就绪';
-            contentEl.id = '';
-            if (reasoningSection) reasoningSection.id = '';
-            if (reasoningContentEl) reasoningContentEl.id = '';
-        }
-        
-        // 切换思考过程展开/折叠
         function toggleReasoning(toggleEl) {
             const contentEl = toggleEl.nextElementSibling;
             const isExpanded = toggleEl.classList.contains('expanded');

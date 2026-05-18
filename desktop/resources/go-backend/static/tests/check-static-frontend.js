@@ -25,7 +25,6 @@ const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'pyt
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
 const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + permissionsPanel + '\n' + fileAnalyzerPanel + '\n' + knowledgeWorkbench + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
-const initBlock = (mainClient.match(/function init\(\) \{[\s\S]*?\n        \}\n\nfunction showWelcome/) || [''])[0];
 const jsRoot = path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js');
 const retiredScripts = [
   'advanced-features.js',
@@ -43,6 +42,24 @@ function assert(condition, message) {
     throw new Error(message);
   }
 }
+
+function extractFunction(source, name) {
+  const signature = 'function ' + name + '(';
+  const start = source.indexOf(signature);
+  assert(start >= 0, `function must exist: ${name}`);
+  const brace = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = brace; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1;
+    if (source[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`function body is not balanced: ${name}`);
+}
+
+const initBlock = extractFunction(mainClient, 'init');
 
 assert(index.includes('/static/js/kaguya-api-client.js'), 'index must load the shared API client');
 assert(index.includes('<script defer src="/static/js/kaguya-api-client.js"'), 'shared API client must not block HTML parsing');
@@ -232,7 +249,7 @@ assert(!appSource.includes("fetch('/multimodal/upload'"), 'Multimodal upload mus
 assert(agentIde.includes('/agent/upload-device-files'), 'Static IDE page must upload through the backend device upload API');
 assert(agentIde.includes('webkitdirectory'), 'Static IDE page must support folder upload');
 assert(agentIde.includes('KaguyaUpload.uploadFiles'), 'Static IDE page must use shared upload client');
-assert(appSource.includes('KaguyaStream.readSSE'), 'Chat streams must use shared stream reader');
+assert(streamClient.includes('function readSSE'), 'shared stream client must own SSE parsing');
 assert(appSource.includes('KaguyaStream.postSSE'), 'Chat streams must use shared checked stream opener');
 assert(appSource.includes("KaguyaAPI.get('/rag/documents'"), 'RAG document list must use shared API client');
 assert(appSource.includes("KaguyaAPI.json('/rag/search'"), 'RAG search must use shared API client');
@@ -250,6 +267,10 @@ assert(!appSource.includes("fetch('/agent/file-write'"), 'Sidebar IDE file write
 assert(!appSource.includes("fetch('/agent/api-status'"), 'Agent API status must not keep naked fetch');
 assert(!appSource.includes('body.getReader'), 'index must not keep private stream readers');
 assert(!appSource.includes('new TextDecoder'), 'index must not keep private stream decoders');
+assert(!mainClient.includes('function handleStreamResponse'), 'main client must not keep unused private stream helper');
+assert(!mainClient.includes('async function sendDeepSeekMessage'), 'main client must not keep obsolete direct DeepSeek stream sender');
+assert(!mainClient.includes('function openExternalApiSettings'), 'main client must not keep obsolete external API settings bridge');
+assert(!mainClient.includes('function showTyping'), 'main client must not keep unused typing placeholder renderer');
 assert(appSource.includes('safeHighlight'), 'index must guard highlight.js usage when CDN is unavailable');
 assert(!index.includes("const decoder = new TextDecoder();\n                let buffer = '';"), 'Agent run must not keep a private SSE parser');
 assert(appSource.includes('KaguyaAgent.begin'), 'Agent run must register browser abort controller');
