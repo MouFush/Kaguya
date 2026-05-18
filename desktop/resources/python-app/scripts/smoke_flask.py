@@ -101,6 +101,7 @@ def main() -> int:
             ("GET", "/static/js/kaguya-app-data.js", None, False),
             ("GET", "/static/js/kaguya-main.js", None, False),
             ("GET", "/static/js/kaguya-learning-panels.js", None, False),
+            ("GET", "/static/js/kaguya-admin-panels.js", None, False),
             ("GET", "/static/js/kaguya-rag-panel.js", None, False),
             ("GET", "/static/js/kaguya-workflow-mcp.js", None, False),
             ("GET", "/static/js/kaguya-enhanced-panels.js", None, False),
