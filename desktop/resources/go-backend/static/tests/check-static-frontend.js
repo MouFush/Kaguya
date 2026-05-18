@@ -26,6 +26,17 @@ const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
 const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + permissionsPanel + '\n' + fileAnalyzerPanel + '\n' + knowledgeWorkbench + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
 const initBlock = (mainClient.match(/function init\(\) \{[\s\S]*?\n        \}\n\nfunction showWelcome/) || [''])[0];
+const jsRoot = path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js');
+const retiredScripts = [
+  'advanced-features.js',
+  'enhanced-v2-dashboard.js',
+  'kaguya-optimized-dashboard.js',
+  'kaguya-security-dashboard.js',
+  'modern-ui.js',
+  'monitoring-dashboard.js',
+  'ui-optimization.js',
+  'user-guide.js',
+];
 
 function assert(condition, message) {
   if (!condition) {
@@ -56,6 +67,12 @@ assert(index.includes('/static/js/kaguya-provider-config.js'), 'index must load 
 assert(index.includes('/static/js/kaguya-scene-config.js'), 'index must load shared scene config');
 assert(index.includes('/static/css/kaguya-main.css'), 'index must load extracted main stylesheet');
 assert(!index.includes('<style>'), 'index must not keep the large inline stylesheet');
+assert(!index.includes('__CSRF_TOKEN__'), 'static shell must not embed a fixed CSRF token');
+assert(!index.includes('name="csrf-token"'), 'static shell must not expose a misleading fixed CSRF meta tag');
+for (const filename of retiredScripts) {
+  assert(!fs.existsSync(path.join(jsRoot, filename)), `retired frontend script must stay removed: ${filename}`);
+  assert(!index.includes(filename), `index must not load retired frontend script: ${filename}`);
+}
 assert(index.includes('/static/agent_ide.html'), 'index IDE entry must open the static IDE page');
 assert(appSource.includes('hydrateSavedApiConfig'), 'index must hydrate saved device API config on startup');
 assert(appSource.includes('KaguyaAPI.loadSavedConfig'), 'saved API config hydration must use shared API client');

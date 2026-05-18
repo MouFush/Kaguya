@@ -62,6 +62,8 @@ class ApiContractTest(unittest.TestCase):
                 offenders.append(f"path:{normalized}")
                 continue
             abs_path = os.path.join(REPO_ROOT, rel_path)
+            if not os.path.exists(abs_path):
+                continue
             if os.path.getsize(abs_path) > 5_000_000:
                 continue
             try:
