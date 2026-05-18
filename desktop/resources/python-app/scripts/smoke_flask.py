@@ -51,6 +51,20 @@ def request(method: str, port: int, path: str, payload: dict | None = None) -> t
         return exc.code, exc.headers.get("Content-Type", ""), body
 
 
+def request_bytes(method: str, port: int, path: str, payload: dict | None = None) -> tuple[int, str, bytes]:
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("Content-Type", ""), exc.read()
+
+
 def main() -> int:
     if not os.path.exists(GO_EXE):
         print(json.dumps({"success": False, "error": "go_backend_missing", "path": GO_EXE}, ensure_ascii=False))
@@ -143,6 +157,36 @@ def main() -> int:
                 failures.append(f"{method} {path} returned 404")
             if expect_json and not is_json:
                 failures.append(f"{method} {path} did not return JSON: {body[:120]}")
+        if failures:
+            print(json.dumps({"success": False, "failures": failures}, ensure_ascii=False))
+            return 1
+        for path in ["/header-img", "/hero-img", "/welcome-img", "/sidebar-icon", "/deepseek-icon"]:
+            status, content_type, body = request_bytes("GET", port, path)
+            print(json.dumps({"method": "GET", "path": path, "status": status, "content_type": content_type, "bytes": len(body)}, ensure_ascii=False))
+            if status != 200:
+                failures.append(f"GET {path} returned {status}")
+            if not content_type.startswith("image/"):
+                failures.append(f"GET {path} did not return an image: {content_type}")
+            if len(body) == 0:
+                failures.append(f"GET {path} returned an empty image body")
+        key = "sk-smoke-secret-not-real"
+        status, content_type, body = request("POST", port, "/api/device/bind", {"provider": "kimi", "apiKey": key})
+        print(json.dumps({"method": "POST", "path": "/api/device/bind", "status": status, "json": "application/json" in content_type}, ensure_ascii=False))
+        if status != 200 or "application/json" not in content_type:
+            failures.append("POST /api/device/bind failed to return JSON 200")
+        if key in body:
+            failures.append("POST /api/device/bind leaked cleartext key")
+        status, content_type, body = request("GET", port, "/api/account/saved-config")
+        print(json.dumps({"method": "GET", "path": "/api/account/saved-config", "status": status, "json": "application/json" in content_type}, ensure_ascii=False))
+        try:
+            saved = json.loads(body)
+        except json.JSONDecodeError:
+            saved = {}
+            failures.append("GET /api/account/saved-config returned invalid JSON")
+        if status != 200 or saved.get("provider") != "kimi" or saved.get("model") != "kimi-k2.6" or not saved.get("has_config"):
+            failures.append(f"saved Kimi config was not restored correctly: {body[:200]}")
+        if key in body:
+            failures.append("GET /api/account/saved-config leaked cleartext key")
         if failures:
             print(json.dumps({"success": False, "failures": failures}, ensure_ascii=False))
             return 1

@@ -191,6 +191,7 @@ assert(!index.includes('function crudUpdate'), 'index must not re-own CRUD helpe
 assert(!index.includes('function debouncedSaveLS'), 'index must not re-own localStorage debounce helper');
 assert(providerConfig.includes('window.API_PROVIDERS'), 'provider config must expose window.API_PROVIDERS');
 assert(providerConfig.includes('kimi-k2.6'), 'provider config must include Kimi K2.6');
+assert(providerConfig.includes("url: 'https://api.moonshot.ai/v1'"), 'Kimi provider must use Moonshot OpenAI-compatible v1 base URL');
 assert(providerConfig.includes('MiniMax-M2.7'), 'provider config must include MiniMax M2.7');
 assert(!index.includes('const API_PROVIDERS={'), 'index must not own provider schema');
 assert(sceneConfig.includes('window.SCENE_CATEGORIES'), 'scene config must expose SCENE_CATEGORIES');
@@ -236,6 +237,9 @@ assert(appSource.includes('KaguyaAgent.observeFrame'), 'Agent SSE frames must be
 assert(appSource.includes("data.type === 'run_started'"), 'Agent SSE run_started frame must be handled');
 assert(appSource.includes("data.type === 'aborted'"), 'Agent SSE aborted frame must be handled');
 assert(appSource.includes('sanitizeApiProvidersForStorage'), 'index must sanitize provider localStorage writes');
+assert(appSource.includes('async function saveApiProviders(cfg, preferredProvider)'), 'provider saves must bind the panel provider explicitly');
+assert(appSource.includes('await saveApiProviders(providers, pv)'), 'provider save action must pass the current panel provider');
+assert(appSource.includes('bindProvider=(preferredCfg&&preferredCfg.apiKey)?preferredProvider:activeProvider'), 'device vault bind must not accidentally save a different active provider');
 assert(appSource.includes('legacy-key-not-migrated'), 'legacy DeepSeek migration must not copy plaintext API keys');
 assert(!appSource.includes('m.deepseek=deepseekConfig'), 'legacy DeepSeek migration must not store raw config');
 assert(appSource.includes("localStorage.removeItem('deepseek_config')"), 'legacy DeepSeek plaintext config must be removed after migration');

@@ -137,6 +137,40 @@ func TestDeviceVaultSurvivesServerRestart(t *testing.T) {
 	}
 }
 
+func TestDeviceBindKimiDefaultsSurviveRestart(t *testing.T) {
+	runtimeDir := t.TempDir()
+	key := "sk-kimi-default-secret"
+	s1, err := NewServer(ServerConfig{RuntimeDir: runtimeDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := requestJSON(t, s1.Handler(), http.MethodPost, "/api/device/bind", map[string]any{
+		"provider": "kimi",
+		"apiKey":   key,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bind status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got := decodeBody(t, rec)
+	if got["api_url"] != "https://api.moonshot.ai/v1" || got["model"] != "kimi-k2.6" {
+		t.Fatalf("kimi defaults missing from bind response: %#v", got)
+	}
+
+	s2, err := NewServer(ServerConfig{RuntimeDir: runtimeDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = requestJSON(t, s2.Handler(), http.MethodGet, "/api/account/saved-config", nil)
+	body := rec.Body.String()
+	if strings.Contains(body, key) {
+		t.Fatalf("saved config leaked cleartext key: %s", body)
+	}
+	got = decodeBody(t, rec)
+	if got["provider"] != "kimi" || got["api_url"] != "https://api.moonshot.ai/v1" || got["model"] != "kimi-k2.6" || got["has_config"] != true {
+		t.Fatalf("kimi defaults did not survive restart: %#v", got)
+	}
+}
+
 func TestMaskedRoundTripPreservesSavedKey(t *testing.T) {
 	_, h := newTestServer(t)
 	key := "sk-preserve-123456"
@@ -723,6 +757,28 @@ func TestAssetAliasesUseAppDir(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != tc.body {
 			t.Fatalf("%s asset alias failed: status=%d body=%q", tc.path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestSidebarIconFallsBackToPythonAssets(t *testing.T) {
+	rootDir := t.TempDir()
+	appDir := filepath.Join(rootDir, "python-app")
+	assetDir := filepath.Join(appDir, "assets")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(assetDir, "kaguya-welcome.png"), []byte("welcome-fallback"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(ServerConfig{RuntimeDir: t.TempDir(), AppDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/sidebar-icon", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "welcome-fallback" {
+		t.Fatalf("sidebar fallback failed: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 

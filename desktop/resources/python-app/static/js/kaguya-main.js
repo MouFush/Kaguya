@@ -2912,9 +2912,10 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
           }
           return API_PROVIDERS[selected]?selected:'deepseek';
         }
-        async function saveApiProviders(cfg){
+        async function saveApiProviders(cfg, preferredProvider){
           localStorage.setItem('api_providers',JSON.stringify(sanitizeApiProvidersForStorage(cfg)));
-          var activeProvider=chooseActiveApiProvider(cfg);
+          var preferredCfg=preferredProvider&&cfg[preferredProvider]?cfg[preferredProvider]:null;
+          var activeProvider=(preferredCfg&&preferredCfg.enabled&&(preferredCfg.apiKey||preferredCfg.hasSavedKey))?preferredProvider:chooseActiveApiProvider(cfg);
           _currentApiProvider=activeProvider;
           localStorage.setItem('active_api_provider',activeProvider);
           var backendCfg={active_provider:activeProvider,providers:{},device_id:generateDeviceId()};
@@ -2924,15 +2925,16 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
           });
           if(!window.KaguyaAPI) throw new Error('api_client_unavailable');
           window.KaguyaAPI.json('/external/config', backendCfg).catch(function(){});
-          var activeCfg=cfg[activeProvider]||{};
+          var bindProvider=(preferredCfg&&preferredCfg.apiKey)?preferredProvider:activeProvider;
+          var activeCfg=cfg[bindProvider]||{};
           if(activeCfg.apiKey){
-            var bindPayload={device_id:generateDeviceId(),provider:activeProvider,apiKey:activeCfg.apiKey,apiUrl:activeCfg.apiUrl||API_PROVIDERS[activeProvider].url,model:activeCfg.model||API_PROVIDERS[activeProvider].models[0].id};
+            var bindPayload={device_id:generateDeviceId(),provider:bindProvider,apiKey:activeCfg.apiKey,apiUrl:activeCfg.apiUrl||API_PROVIDERS[bindProvider].url,model:activeCfg.model||API_PROVIDERS[bindProvider].models[0].id};
             var bindData = await window.KaguyaAPI.bindDeviceConfig(bindPayload);
             if(bindData&&bindData.success){
               activeCfg.hasSavedKey=true;
               activeCfg.masked_api_key=bindData.masked_api_key||bindData.api_key||bindData.apiKey||'';
               activeCfg.apiKey='';
-              cfg[activeProvider]=activeCfg;
+              cfg[bindProvider]=activeCfg;
               localStorage.setItem('api_providers',JSON.stringify(sanitizeApiProvidersForStorage(cfg)));
             } else if(bindData&&bindData.error) {
               throw new Error(bindData.message||bindData.error);
@@ -3007,12 +3009,12 @@ const PROMPT_TEMPLATES = KAGUYA_APP_DATA.promptTemplates || [];
                 hasSavedKey:nextKey?false:!!existing.hasSavedKey,
                 masked_api_key:nextKey?'':(existing.masked_api_key||existing.maskedApiKey||'')
             };
-            if(providers[pv].enabled&&providers[pv].apiKey){
+            if(providers[pv].enabled&&(providers[pv].apiKey||providers[pv].hasSavedKey)){
                 _currentApiProvider=pv;
                 localStorage.setItem('active_api_provider',pv);
             }
             try{
-              await saveApiProviders(providers);
+              await saveApiProviders(providers, pv);
               updateApiIndicator();
               showToast(API_PROVIDERS[pv].name+' 配置已保存');
             }catch(e){

@@ -383,6 +383,8 @@ func (s *Server) imageAssetCandidates(name string) []imageAssetCandidate {
 		candidates = append(candidates,
 			imageAssetCandidate{root: appAssets, name: "kaguya.png"},
 			imageAssetCandidate{root: electronAssets, name: "kaguya.png"},
+			imageAssetCandidate{root: appAssets, name: "kaguya-welcome.png"},
+			imageAssetCandidate{root: appAssets, name: "kaguya-header.png"},
 			imageAssetCandidate{root: appAssets, name: "kaguya.ico"},
 			imageAssetCandidate{root: electronAssets, name: "kaguya.ico"},
 		)
