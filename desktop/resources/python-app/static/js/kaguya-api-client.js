@@ -95,6 +95,27 @@
     }
   }
 
+  async function raw(path, options) {
+    const opts = Object.assign({}, options || {});
+    const timeoutMs = opts.timeoutMs == null ? DEFAULT_TIMEOUT_MS : opts.timeoutMs;
+    delete opts.timeoutMs;
+    let timeoutId = null;
+    const controller = opts.signal ? null : new AbortController();
+    if (controller) {
+      opts.signal = controller.signal;
+    }
+    if (timeoutMs > 0 && controller) {
+      timeoutId = setTimeout(function () {
+        controller.abort(new Error('request_timeout'));
+      }, timeoutMs);
+    }
+    try {
+      return await fetch(path, opts);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
   function json(path, payload, options) {
     return request(path, Object.assign({
       method: 'POST',
@@ -164,6 +185,7 @@
   window.KaguyaState = state;
   window.KaguyaAPI = {
     request,
+    raw,
     get,
     del,
     put,

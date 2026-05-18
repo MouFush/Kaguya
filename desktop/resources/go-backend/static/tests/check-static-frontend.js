@@ -12,6 +12,7 @@ const appData = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app
 const mainClient = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-main.js'), 'utf8');
 const learningPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-learning-panels.js'), 'utf8');
 const adminPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-admin-panels.js'), 'utf8');
+const projectCenter = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-project-center.js'), 'utf8');
 const ragPanel = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-rag-panel.js'), 'utf8');
 const workflowMcp = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-workflow-mcp.js'), 'utf8');
 const enhancedPanels = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-enhanced-panels.js'), 'utf8');
@@ -20,7 +21,7 @@ const uiUtils = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app
 const providerConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-provider-config.js'), 'utf8');
 const sceneConfig = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'js', 'kaguya-scene-config.js'), 'utf8');
 const mainCss = fs.readFileSync(path.resolve(staticRoot, '..', '..', 'python-app', 'static', 'css', 'kaguya-main.css'), 'utf8');
-const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
+const appSource = index + '\n' + mainClient + '\n' + learningPanels + '\n' + adminPanels + '\n' + projectCenter + '\n' + ragPanel + '\n' + workflowMcp + '\n' + enhancedPanels + '\n' + themeEffects;
 const initBlock = (mainClient.match(/function init\(\) \{[\s\S]*?\n        \}\n\nfunction showWelcome/) || [''])[0];
 
 function assert(condition, message) {
@@ -39,6 +40,7 @@ assert(index.includes('/static/js/kaguya-app-data.js'), 'index must load extract
 assert(index.includes('/static/js/kaguya-main.js'), 'index must load extracted main app script');
 assert(index.includes('/static/js/kaguya-learning-panels.js'), 'index must load extracted learning panel handlers');
 assert(index.includes('/static/js/kaguya-admin-panels.js'), 'index must load extracted admin panel handlers');
+assert(index.includes('/static/js/kaguya-project-center.js'), 'index must load extracted project center handlers');
 assert(index.includes('/static/js/kaguya-rag-panel.js'), 'index must load extracted RAG panel handlers');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'index must load extracted workflow/MCP handlers');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'index must load extracted enhanced panel handlers');
@@ -52,6 +54,8 @@ assert(index.includes('/static/agent_ide.html'), 'index IDE entry must open the 
 assert(appSource.includes('hydrateSavedApiConfig'), 'index must hydrate saved device API config on startup');
 assert(appSource.includes('KaguyaAPI.loadSavedConfig'), 'saved API config hydration must use shared API client');
 assert(apiClient.includes('window.KaguyaAPI'), 'API client must expose window.KaguyaAPI');
+assert(apiClient.includes('function raw(path, options)'), 'API client must expose raw response helper for downloads');
+assert(apiClient.includes('raw,'), 'API client must export raw response helper');
 assert(apiClient.includes('function del'), 'API client must expose DELETE helper');
 assert(apiClient.includes('function put'), 'API client must expose PUT helper');
 assert(apiClient.includes('normalizeProviderPayload'), 'API client must normalize provider payloads');
@@ -88,6 +92,7 @@ assert(mainClient.includes('function ensureTabLoaded'), 'main client must lazy-l
 assert(index.includes('/static/js/kaguya-rag-panel.js'), 'RAG panel module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-learning-panels.js'), 'learning panel module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-admin-panels.js'), 'admin panel module must remain explicitly loaded');
+assert(index.includes('/static/js/kaguya-project-center.js'), 'project center module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-workflow-mcp.js'), 'workflow/MCP module must remain explicitly loaded');
 assert(index.includes('/static/js/kaguya-enhanced-panels.js'), 'enhanced panel module must remain explicitly loaded');
 assert(!mainClient.includes('loadFrontendModule'), 'module wiring must stay explicit instead of hidden behind dynamic script loading');
@@ -114,6 +119,15 @@ assert((adminPanels.match(/\bfetch\s*\(/g) || []).length === 0, 'admin panel scr
 assert(!mainClient.includes('function refreshSecurityStatus()'), 'main client must not own security panel internals');
 assert(!mainClient.includes('function loadAuthStatus()'), 'main client must not own auth panel internals');
 assert(!mainClient.includes('function loadUserProfile()'), 'main client must not own account panel internals');
+assert(projectCenter.includes('function loadProjectCenter()'), 'project center script must own project center loading');
+assert(projectCenter.includes('function renderProjectTasks()'), 'project center script must own kanban rendering');
+assert(projectCenter.includes('function renderOpsOverview()'), 'project center script must own ops dashboard rendering');
+assert(projectCenter.includes('function projectGet'), 'project center script must centralize GET requests');
+assert(projectCenter.includes('KaguyaAPI.raw'), 'project center script must use shared raw API for downloads');
+assert((projectCenter.match(/\bfetch\s*\(/g) || []).length === 0, 'project center script must not keep naked fetch calls');
+assert(!mainClient.includes('function loadProjectCenter()'), 'main client must not own project center internals');
+assert(!mainClient.includes('function renderProjectTasks()'), 'main client must not own project kanban internals');
+assert(!mainClient.includes('function renderOpsOverview()'), 'main client must not own ops dashboard internals');
 assert(ragPanel.includes('function loadRagDocuments()'), 'RAG panel script must own RAG document loading');
 assert(ragPanel.includes('function searchRagDocs()'), 'RAG panel script must own RAG search');
 assert(ragPanel.includes('function uploadRagFile'), 'RAG panel script must own RAG upload UI');
