@@ -1,8 +1,0 @@
-{
-  "name": "kaguya-ide",
-  "version": "3.1.0",
-  "description": "Kaguya IDE - AI-Powered Development Environment",
-  "main": "electron/main.js",
-  "author": "Kaguya",
-  "license": "MIT"
-}
