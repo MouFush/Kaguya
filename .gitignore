@@ -1,0 +1,38 @@
+# Runtime data and caches must not be shipped as source.
+__pycache__/
+.pytest_cache/
+*.py[cod]
+smoke-*.log
+
+resources/python-app/ide_accounts.json
+resources/python-app/ide_workspaces/
+resources/python-app/audit_logs/
+resources/python-app/uploads/
+resources/python-app/code_executions/
+resources/python-app/rag_data/
+resources/python-app/audio_cache/
+resources/python-app/security_data/
+resources/python-app/data/
+resources/python-app/.kaguya/
+resources/python-app/.kaguya_file_history/
+resources/python-app/external_api/
+resources/python-app/project_center/
+resources/python-app/memory_system/
+resources/python-app/memory_store/
+resources/python-app/multimodal/
+resources/python-app/finetune/
+
+# Electron/package artifacts generated from source.
+resources/app.asar
+# Binary files - not source
+*.exe
+*.dll
+*.pak
+*.dat
+*.bin
+*.asar
+locales/
+
+# Build artifacts
+resources/go-backend/kaguya-go-backend.exe
+resources/go-backend/build/

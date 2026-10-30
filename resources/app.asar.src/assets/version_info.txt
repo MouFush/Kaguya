@@ -1,0 +1,32 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(3, 1, 0, 0),
+    prodvers=(3, 1, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u'080404b0',
+          [
+            StringStruct(u'CompanyName', u'Kaguya'),
+            StringStruct(u'FileDescription', u'Kaguya IDE - AI-Powered Development Environment'),
+            StringStruct(u'FileVersion', u'3.1.0.0'),
+            StringStruct(u'InternalName', u'KaguyaIDE'),
+            StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Kaguya. All rights reserved.'),
+            StringStruct(u'OriginalFilename', u'KaguyaIDE.exe'),
+            StringStruct(u'ProductName', u'Kaguya IDE'),
+            StringStruct(u'ProductVersion', u'3.1.0.0'),
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
+  ]
+)
